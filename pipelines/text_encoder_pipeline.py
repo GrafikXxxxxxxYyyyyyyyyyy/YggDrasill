@@ -1,17 +1,16 @@
 import torch 
 
 from dataclasses import dataclass
-from typing import List, Optional, Union
 from diffusers.utils import BaseOutput
+from typing import List, Optional, Union, Dict, Any
 
-# from .pipelines.clip_te_pipeline import (
-#     CLIPTextEncoderPipeline,
-#     CLIPTextEncoderPipelineInput,
-# )
+from .pipelines.clip_te_pipeline import (
+    CLIPTextEncoderPipeline, 
+    CLIPTextEncoderPipelineInput
+)
 # from .pipelines.transformer_te_pipeline import (
 #     TransformerTextEncoderPipeline,
 #     TransformerTextEncoderPipelineInput,
-#     TransformerTextEncoderPipelineOutput
 # )
 from ..models.text_encoder_model import TextEncoderModel
 
@@ -25,16 +24,16 @@ class TextEncoderPipelineInput(CLIPTextEncoderPipelineInput):
 class TextEncoderPipelineOutput(BaseOutput):
     do_cfg: bool
     clip_embeds_1: torch.FloatTensor
-    lora_scale: Optional[float] = None
     clip_embeds_2: Optional[torch.FloatTensor] = None
+        # transformer_embeds: Optional[torch.FloatTensor] = None
     pooled_clip_embeds: Optional[torch.FloatTensor] = None
-    # t5_embeds: Optional[torch.FloatTensor] = None
+    cross_attention_kwargs: Optional[Dict[str, Any]] = None
 
 
 
 class TextEncoderPipeline:
     clip_pipeline: CLIPTextEncoderPipeline
-    # transformer_pipeline: TransformerTextEncoderPipeline
+        # transformer_pipeline: TransformerTextEncoderPipeline
 
     def __call__(
         self,
@@ -48,8 +47,6 @@ class TextEncoderPipeline:
         **kwargs,
     ):
         print("TextEncoderPipeline --->")
-
-
 
 
         if "1. Подготавливаем необходимые аргументы":
@@ -82,7 +79,6 @@ class TextEncoderPipeline:
         )
 
 
-
         # Получаем эмбеддинги с модели Transformer
         # if text_encoder.transformer_encoder is not None:
         #     transformer_pipeline = TransformerTextEncoderPipeline()
@@ -92,13 +88,18 @@ class TextEncoderPipeline:
         #     )
 
 
-
+        # TODO: Поскольку пока трансформер модель не прикручена, то будем
+        # передавать эмбеддинги только клиповских моделей сразу в аутпут 
         return TextEncoderPipelineOutput(
             do_cfg=do_cfg,
             clip_embeds_1=clip_output.prompt_embeds_1,
-            lora_scale = lora_scale,
             clip_embeds_2 = clip_output.prompt_embeds_2,
             pooled_clip_embeds = clip_output.pooled_prompt_embeds,
+            cross_attention_kwargs = (
+                {'scale': lora_scale}
+                if lora_scale is not None else
+                lora_scale
+            ),
         )
     
 
