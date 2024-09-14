@@ -8,29 +8,15 @@ from diffusers import (
 )
 from dataclasses import dataclass
 from diffusers.utils import BaseOutput
-from typing import Optional, Union, Dict, Any
-
-
-@dataclass
-class Conditions(BaseOutput):
-    # Unconditioned
-    class_labels: Optional[torch.Tensor] = None
-    # Conditioned
-    prompt_embeds: Optional[torch.Tensor] = None
-    timestep_cond: Optional[torch.Tensor] = None
-    attention_mask: Optional[torch.Tensor] = None
-    cross_attention_kwargs: Optional[Dict[str, Any]] = None
-    added_cond_kwargs: Optional[Dict[str, torch.Tensor]] = None
-    # ControlNet
-    # ...
+from typing import Optional, Union
 
 
 @dataclass
 class ModelKey(BaseOutput):
     dtype: torch.dtype = torch.float16
     device: str = "cuda"
+    model_type: str = "sdxl"
     model_path: str = "GrafikXxxxxxxYyyyyyyyyyy/sdxl_Juggernaut"
-    model_type: str = "sd15"
 
 
 

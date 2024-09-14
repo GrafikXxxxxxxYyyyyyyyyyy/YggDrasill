@@ -9,6 +9,10 @@ from .pipelines.text_encoder_pipeline import (
     TextEncoderPipelineInput,
 )
 from .stable_diffusion_model import StableDiffusionModel
+from .core.diffusion_pipeline import (
+    DiffusionPipeline, 
+    DiffusionPipelineInput
+)
 
 
 @dataclass
@@ -29,6 +33,7 @@ class StableDiffusionPipelineOutput(BaseOutput):
 
 class StableDiffusionPipeline:
     te_pipeline: TextEncoderPipeline
+    diffusion_pipeline: DiffusionPipeline
 
     def __call__(
         self,
@@ -60,25 +65,29 @@ class StableDiffusionPipeline:
                     **te_input,
                 )
 
-            print(te_output)
 
-
-
-        if "2. Получаем вызовом модели верный пайплайн следующей процедуры":
-            pass
-
-
+        model(
+            te_output=te_output,
+            use_refiner=use_refiner,
+            guidance_scale=guidance_scale,
+            num_images_per_prompt=num_images_per_prompt,
+            aesthetic_score=aesthetic_score,
+            negative_aesthetic_score=negative_aesthetic_score,
+        )
+            
 
         if "3. Учитывая переданные аргументы, используем полученный/ые пайплайны":
-            # Это логика напротив должна быть прописана снизу вверх от самих 
-            # моделей предсказания шума, до высокоуровневых моделей, чтобы 
-            # её проще был сшивать через метод .__call__() моделей
+            diffusion_pipeline = DiffusionPipeline()
+            output = diffusion_pipeline(
+                diffuser=model.diffuser,
+                **diffusion_input,
+            )
             pass
 
         
 
         return StableDiffusionPipelineOutput(
-            # images=
+            images=output.images
         )
 
 

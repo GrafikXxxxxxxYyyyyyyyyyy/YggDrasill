@@ -95,7 +95,7 @@ class TextEncoderPipeline:
             clip_embeds_2 = clip_output.prompt_embeds_2,
             pooled_clip_embeds = clip_output.pooled_prompt_embeds,
             cross_attention_kwargs = (
-                {'scale': lora_scale}
+                {"scale": lora_scale}
                 if lora_scale is not None else
                 None
             ),
