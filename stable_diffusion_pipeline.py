@@ -1,0 +1,93 @@
+import torch 
+
+from typing import List, Optional
+from dataclasses import dataclass
+from diffusers.utils import BaseOutput
+
+from .pipelines.text_encoder_pipeline import (
+    TextEncoderPipeline,
+    TextEncoderPipelineInput,
+)
+from .stable_diffusion_model import StableDiffusionModel
+
+
+@dataclass
+class StableDiffusionPipelineInput(BaseOutput):
+    diffusion_input: DiffusionPipelineInput
+    use_refiner: bool = False
+    guidance_scale: float = 5.0
+    num_images_per_prompt: int= 1
+    te_input: Optional[TextEncoderPipelineInput] = None
+    # ie_input: Optional[ImageEncoderPipelineInput] = None
+
+
+@dataclass
+class StableDiffusionPipelineOutput(BaseOutput):
+    images: torch.FloatTensor
+
+
+
+class StableDiffusionPipeline:
+    te_pipeline: TextEncoderPipeline
+
+    def __call__(
+        self,
+        model: StableDiffusionModel,
+        diffusion_input: DiffusionPipelineInput,
+        te_input: Optional[TextEncoderPipelineInput] = None,
+        use_refiner: bool = False,
+        guidance_scale: float = 5.0,
+        num_images_per_prompt: int = 1,
+                # ip_adapter_image: Optional[PipelineImageInput] = None,
+                # output_type: str = "pt",
+        refiner_steps: Optional[int] = None,
+        refiner_scale: Optional[float] = None,
+        aesthetic_score: float = 6.0,
+        negative_aesthetic_score: float = 2.5,
+        **kwargs,
+    ):
+        print("StableDiffusionPipeline --->")
+        
+
+        if "1. Собираем и преобразуем обуславливающую информацию":
+            # Эта логика должна быть выстроена сверху вниз, чтобы 
+            # сойтись с логикой диффузионного процесса, которая будет 
+            # прописана снизу вверх для ветки core
+            if model.text_encoder is not None and te_input is not None:
+                te_pipeline = TextEncoderPipeline()
+                te_output = te_pipeline(
+                    model.text_encoder,
+                    **te_input,
+                )
+
+            print(te_output)
+
+
+
+        if "2. Получаем вызовом модели верный пайплайн следующей процедуры":
+            pass
+
+
+
+        if "3. Учитывая переданные аргументы, используем полученный/ые пайплайны":
+            # Это логика напротив должна быть прописана снизу вверх от самих 
+            # моделей предсказания шума, до высокоуровневых моделей, чтобы 
+            # её проще был сшивать через метод .__call__() моделей
+            pass
+
+        
+
+        return StableDiffusionPipelineOutput(
+            # images=
+        )
+
+
+
+
+
+
+
+
+
+
+
