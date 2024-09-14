@@ -55,14 +55,13 @@ class TextEncoderPipeline:
 
             prompt = prompt or ""
             prompt = [prompt] if isinstance(prompt, str) else prompt
-            if prompt_2 is not None:
-                prompt_2 = [prompt_2] if isinstance(prompt_2, str) else prompt_2
-            
+            prompt_2 = prompt_2 or prompt
+            prompt_2 = [prompt_2] if isinstance(prompt_2, str) else prompt_2
             if do_cfg:
                 negative_prompt = negative_prompt or ""
                 negative_prompt = [negative_prompt] if isinstance(negative_prompt, str) else negative_prompt
-                if negative_prompt_2 is not None:
-                    negative_prompt_2 = [negative_prompt_2] if isinstance(negative_prompt_2, str) else negative_prompt_2
+                negative_prompt_2 = negative_prompt_2 or negative_prompt
+                negative_prompt_2 = [negative_prompt_2] if isinstance(negative_prompt_2, str) else negative_prompt_2
         
 
 
@@ -98,7 +97,7 @@ class TextEncoderPipeline:
             cross_attention_kwargs = (
                 {'scale': lora_scale}
                 if lora_scale is not None else
-                lora_scale
+                None
             ),
         )
     
