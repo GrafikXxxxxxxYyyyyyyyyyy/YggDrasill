@@ -8,7 +8,7 @@ from diffusers import (
 )
 from dataclasses import dataclass
 from diffusers.utils import BaseOutput
-from typing import Optional, Union
+from typing import Optional, Union, Dict, Any
 
 
 @dataclass
@@ -17,6 +17,24 @@ class ModelKey(BaseOutput):
     device: str = "cuda"
     model_type: str = "sdxl"
     model_path: str = "GrafikXxxxxxxYyyyyyyyyyy/sdxl_Juggernaut"
+
+
+@dataclass
+class Conditions(BaseOutput):
+    """
+    Общий класс всех дополнительных условий для всех
+    моделей которые используются в проекте
+    """
+    # UNet2DModel
+    class_labels: Optional[torch.Tensor] = None
+    # UNet2DConditionModel
+    prompt_embeds: Optional[torch.Tensor] = None
+    timestep_cond: Optional[torch.Tensor] = None
+    attention_mask: Optional[torch.Tensor] = None
+    cross_attention_kwargs: Optional[Dict[str, Any]] = None
+    added_cond_kwargs: Optional[Dict[str, torch.Tensor]] = None
+    # ControlNet
+    # ...
 
 
 
@@ -75,7 +93,10 @@ class NoisePredictor(ModelKey):
 
     @property
     def is_inpainting_model(self):
-        return self.predictor.config.in_channels == 9 or self.unet.config.in_channels == 7
+        return (
+            self.predictor.config.in_channels == 9 
+            or self.predictor.config.in_channels == 7
+        )
     
 
     def to(
@@ -108,6 +129,7 @@ class NoisePredictor(ModelKey):
         self,
         timestep: int,
         noisy_sample: torch.FloatTensor,
+        conditions: Optional[Conditions] = None,
         **kwargs,
     ) -> torch.FloatTensor:          
     # ================================================================================================================ #
@@ -115,18 +137,22 @@ class NoisePredictor(ModelKey):
         Выполняет шаг предсказания шума на метке t для любого
         типа входных данных любой из имеющихся моделей
         """
+        print()
+        print()
+        print()
+        print(conditions)
         extra_kwargs = {}
 
         # Пересобираем пришедшие аргументы под нужную архитектуру(!), если те переданы
         if isinstance(self.predictor, UNet2DModel):
-            extra_kwargs["class_labels"] = kwargs.get("class_labels", None)
+            extra_kwargs["class_labels"] = conditions.class_labels
 
         elif isinstance(self.predictor, UNet2DConditionModel):
-            extra_kwargs["class_labels"] = kwargs.get("class_labels", None)
-            extra_kwargs["prompt_embeds"] = kwargs.get("prompt_embeds", None)
-            extra_kwargs["timestep_cond"] = kwargs.get("timestep_cond", None)
-            extra_kwargs["added_cond_kwargs"] = kwargs.get("added_cond_kwargs", None)
-            extra_kwargs["cross_attention_kwargs"] = kwargs.get("cross_attention_kwargs", None)
+            extra_kwargs["class_labels"] = conditions.class_labels
+            extra_kwargs["timestep_cond"] = conditions.timestep_cond
+            extra_kwargs["added_cond_kwargs"] = conditions.added_cond_kwargs
+            extra_kwargs["encoder_hidden_states"] = conditions.prompt_embeds
+            extra_kwargs["cross_attention_kwargs"] = conditions.cross_attention_kwargs
 
         elif isinstance(self.predictor, SD3Transformer2DModel):
             pass
@@ -136,6 +162,11 @@ class NoisePredictor(ModelKey):
 
         
         # Предсказывает шум моделью + собранными параметрами
+        print(timestep)
+        print(noisy_sample.shape)
+        print(extra_kwargs["encoder_hidden_states"].shape)
+        print(extra_kwargs["added_cond_kwargs"]["time_ids"].shape)
+        print(extra_kwargs["added_cond_kwargs"]["text_embeds"].shape)
         predicted_noise = self.predictor(
             timestep=timestep,
             sample=noisy_sample,

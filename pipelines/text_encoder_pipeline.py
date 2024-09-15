@@ -18,11 +18,14 @@ from ..models.text_encoder_model import TextEncoderModel
 @dataclass
 class TextEncoderPipelineInput(CLIPTextEncoderPipelineInput):
     prompt: Optional[Union[str, List[str]]] = None
+    negative_prompt: Optional[Union[str, List[str]]] = None
+    negative_prompt_2: Optional[Union[str, List[str]]] = None
 
 
 @dataclass
 class TextEncoderPipelineOutput(BaseOutput):
     do_cfg: bool
+    batch_size: int
     clip_embeds_1: torch.FloatTensor
     clip_embeds_2: Optional[torch.FloatTensor] = None
         # transformer_embeds: Optional[torch.FloatTensor] = None
@@ -38,6 +41,7 @@ class TextEncoderPipeline:
     def __call__(
         self,
         text_encoder: TextEncoderModel,
+        num_images_per_prompt: int = 1,
         clip_skip: Optional[int] = None,
         lora_scale: Optional[float] = None,
         prompt: Optional[Union[str, List[str]]] = None,
@@ -60,37 +64,65 @@ class TextEncoderPipeline:
             if do_cfg:
                 negative_prompt = negative_prompt or ""
                 negative_prompt = [negative_prompt] if isinstance(negative_prompt, str) else negative_prompt
+                if len(prompt) != len(negative_prompt):
+                    # Если негатив промпт не совпал с обычным, тупо зануляем все негативы
+                    negative_prompt = [""] * len(prompt)
+
                 negative_prompt_2 = negative_prompt_2 or negative_prompt
                 negative_prompt_2 = [negative_prompt_2] if isinstance(negative_prompt_2, str) else negative_prompt_2
         
+            batch_size = len(prompt) * num_images_per_prompt
 
+            
+        
+        if "2. Получаем эмбеддинги с моделей":
+            clip_pipeline = CLIPTextEncoderPipeline()
+            clip_output = clip_pipeline(
+                text_encoder.clip_encoder,
+                prompt=prompt,
+                prompt_2=prompt_2,
+                clip_skip=clip_skip,
+                lora_scale=lora_scale,
+                num_images_per_prompt=num_images_per_prompt,
+            )
+            print(clip_output.prompt_embeds_1.shape)
+            # И применяем инструкции cfg если необходимо
+            if do_cfg:
+                negative_clip_output = clip_pipeline(
+                    text_encoder.clip_encoder,
+                    prompt=negative_prompt,
+                    prompt_2=negative_prompt_2,
+                    clip_skip=clip_skip,
+                    lora_scale=lora_scale,
+                    num_images_per_prompt=num_images_per_prompt,
+                )
+                
+                clip_output.prompt_embeds_1 = torch.cat([
+                    negative_clip_output.prompt_embeds_1, clip_output.prompt_embeds_1
+                ], dim=0)
+                clip_output.prompt_embeds_2 = torch.cat([
+                    negative_clip_output.prompt_embeds_2, clip_output.prompt_embeds_2
+                ], dim=0)
+                clip_output.pooled_prompt_embeds = torch.cat([
+                    negative_clip_output.pooled_prompt_embeds, clip_output.pooled_prompt_embeds
+                ], dim=0)
 
-        # Получаем эмбеддинги с моделей CLIP
-        clip_pipeline = CLIPTextEncoderPipeline()
-        clip_output = clip_pipeline(
-            text_encoder.clip_encoder,
-            prompt=prompt,
-            prompt_2=prompt_2,
-            clip_skip=clip_skip,
-            lora_scale=lora_scale,
-            negative_prompt=negative_prompt,
-            negative_prompt_2=negative_prompt_2,
-        )
+            print(clip_output.prompt_embeds_1.shape)
 
-
-        # Получаем эмбеддинги с модели Transformer
-        # if text_encoder.transformer_encoder is not None:
-        #     transformer_pipeline = TransformerTextEncoderPipeline()
-        #     output.t5_embeds = transformer_pipeline(
-        #         text_encoder.transformer_encoder,
-        #         **te_input,
-        #     )
+            # Получаем эмбеддинги с модели Transformer
+            # if text_encoder.transformer_encoder is not None:
+            #     transformer_pipeline = TransformerTextEncoderPipeline()
+            #     output.t5_embeds = transformer_pipeline(
+            #         text_encoder.transformer_encoder,
+            #         **te_input,
+            #     )
 
 
         # TODO: Поскольку пока трансформер модель не прикручена, то будем
         # передавать эмбеддинги только клиповских моделей сразу в аутпут 
         return TextEncoderPipelineOutput(
             do_cfg=do_cfg,
+            batch_size=batch_size,
             clip_embeds_1=clip_output.prompt_embeds_1,
             clip_embeds_2 = clip_output.prompt_embeds_2,
             pooled_clip_embeds = clip_output.pooled_prompt_embeds,
