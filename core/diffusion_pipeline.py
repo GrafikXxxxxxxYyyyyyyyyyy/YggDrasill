@@ -114,7 +114,7 @@ class DiffusionPipeline:
 
             backward_output.timestep = t
             backward_output = BACKWARD(
-                # predictor=diffuser.predictor,
+                diffuser.predictor,
                 conditions=conditions,
                 **backward_output
             )

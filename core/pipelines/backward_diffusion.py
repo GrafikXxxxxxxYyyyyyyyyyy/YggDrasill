@@ -16,7 +16,7 @@ class BackwardDiffusionInput(BaseOutput):
 
 
 class BackwardDiffusion(NoiseScheduler):
-    predictor: NoisePredictor
+    # predictor: NoisePredictor
 
     do_cfg: bool = False
     guidance_scale: float = 5.0
@@ -25,6 +25,7 @@ class BackwardDiffusion(NoiseScheduler):
     
     def __call__(
         self,
+        predictor: NoisePredictor,
         timestep: int, 
         noisy_sample: torch.FloatTensor,
         conditions: Optional[Conditions] = None,
@@ -34,7 +35,6 @@ class BackwardDiffusion(NoiseScheduler):
         Данный пайплайн выполняет один полный шаг снятия шума в диффузионном процессе
         """
         print("BackwardDiffusion --->")
-
 
 
         # Учитываем CFG
@@ -52,7 +52,7 @@ class BackwardDiffusion(NoiseScheduler):
 
         # Конкатит маску и маскированную картинку для inpaint модели
         if (
-            self.predictor.is_inpainting_model
+            predictor.is_inpainting_model
             and self.mask_sample is not None
             and self.masked_sample is not None
         ):
@@ -60,7 +60,7 @@ class BackwardDiffusion(NoiseScheduler):
         
 
         # Получаем предсказание шума
-        noise_predict = self.predictor(
+        noise_predict = predictor(
             timestep=timestep,
             noisy_sample=model_input,
             conditions=conditions,

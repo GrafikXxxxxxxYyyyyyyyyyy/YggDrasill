@@ -32,7 +32,7 @@ class StableDiffusionPipelineOutput(BaseOutput):
 
 
 class StableDiffusionPipeline:
-    model: StableDiffusionModel
+    # model: StableDiffusionModel
     te_pipeline: TextEncoderPipeline
     diffusion_pipeline: DiffusionPipeline
 
@@ -52,7 +52,7 @@ class StableDiffusionPipeline:
         **kwargs,
     ):
         print("StableDiffusionPipeline --->")
-        self.model = model
+        # self.model = model
 
         if "1. Собираем и преобразуем обуславливающую информацию":
             # Эта логика должна быть выстроена сверху вниз, чтобы 
@@ -78,7 +78,7 @@ class StableDiffusionPipeline:
         if "3. Учитывая переданные аргументы, используем полученный/ые пайплайны":
             diffusion_pipeline = DiffusionPipeline()
             output = diffusion_pipeline(
-                diffuser=model.diffuser,
+                model.diffuser,
                 conditions=conditions,
                 **diffusion_input,
             )

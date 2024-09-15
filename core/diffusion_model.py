@@ -74,8 +74,6 @@ class DiffusionModel(DiffusionModelKey):
     # def switch_to_refiner(self):
     #     pass
 
-
-    
     # TODO: Вынести в отдельный функциональный класс  или чет типа того
     def _get_add_time_ids(
         self,
@@ -180,7 +178,7 @@ class DiffusionModel(DiffusionModelKey):
 
         if "2. Формирует класс BacwardDiffusion":
             bacward_step_pipeline = BackwardDiffusion(**self.key)
-            bacward_step_pipeline.predictor = self.predictor
+            # bacward_step_pipeline.predictor = self.predictor
 
             # Устанавливает в пайплайн метку cfg
             bacward_step_pipeline.do_cfg = self.do_cfg
