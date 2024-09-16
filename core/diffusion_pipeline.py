@@ -37,7 +37,8 @@ class DiffusionPipelineOutput(BaseOutput):
 
 
 class DiffusionPipeline:
-    diffuser: DiffusionModel
+    # Попробуем сделать модель собственным членом класса
+    diffuser: Optional[DiffusionModel] = None
 
     """
     Данный класс служит для того, чтобы выполнять полностью проход
@@ -45,7 +46,7 @@ class DiffusionPipeline:
     """
     def __call__(
         self,
-        diffuser: DiffusionModel,
+        diffuser: Optional[DiffusionModel] = None,
         width: Optional[int] = None,
         height: Optional[int] = None,
         conditions: Optional[Conditions] = None,
@@ -56,13 +57,17 @@ class DiffusionPipeline:
         **kwargs,
     ):  
         print("DiffusionPipeline --->")
-        self.diffuser = diffuser
+        if (
+            diffuser is not None
+            and isinstance(diffuser, DiffusionModel)
+        ):
+            self.diffuser = diffuser
 
         
         # Препроцессим входные изображения
         IMAGE_PROCESSOR = VaePipeline()
         processor_output = IMAGE_PROCESSOR(
-            vae=diffuser.vae,
+            vae=self.diffuser.vae,
             width=width,
             height=height,
             image=image,
@@ -79,7 +84,7 @@ class DiffusionPipeline:
 
         
         # Получаем пайп для шага обратного процесса из самой модели
-        BACKWARD, conditions = diffuser(
+        BACKWARD, conditions = self.diffuser(
             width=width,
             height=height,
             conditions=conditions,
@@ -90,13 +95,13 @@ class DiffusionPipeline:
 
 
         # Инитим форвард пайплайн из ключа модели
-        FORWARD = ForwardDiffusion(**(diffuser.key))
+        FORWARD = ForwardDiffusion(**(self.diffuser.key))
         forward_input.sample = image
         forward_input.generator = generator
         forward_output = FORWARD(
             shape=(
-                diffuser.batch_size,
-                diffuser.num_channels,
+                self.diffuser.batch_size,
+                self.diffuser.num_channels,
                 width,
                 height,
             ),
@@ -114,7 +119,7 @@ class DiffusionPipeline:
 
             backward_output.timestep = t
             backward_output = BACKWARD(
-                diffuser.predictor,
+                self.diffuser.predictor,
                 conditions=conditions,
                 **backward_output
             )
@@ -124,7 +129,7 @@ class DiffusionPipeline:
 
 
         vae_output = IMAGE_PROCESSOR(
-            vae=diffuser.vae,
+            vae=self.diffuser.vae,
             latents=backward_output.noisy_sample
         )
 

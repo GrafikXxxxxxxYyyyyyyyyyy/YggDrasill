@@ -32,14 +32,23 @@ class StableDiffusionPipelineOutput(BaseOutput):
 
 
 class StableDiffusionPipeline:
-    # model: StableDiffusionModel
+    model: StableDiffusionModel
     te_pipeline: TextEncoderPipeline
     diffusion_pipeline: DiffusionPipeline
 
+    def __init__(
+        self,
+        **kwargs,
+    ):
+        self.te_pipeline = TextEncoderPipeline()
+        self.diffusion_pipeline = DiffusionPipeline()
+
+
+
     def __call__(
         self,
-        model: StableDiffusionModel,
         diffusion_input: DiffusionPipelineInput,
+        model: Optional[StableDiffusionModel] = None,
         te_input: Optional[TextEncoderPipelineInput] = None,
         use_refiner: bool = False,
         guidance_scale: float = 5.0,
@@ -52,19 +61,19 @@ class StableDiffusionPipeline:
         **kwargs,
     ):
         print("StableDiffusionPipeline --->")
-        # self.model = model
+        # Устанавливаем в класс StableDiffusionModel
+        if model is not None:
+            self.model = model
+
 
         if "1. Собираем и преобразуем обуславливающую информацию":
-            # Эта логика должна быть выстроена сверху вниз, чтобы 
-            # сойтись с логикой диффузионного процесса, которая будет 
-            # прописана снизу вверх для ветки core
-            if model.text_encoder is not None and te_input is not None:
-                te_pipeline = TextEncoderPipeline()
-                te_output = te_pipeline(
-                    model.text_encoder,
-                    **te_input,
-                )
+            if self.model.text_encoder is not None and te_input is not None:
+                # Устанавливаем в пайплайн нужную модель
+                self.te_pipeline.text_encoder = self.model.text_encoder
+                # Вызываем сам пайплайн
+                te_output = self.te_pipeline(**te_input)
 
+        print(te_output)
 
         conditions = model(
             te_output=te_output,
@@ -82,7 +91,6 @@ class StableDiffusionPipeline:
                 conditions=conditions,
                 **diffusion_input,
             )
-            pass
 
         
 

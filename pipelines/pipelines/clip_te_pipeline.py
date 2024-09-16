@@ -25,10 +25,12 @@ class CLIPTextEncoderPipelineOutput(BaseOutput):
 
 
 class CLIPTextEncoderPipeline:
+    clip_encoder: CLIPTextEncoderModel
+
     def __call__(
         self,
-        clip_encoder: CLIPTextEncoderModel,
         prompt: List[str],
+        clip_encoder: Optional[CLIPTextEncoderModel] = None,
         num_images_per_prompt: int = 1,
         clip_skip: Optional[int] = None,
         lora_scale: Optional[float] = None,
@@ -37,6 +39,8 @@ class CLIPTextEncoderPipeline:
     ) -> CLIPTextEncoderPipelineOutput:  
         print("CLIPTextEncoderPipeline --->")
 
+        if clip_encoder is not None:
+            self.clip_encoder = clip_encoder
 
 
         # Получаем выходы всех энкодеров модели
@@ -44,7 +48,7 @@ class CLIPTextEncoderPipeline:
             prompt_embeds_1, 
             prompt_embeds_2, 
             pooled_prompt_embeds
-        ) = clip_encoder(
+        ) = self.clip_encoder(
             prompt=prompt,
             prompt_2=prompt_2,
             clip_skip=clip_skip,

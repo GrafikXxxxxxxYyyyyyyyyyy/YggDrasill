@@ -47,6 +47,8 @@ class StableDiffusionModel:
         )
 
         # self.image_encoder = 
+
+        
         self.model_path = model_path
         self.model_type = model_type or "sd15"
     # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #    

@@ -35,12 +35,20 @@ class TextEncoderPipelineOutput(BaseOutput):
 
 
 class TextEncoderPipeline:
+    text_encoder: TextEncoderModel
     clip_pipeline: CLIPTextEncoderPipeline
         # transformer_pipeline: TransformerTextEncoderPipeline
 
+    def __init__(
+        self,
+        **kwargs,
+    ):
+        self.clip_pipeline = CLIPTextEncoderPipeline()
+    
+
     def __call__(
         self,
-        text_encoder: TextEncoderModel,
+        text_encoder: Optional[TextEncoderModel] = None,
         num_images_per_prompt: int = 1,
         clip_skip: Optional[int] = None,
         lora_scale: Optional[float] = None,
@@ -51,6 +59,9 @@ class TextEncoderPipeline:
         **kwargs,
     ):
         print("TextEncoderPipeline --->")
+        # Устанавливаем модель TextEncoderModel
+        if text_encoder is not None:
+            self.text_encoder = text_encoder
 
 
         if "1. Подготавливаем необходимые аргументы":
@@ -76,9 +87,10 @@ class TextEncoderPipeline:
             
         
         if "2. Получаем эмбеддинги с моделей":
-            clip_pipeline = CLIPTextEncoderPipeline()
-            clip_output = clip_pipeline(
-                text_encoder.clip_encoder,
+            # Устанавливаем в класс правильную модель
+            self.clip_pipeline.clip_encoder = self.text_encoder.clip_encoder
+            # Вызываем сам класс
+            clip_output = self.clip_pipeline(
                 prompt=prompt,
                 prompt_2=prompt_2,
                 clip_skip=clip_skip,
@@ -86,10 +98,11 @@ class TextEncoderPipeline:
                 num_images_per_prompt=num_images_per_prompt,
             )
             print(clip_output.prompt_embeds_1.shape)
+            print(clip_output.prompt_embeds_2.shape)
+            print(clip_output.pooled_prompt_embeds.shape)
             # И применяем инструкции cfg если необходимо
             if do_cfg:
-                negative_clip_output = clip_pipeline(
-                    text_encoder.clip_encoder,
+                negative_clip_output = self.clip_pipeline(
                     prompt=negative_prompt,
                     prompt_2=negative_prompt_2,
                     clip_skip=clip_skip,
@@ -107,7 +120,9 @@ class TextEncoderPipeline:
                     negative_clip_output.pooled_prompt_embeds, clip_output.pooled_prompt_embeds
                 ], dim=0)
 
-            print(clip_output.prompt_embeds_1.shape)
+                print(clip_output.prompt_embeds_1.shape)
+                print(clip_output.prompt_embeds_2.shape)
+                print(clip_output.pooled_prompt_embeds.shape)
 
             # Получаем эмбеддинги с модели Transformer
             # if text_encoder.transformer_encoder is not None:
