@@ -16,27 +16,21 @@ class BackwardDiffusionInput(BaseOutput):
 
 
 class BackwardDiffusion(NoiseScheduler):
-    # predictor: NoisePredictor
-
     do_cfg: bool = False
     guidance_scale: float = 5.0
     mask_sample: Optional[torch.FloatTensor] = None
     masked_sample: Optional[torch.FloatTensor] = None
-    
-    def __call__(
+
+
+    def backward_step(
         self,
         predictor: NoisePredictor,
         timestep: int, 
         noisy_sample: torch.FloatTensor,
         conditions: Optional[Conditions] = None,
-        **kwargs,
     ) -> BackwardDiffusionInput:
         """
-        Данный пайплайн выполняет один полный шаг снятия шума в диффузионном процессе
         """
-        print("BackwardDiffusion --->")
-
-
         # Учитываем CFG
         model_input = (
             torch.cat([noisy_sample] * 2)
@@ -76,6 +70,30 @@ class BackwardDiffusion(NoiseScheduler):
             timestep=timestep,
             sample=noisy_sample,
             model_output=noise_predict,
+        )
+
+        return timestep, less_noisy_sample
+
+    
+    
+    def __call__(
+        self,
+        predictor: NoisePredictor,
+        timestep: int, 
+        noisy_sample: torch.FloatTensor,
+        conditions: Optional[Conditions] = None,
+        **kwargs,
+    ) -> BackwardDiffusionInput:
+        """
+        Данный пайплайн выполняет один полный шаг снятия шума в диффузионном процессе
+        """
+        print("BackwardDiffusion --->")
+
+        timestep, less_noisy_sample = self.backward_step(
+            predictor=predictor, 
+            timestep=timestep, 
+            noisy_sample=noisy_sample, 
+            conditions=conditions
         )
 
         return BackwardDiffusionInput(

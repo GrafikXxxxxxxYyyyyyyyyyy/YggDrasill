@@ -1,8 +1,8 @@
 import torch 
 
-from typing import List, Optional
 from dataclasses import dataclass
 from diffusers.utils import BaseOutput
+from typing import List, Optional, Tuple
 from diffusers.utils.torch_utils import randn_tensor
 
 from ..models.noise_scheduler import NoiseScheduler
@@ -31,9 +31,9 @@ class ForwardDiffusion(NoiseScheduler):
     """
     Данный пайплайн выполняет процедуру прямого диффузионного процесса 
     """
-    def __call__(
+    def forward_pass(
         self,
-        shape,
+        shape: Tuple[int, int, int, int],
         strength: float = 1.0, 
         num_inference_steps: int = 30, 
         timesteps: Optional[List[int]] = None,
@@ -44,9 +44,6 @@ class ForwardDiffusion(NoiseScheduler):
         noisy_sample: Optional[torch.FloatTensor] = None,
         **kwargs,
     ):  
-        print("ForwardDiffusion --->")
-
-
         # Опционально формируем временные шаги, если те не переданы
         if timesteps is None:
             # get the original timestep using init_timestep
@@ -127,6 +124,35 @@ class ForwardDiffusion(NoiseScheduler):
                     noise * self.scale_factor
                 )
 
+            return timesteps, noisy_sample
+
+
+    def __call__(
+        self,
+        shape,
+        strength: float = 1.0, 
+        num_inference_steps: int = 30, 
+        timesteps: Optional[List[int]] = None,
+        denoising_end: Optional[float] = None,
+        denoising_start: Optional[float] = None,
+        sample: Optional[torch.FloatTensor] = None,
+        generator: Optional[torch.Generator] = None,
+        noisy_sample: Optional[torch.FloatTensor] = None,
+        **kwargs,
+    ):  
+        print("ForwardDiffusion --->")
+
+        timesteps, noisy_sample = self.forward_pass(
+            shape=shape,
+            strength=strength,
+            num_inference_steps=num_inference_steps,
+            timesteps=timesteps, 
+            denoising_end=denoising_end,
+            denoising_start=denoising_start,
+            sample=sample,
+            generator=generator,
+            noisy_sample=noisy_sample,
+        )
         
         return ForwardDiffusionOutput(
             timesteps=timesteps,

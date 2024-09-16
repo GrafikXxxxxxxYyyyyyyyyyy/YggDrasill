@@ -28,7 +28,7 @@ class VaePipelineOutput(BaseOutput):
 
 
 class VaePipeline:
-    def __call__(
+    def process_images(
         self, 
         width: Optional[int] = None,
         height: Optional[int] = None,
@@ -38,7 +38,7 @@ class VaePipeline:
         mask_image: Optional[PipelineImageInput] = None,
         latents: Optional[torch.FloatTensor] = None,
         **kwargs,
-    ) -> VaePipelineOutput:  
+    ):  
         """
         1) Препроцессит изображения
         2) Кодирует картинку (и маски) в латентное представление
@@ -47,14 +47,14 @@ class VaePipeline:
         use_vae = True if vae is not None else False
 
         # Инициализируем необходимые классы
-        self.image_processor = VaeImageProcessor(
+        image_processor = VaeImageProcessor(
             vae_scale_factor=(
                 vae.scale_factor
                 if use_vae else
                 1
             )
         )
-        self.mask_processor = VaeImageProcessor(
+        mask_processor = VaeImageProcessor(
             vae_scale_factor=(
                 vae.scale_factor
                 if use_vae else
@@ -67,9 +67,13 @@ class VaePipeline:
         output = VaePipelineOutput()
 
 
+        images: Optional[torch.FloatTensor] = None
+        mask_latents: Optional[torch.FloatTensor] = None
+        image_latents: Optional[torch.FloatTensor] = None
+        masked_image_latents: Optional[torch.FloatTensor] = None
         # Предобрабатываем пришедшие на вход изображения (и их маски)
         if image is not None:
-            image = self.image_processor.preprocess(image)    
+            image = image_processor.preprocess(image)    
             if height is not None and width is not None:
                 image = torch.nn.functional.interpolate(
                     image, 
@@ -78,7 +82,7 @@ class VaePipeline:
                 
                 # Возвращает либо латентное представление картинки
                 # либо запроцешенную картинку
-                output.image_latents = (
+                image_latents = (
                     vae(
                         images=image,
                         generator=generator,
@@ -88,16 +92,26 @@ class VaePipeline:
                 )
 
             if mask_image is not None:
-                mask_image = self.mask_processor.preprocess(mask_image)        
+                mask_image = mask_processor.preprocess(mask_image)        
                 if height is not None and width is not None:
                     mask_image = torch.nn.functional.interpolate(
                         mask_image, 
                         size=(height, width)
                     )
                 masked_image = image * (mask_image < 0.5)
-                output.mask_latents = mask_image
+                mask_latents = (
+                    torch.nn.functional.interpolate(
+                        mask_image, 
+                        size=(
+                            height // vae.scale_factor, 
+                            width // vae.scale_factor
+                        )
+                    )
+                    if use_vae else
+                    mask_image
+                )
 
-                output.masked_image_latents = (
+                masked_image_latents = (
                     vae(
                         images=masked_image,
                         generator=generator,
@@ -112,9 +126,32 @@ class VaePipeline:
                 if use_vae else
                 latents
             )
-            output.images = self.image_processor.postprocess(images.detach())
+            output.images = image_processor.postprocess(images.detach())
+
+        
+        return images, mask_latents, image_latents, masked_image_latents
+    
 
 
-        return output
+    def __call__(
+        self, 
+        input: VaePipelineInput,
+        **kwargs,
+    ) -> VaePipelineOutput:  
+        print("VaePipeline --->")
+    
+        (
+            images, 
+            mask_latents, 
+            image_latents, 
+            masked_image_latents,
+        ) = self.process_images(**input)
+
+        return VaePipelineOutput(
+            images=images,
+            mask_latents=mask_latents,
+            image_latents=image_latents,
+            masked_image_latents=masked_image_latents,
+        )
 
 

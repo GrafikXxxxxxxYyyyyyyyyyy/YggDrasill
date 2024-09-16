@@ -73,9 +73,8 @@ class StableDiffusionPipeline:
                 # Вызываем сам пайплайн
                 te_output = self.te_pipeline(**te_input)
 
-        print(te_output)
 
-        conditions = model(
+        conditions = self.model(
             te_output=te_output,
             use_refiner=use_refiner,
             guidance_scale=guidance_scale,
@@ -85,9 +84,10 @@ class StableDiffusionPipeline:
    
 
         if "3. Учитывая переданные аргументы, используем полученный/ые пайплайны":
-            diffusion_pipeline = DiffusionPipeline()
-            output = diffusion_pipeline(
-                model.diffuser,
+            # diffusion_pipeline = DiffusionPipeline()
+            self.diffusion_pipeline.diffuser = self.model.diffuser
+
+            output = self.diffusion_pipeline(
                 conditions=conditions,
                 **diffusion_input,
             )

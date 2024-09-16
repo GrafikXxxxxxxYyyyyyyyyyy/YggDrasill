@@ -107,17 +107,17 @@ class NoisePredictor(ModelKey):
         self.predictor.to(device=device, dtype=dtype)
 
 
-    def reload(
-        self, 
-        model_path: str,
-        model_type: Optional[str] = None,
-        device: str = "cuda",
-    ):
-        self.__init__(
-            model_path=model_path,
-            device=device,
-            model_type=model_type, 
-        )
+    # def reload(
+    #     self, 
+    #     model_path: str,
+    #     model_type: Optional[str] = None,
+    #     device: str = "cuda",
+    # ):
+    #     self.__init__(
+    #         model_path=model_path,
+    #         device=device,
+    #         model_type=model_type, 
+    #     )
     # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #
 
 

@@ -14,9 +14,10 @@ class DiffusionModelKey(ModelKey):
     scheduler_name: str = "euler"
 
 
-class DiffusionModel:
+class DiffusionModel(NoisePredictor):
     # Основные параметры модели
     key: DiffusionModelKey
+    predictor: NoisePredictor
     vae: Optional[VaeModel] = None
 
     # Параметры, которые можно вынести в функциональный класс
@@ -40,7 +41,7 @@ class DiffusionModel:
             is_latent_model=is_latent_model,
             **kwargs,
         )
-        self.predictor = NoisePredictor(**kwargs)
+        # self.predictor = NoisePredictor(**kwargs)
         self.vae = VaeModel(**kwargs) if is_latent_model else None
 
     @property
@@ -174,5 +175,27 @@ class DiffusionModel:
                     pass
 
 
+
+            # Правильно инитит маску и маскированную картинку в пайпе
+            if mask_image is not None:
+                mask_image = mask_image.repeat(
+                    self.batch_size // mask_image.shape[0], 1, 1, 1
+                )
+                mask_image = (
+                    torch.cat([mask_image] * 2)
+                    if self.do_cfg else
+                    mask_image
+                )
+
+            if masked_image is not None:
+                masked_image = masked_image.repeat(
+                    self.batch_size // masked_image.shape[0], 1, 1, 1
+                )
+                masked_image = (
+                    torch.cat([masked_image] * 2)
+                    if self.do_cfg else
+                    masked_image
+                )
+            
             return mask_image, masked_image, conditions
     # ================================================================================================================ #
