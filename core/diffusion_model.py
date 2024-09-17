@@ -139,6 +139,7 @@ class DiffusionModel:
     # ================================================================================================================ #
     def __call__(
         self,
+        batch_size: int = 1,
         do_cfg: bool = False,
         width: Optional[int] = None,
         height: Optional[int] = None,
@@ -155,6 +156,7 @@ class DiffusionModel:
         
         if "1. Дополняет условия в соответствии с моделью":
             if conditions is not None:
+
                 if self.model_type == "sd15":
                     pass
                 elif self.model_type == "sdxl":
@@ -175,8 +177,8 @@ class DiffusionModel:
                         text_encoder_projection_dim = self.text_encoder_projection_dim,
                         requires_aesthetics_score = self.use_refiner,
                     )
-                    add_time_ids = add_time_ids.repeat(self.batch_size, 1)
-                    add_neg_time_ids = add_neg_time_ids.repeat(self.batch_size, 1)
+                    add_time_ids = add_time_ids.repeat(batch_size, 1)
+                    add_neg_time_ids = add_neg_time_ids.repeat(batch_size, 1)
                     if do_cfg:
                         add_time_ids = torch.cat([add_neg_time_ids, add_time_ids], dim=0)
                     

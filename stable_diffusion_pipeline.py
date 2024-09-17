@@ -70,9 +70,13 @@ class StableDiffusionPipeline(
             aesthetic_score=aesthetic_score,
             negative_aesthetic_score=negative_aesthetic_score,
         )
-        print(f"ConditionsSDP after model: {conditions}")
-   
-        diffusion_input.conditions = conditions
+
+        # Создаём новый расширенный словиями класс инпута
+        diffusion_input = DiffusionPipelineInput(
+            # conditions=Conditions(**conditions),
+            conditions=conditions,
+            **diffusion_input,
+        )
         if "2. Учитывая переданные аргументы, используем полученный/ые пайплайны":
             diffusion_output = self.diffusion_process(
                 model.diffuser,

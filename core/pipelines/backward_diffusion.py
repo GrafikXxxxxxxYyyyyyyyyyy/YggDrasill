@@ -55,13 +55,14 @@ class BackwardDiffusion(NoiseScheduler):
         ):
             model_input = torch.cat([model_input, self.mask_sample, self.masked_sample], dim=1)   
         
-        print(f"ConditionsBD: {conditions}")
+        print(f"Step: {timestep}")
         # Получаем предсказание шума
         noise_predict = predictor(
             timestep=timestep,
             noisy_sample=model_input,
-            **conditions,
+            conditions=conditions,
         )
+        print(f"Back step: {timestep}")
 
         # Учитываем CFG
         if self.do_cfg:

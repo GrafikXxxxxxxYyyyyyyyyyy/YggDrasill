@@ -123,31 +123,33 @@ class DiffusionPipeline(
         )   
 
 
-        print(f"ConditionsDP: {conditions}")
+
         conditions = diffuser(
+            batch_size=batch_size,
             do_cfg=self.do_cfg,
             width=width,
             height=height,
             conditions=conditions,
         )
-        print(f"ConditionsDP after model: {conditions}")
 
 
         #  Аналогично для Backward но в цикле
         backward_input = BackwardDiffusionInput(
             timestep=-1,
             noisy_sample=forward_output.noisy_sample, 
+            # conditions=Conditions(**conditions),
+            conditions=conditions,
         )
-        backward_input.conditions = conditions
         for i, t in tqdm(enumerate(forward_output.timesteps)):
             # TODO: Добавить расширение условий за счёт ControlNet
             # <...>
-
+            print(f"Step: {t}")
             backward_input.timestep = t
             backward_input = self.backward_step(
                 diffuser.predictor,
                 **backward_input
             )
+            print(f"Back step: {t}")
             
             # TODO: Добавить обработку маски через image
             # в случае если модель не для inpainting

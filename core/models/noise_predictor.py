@@ -131,19 +131,7 @@ class NoisePredictor(ModelKey):
         self,
         timestep: int,
         noisy_sample: torch.FloatTensor,
-
-        # UNet2DModel
-        class_labels: Optional[torch.Tensor] = None,
-
-        # UNet2DConditionModel
-        prompt_embeds: Optional[torch.Tensor] = None,
-        timestep_cond: Optional[torch.Tensor] = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        cross_attention_kwargs: Optional[Dict[str, Any]] = None,
-        added_cond_kwargs: Optional[Dict[str, torch.Tensor]] = None,
-        
-        # ControlNet
-        # ...
+        conditions: Optional[Conditions] = None,
         **kwargs,
     ) -> torch.FloatTensor:          
     # ================================================================================================================ #
@@ -155,14 +143,14 @@ class NoisePredictor(ModelKey):
 
         # Пересобираем пришедшие аргументы под нужную архитектуру(!), если те переданы
         if isinstance(self.predictor, UNet2DModel):
-            extra_kwargs["class_labels"] = class_labels
+            extra_kwargs["class_labels"] = conditions.class_labels
 
         elif isinstance(self.predictor, UNet2DConditionModel):
-            extra_kwargs["class_labels"] = class_labels
-            extra_kwargs["timestep_cond"] = timestep_cond
-            extra_kwargs["added_cond_kwargs"] = added_cond_kwargs
-            extra_kwargs["encoder_hidden_states"] = prompt_embeds
-            extra_kwargs["cross_attention_kwargs"] = cross_attention_kwargs
+            extra_kwargs["class_labels"] = conditions.class_labels
+            extra_kwargs["timestep_cond"] = conditions.timestep_cond
+            extra_kwargs["added_cond_kwargs"] = conditions.added_cond_kwargs
+            extra_kwargs["encoder_hidden_states"] = conditions.prompt_embeds
+            extra_kwargs["cross_attention_kwargs"] = conditions.cross_attention_kwargs
 
         elif isinstance(self.predictor, SD3Transformer2DModel):
             pass
@@ -170,13 +158,14 @@ class NoisePredictor(ModelKey):
         elif isinstance(self.predictor, FluxTransformer2DModel):
             pass
 
-        
+        print(f"Step: {timestep}")
         # Предсказывает шум моделью + собранными параметрами
         predicted_noise = self.predictor(
             timestep=timestep,
             sample=noisy_sample,
             **extra_kwargs,
         )
+        print(f"Back step: {timestep}")
 
         return predicted_noise
     # ================================================================================================================ #
