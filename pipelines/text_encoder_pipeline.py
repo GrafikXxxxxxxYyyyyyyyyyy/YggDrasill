@@ -13,7 +13,8 @@ from .pipelines.clip_te_pipeline import (
 #     TransformerTextEncoderPipeline,
 #     TransformerTextEncoderPipelineInput,
 # )
-from ..stable_diffusion_model import TextEncoderModel, StableDiffusionModelKey
+from ..models.text_encoder_model import TextEncoderModel
+from ..stable_diffusion_model import StableDiffusionModelKey
 
 
 @dataclass

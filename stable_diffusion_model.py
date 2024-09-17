@@ -4,7 +4,6 @@ from typing import Optional
 from dataclasses import dataclass
 
 
-from .stable_diffusion_pipeline import TextEncoderPipelineOutput
 from .core.diffusion_model import (
     Conditions, 
     DiffusionModel, 
@@ -14,6 +13,7 @@ from .models.text_encoder_model import (
     TextEncoderModel,
     CLIPTextEncoderModel,
 )
+from .pipelines.text_encoder_pipeline import TextEncoderPipelineOutput
 
 
 @dataclass
