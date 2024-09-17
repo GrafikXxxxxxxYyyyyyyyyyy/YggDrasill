@@ -124,37 +124,25 @@ class ForwardDiffusion(NoiseScheduler):
                     noise * self.scale_factor
                 )
 
-            return timesteps, noisy_sample
+            return ForwardDiffusionOutput(
+                timesteps=timesteps,
+                noisy_sample=noisy_sample,
+            )
 
 
     def __call__(
         self,
         shape,
-        strength: float = 1.0, 
-        num_inference_steps: int = 30, 
-        timesteps: Optional[List[int]] = None,
-        denoising_end: Optional[float] = None,
-        denoising_start: Optional[float] = None,
-        sample: Optional[torch.FloatTensor] = None,
-        generator: Optional[torch.Generator] = None,
-        noisy_sample: Optional[torch.FloatTensor] = None,
+        input: Optional[ForwardDiffusionInput] = None,
         **kwargs,
     ):  
         print("ForwardDiffusion --->")
 
-        timesteps, noisy_sample = self.forward_pass(
+        # Если на вход не пришло инпута, создаём дефолтный
+        if input is None: 
+            input = ForwardDiffusionInput()
+
+        return self.forward_pass(
             shape=shape,
-            strength=strength,
-            num_inference_steps=num_inference_steps,
-            timesteps=timesteps, 
-            denoising_end=denoising_end,
-            denoising_start=denoising_start,
-            sample=sample,
-            generator=generator,
-            noisy_sample=noisy_sample,
-        )
-        
-        return ForwardDiffusionOutput(
-            timesteps=timesteps,
-            noisy_sample=noisy_sample,
+            **input,
         )

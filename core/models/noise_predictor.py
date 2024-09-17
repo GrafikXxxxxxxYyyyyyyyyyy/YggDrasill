@@ -27,12 +27,14 @@ class Conditions(BaseOutput):
     """
     # UNet2DModel
     class_labels: Optional[torch.Tensor] = None
+
     # UNet2DConditionModel
     prompt_embeds: Optional[torch.Tensor] = None
     timestep_cond: Optional[torch.Tensor] = None
     attention_mask: Optional[torch.Tensor] = None
     cross_attention_kwargs: Optional[Dict[str, Any]] = None
     added_cond_kwargs: Optional[Dict[str, torch.Tensor]] = None
+    
     # ControlNet
     # ...
 
@@ -129,7 +131,19 @@ class NoisePredictor(ModelKey):
         self,
         timestep: int,
         noisy_sample: torch.FloatTensor,
-        conditions: Optional[Conditions] = None,
+
+        # UNet2DModel
+        class_labels: Optional[torch.Tensor] = None,
+
+        # UNet2DConditionModel
+        prompt_embeds: Optional[torch.Tensor] = None,
+        timestep_cond: Optional[torch.Tensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        cross_attention_kwargs: Optional[Dict[str, Any]] = None,
+        added_cond_kwargs: Optional[Dict[str, torch.Tensor]] = None,
+        
+        # ControlNet
+        # ...
         **kwargs,
     ) -> torch.FloatTensor:          
     # ================================================================================================================ #
@@ -137,22 +151,18 @@ class NoisePredictor(ModelKey):
         Выполняет шаг предсказания шума на метке t для любого
         типа входных данных любой из имеющихся моделей
         """
-        print()
-        print()
-        print()
-        print(conditions)
         extra_kwargs = {}
 
         # Пересобираем пришедшие аргументы под нужную архитектуру(!), если те переданы
         if isinstance(self.predictor, UNet2DModel):
-            extra_kwargs["class_labels"] = conditions.class_labels
+            extra_kwargs["class_labels"] = class_labels
 
         elif isinstance(self.predictor, UNet2DConditionModel):
-            extra_kwargs["class_labels"] = conditions.class_labels
-            extra_kwargs["timestep_cond"] = conditions.timestep_cond
-            extra_kwargs["added_cond_kwargs"] = conditions.added_cond_kwargs
-            extra_kwargs["encoder_hidden_states"] = conditions.prompt_embeds
-            extra_kwargs["cross_attention_kwargs"] = conditions.cross_attention_kwargs
+            extra_kwargs["class_labels"] = class_labels
+            extra_kwargs["timestep_cond"] = timestep_cond
+            extra_kwargs["added_cond_kwargs"] = added_cond_kwargs
+            extra_kwargs["encoder_hidden_states"] = prompt_embeds
+            extra_kwargs["cross_attention_kwargs"] = cross_attention_kwargs
 
         elif isinstance(self.predictor, SD3Transformer2DModel):
             pass
@@ -162,11 +172,6 @@ class NoisePredictor(ModelKey):
 
         
         # Предсказывает шум моделью + собранными параметрами
-        print(timestep)
-        print(noisy_sample.shape)
-        print(extra_kwargs["encoder_hidden_states"].shape)
-        print(extra_kwargs["added_cond_kwargs"]["time_ids"].shape)
-        print(extra_kwargs["added_cond_kwargs"]["text_embeds"].shape)
         predicted_noise = self.predictor(
             timestep=timestep,
             sample=noisy_sample,

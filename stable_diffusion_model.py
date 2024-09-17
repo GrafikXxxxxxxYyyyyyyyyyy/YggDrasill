@@ -59,7 +59,6 @@ class StableDiffusionModel:
     def __call__(
         self,
         use_refiner: bool = False,
-        guidance_scale: float = 5.0,
         aesthetic_score: float = 6.0,
         negative_aesthetic_score: float = 2.5,
         te_output: Optional[TextEncoderPipelineOutput] = None,
@@ -74,19 +73,17 @@ class StableDiffusionModel:
         """
         print("StableDiffusionModel --->")
 
-        self.diffuser.use_refiner = use_refiner
+        # Устанавливаем собственные аргументы модели
+        self.diffuser.maybe_switch_to_refiner(use_refiner)
         self.diffuser.aesthetic_score = aesthetic_score
         self.diffuser.negative_aesthetic_score = negative_aesthetic_score
+        self.diffuser.text_encoder_projection_dim = self.text_encoder.clip_encoder.text_encoder_projection_dim
+
         
+        # Собираем текстовые и картиночные условия генерации
         conditions = Conditions()
-        
         if te_output is not None:
             conditions.cross_attention_kwargs = te_output.cross_attention_kwargs
-
-            # ПЕРЕНАСТРОЙКА МОДЕЛИ
-            self.diffuser.do_cfg = te_output.do_cfg
-            self.diffuser.guidance_scale = guidance_scale
-            self.diffuser.batch_size = te_output.batch_size
 
             if self.model_type == "sd15":
                 conditions.prompt_embeds = te_output.clip_embeds_1
@@ -103,9 +100,6 @@ class StableDiffusionModel:
                     if use_refiner else
                     torch.concat([te_output.clip_embeds_1, te_output.clip_embeds_2], dim=-1)       
                 )
-
-                # ПЕРЕНАСТРОЙКА МОДЕЛИ
-                self.diffuser.text_encoder_projection_dim = self.text_encoder.clip_encoder.text_encoder_projection_dim
             
             elif self.model_type == "sd3":
                 pass
@@ -113,7 +107,7 @@ class StableDiffusionModel:
             elif self.model_type == "flux":
                 pass
         
-        # Возвращаем собранные условия в формате специального класса-обёртки
+        
         return conditions
     # ================================================================================================================ #
         

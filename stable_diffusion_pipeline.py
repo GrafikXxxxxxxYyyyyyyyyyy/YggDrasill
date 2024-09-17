@@ -1,6 +1,6 @@
 import torch 
 
-from typing import List, Optional
+from typing import Optional
 from dataclasses import dataclass
 from diffusers.utils import BaseOutput
 
@@ -22,7 +22,6 @@ class StableDiffusionPipelineInput(BaseOutput):
     use_refiner: bool = False
     guidance_scale: float = 5.0
     te_input: Optional[TextEncoderPipelineInput] = None
-    # ie_input: Optional[ImageEncoderPipelineInput] = None
 
 
 @dataclass
@@ -31,72 +30,60 @@ class StableDiffusionPipelineOutput(BaseOutput):
 
 
 
-class StableDiffusionPipeline:
-    model: StableDiffusionModel
-    te_pipeline: TextEncoderPipeline
-    diffusion_pipeline: DiffusionPipeline
-
-    def __init__(
-        self,
-        **kwargs,
-    ):
-        self.te_pipeline = TextEncoderPipeline()
-        self.diffusion_pipeline = DiffusionPipeline()
-
-
-
+class StableDiffusionPipeline(
+    DiffusionPipeline,
+    TextEncoderPipeline,  
+):  
     def __call__(
         self,
+        model: StableDiffusionModel,
         diffusion_input: DiffusionPipelineInput,
-        model: Optional[StableDiffusionModel] = None,
         te_input: Optional[TextEncoderPipelineInput] = None,
         use_refiner: bool = False,
         guidance_scale: float = 5.0,
-                # ip_adapter_image: Optional[PipelineImageInput] = None,
-                # output_type: str = "pt",
-        refiner_steps: Optional[int] = None,
-        refiner_scale: Optional[float] = None,
+            # refiner_steps: Optional[int] = None,
+            # refiner_scale: Optional[float] = None,
         aesthetic_score: float = 6.0,
         negative_aesthetic_score: float = 2.5,
         **kwargs,
     ):
         print("StableDiffusionPipeline --->")
-        # Устанавливаем в класс StableDiffusionModel
-        if model is not None:
-            self.model = model
-
 
         if "1. Собираем и преобразуем обуславливающую информацию":
-            if self.model.text_encoder is not None and te_input is not None:
-                # Устанавливаем в пайплайн нужную модель
-                self.te_pipeline.text_encoder = self.model.text_encoder
-                # Вызываем сам пайплайн
-                te_output = self.te_pipeline(**te_input)
+            if model.text_encoder is not None and te_input is not None:
+                te_output = self.get_prompt_embeddings(
+                    model.text_encoder,
+                    **te_input,
+                )
+
+                self.do_cfg = te_output.do_cfg
+                self.guidance_scale = guidance_scale
+                # Изменяет размер тензора т.к может быть несколько картинок на промпт
+                diffusion_input.batch_size = te_output.batch_size
 
 
-        conditions = self.model(
+        # Вызываем модель с доп аргументами, чтобы создать из эмбеддингов
+        # входы для диффузионной модели
+        conditions = model(
             te_output=te_output,
             use_refiner=use_refiner,
-            guidance_scale=guidance_scale,
             aesthetic_score=aesthetic_score,
             negative_aesthetic_score=negative_aesthetic_score,
         )
+        print(f"ConditionsSDP after model: {conditions}")
    
-
-        if "3. Учитывая переданные аргументы, используем полученный/ые пайплайны":
-            # diffusion_pipeline = DiffusionPipeline()
-            self.diffusion_pipeline.diffuser = self.model.diffuser
-
-            output = self.diffusion_pipeline(
-                conditions=conditions,
+        diffusion_input.conditions = conditions
+        if "2. Учитывая переданные аргументы, используем полученный/ые пайплайны":
+            diffusion_output = self.diffusion_process(
+                model.diffuser,
                 **diffusion_input,
             )
 
         
 
-        return StableDiffusionPipelineOutput(
-            images=output.images
-        )
+        # return StableDiffusionPipelineOutput(
+        #     images=output.images
+        # )
 
 
 

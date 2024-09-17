@@ -12,10 +12,12 @@ from ..models.noise_predictor import Conditions, NoisePredictor
 class BackwardDiffusionInput(BaseOutput):
     timestep: int
     noisy_sample: torch.FloatTensor
+    conditions: Optional[Conditions] = None
 
 
 
 class BackwardDiffusion(NoiseScheduler):
+    # Собственные аргументы инитятся там, где они последний раз используются 
     do_cfg: bool = False
     guidance_scale: float = 5.0
     mask_sample: Optional[torch.FloatTensor] = None
@@ -28,6 +30,7 @@ class BackwardDiffusion(NoiseScheduler):
         timestep: int, 
         noisy_sample: torch.FloatTensor,
         conditions: Optional[Conditions] = None,
+        **kwargs,
     ) -> BackwardDiffusionInput:
         """
         """
@@ -52,12 +55,12 @@ class BackwardDiffusion(NoiseScheduler):
         ):
             model_input = torch.cat([model_input, self.mask_sample, self.masked_sample], dim=1)   
         
-
+        print(f"ConditionsBD: {conditions}")
         # Получаем предсказание шума
         noise_predict = predictor(
             timestep=timestep,
             noisy_sample=model_input,
-            conditions=conditions,
+            **conditions,
         )
 
         # Учитываем CFG
@@ -72,16 +75,18 @@ class BackwardDiffusion(NoiseScheduler):
             model_output=noise_predict,
         )
 
-        return timestep, less_noisy_sample
+        return BackwardDiffusionInput(
+            timestep=timestep,
+            conditions=conditions,
+            noisy_sample=less_noisy_sample,
+        )
 
     
     
     def __call__(
         self,
         predictor: NoisePredictor,
-        timestep: int, 
-        noisy_sample: torch.FloatTensor,
-        conditions: Optional[Conditions] = None,
+        input: BackwardDiffusionInput,
         **kwargs,
     ) -> BackwardDiffusionInput:
         """
@@ -89,15 +94,8 @@ class BackwardDiffusion(NoiseScheduler):
         """
         print("BackwardDiffusion --->")
 
-        timestep, less_noisy_sample = self.backward_step(
-            predictor=predictor, 
-            timestep=timestep, 
-            noisy_sample=noisy_sample, 
-            conditions=conditions
-        )
-
-        return BackwardDiffusionInput(
-            timestep=timestep,
-            noisy_sample=less_noisy_sample,
+        return self.backward_step(
+            predictor, 
+            **input,
         )
 

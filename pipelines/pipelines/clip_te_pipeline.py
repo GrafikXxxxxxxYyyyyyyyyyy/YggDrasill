@@ -25,30 +25,21 @@ class CLIPTextEncoderPipelineOutput(BaseOutput):
 
 
 class CLIPTextEncoderPipeline:
-    clip_encoder: CLIPTextEncoderModel
-
-    def __call__(
+    def encode_clip_prompt(
         self,
+        clip_encoder: CLIPTextEncoderModel,
         prompt: List[str],
-        clip_encoder: Optional[CLIPTextEncoderModel] = None,
         num_images_per_prompt: int = 1,
         clip_skip: Optional[int] = None,
         lora_scale: Optional[float] = None,
         prompt_2: Optional[List[str]] = None,
-        **kwargs,
     ) -> CLIPTextEncoderPipelineOutput:  
-        print("CLIPTextEncoderPipeline --->")
-
-        if clip_encoder is not None:
-            self.clip_encoder = clip_encoder
-
-
         # Получаем выходы всех энкодеров модели
         (
             prompt_embeds_1, 
             prompt_embeds_2, 
             pooled_prompt_embeds
-        ) = self.clip_encoder(
+        ) = clip_encoder(
             prompt=prompt,
             prompt_2=prompt_2,
             clip_skip=clip_skip,
@@ -68,12 +59,27 @@ class CLIPTextEncoderPipeline:
             pooled_prompt_embeds = pooled_prompt_embeds.repeat(1, num_images_per_prompt)
             pooled_prompt_embeds = pooled_prompt_embeds.view(bs_embed * num_images_per_prompt, -1)
 
-
+        
         return CLIPTextEncoderPipelineOutput(
             prompt_embeds_1=prompt_embeds_1,
             prompt_embeds_2=prompt_embeds_2,
             pooled_prompt_embeds=pooled_prompt_embeds,
-        )        
+        )
+        
+
+
+    def __call__(
+        self,
+        clip_encoder: CLIPTextEncoderModel,
+        input: CLIPTextEncoderPipelineInput,
+        **kwargs,
+    ) -> CLIPTextEncoderPipelineOutput:  
+        print("CLIPTextEncoderPipeline --->")
+        
+        return self.encode_clip_prompt(
+            clip_encoder=clip_encoder,
+            **input,
+        )
     
 
 

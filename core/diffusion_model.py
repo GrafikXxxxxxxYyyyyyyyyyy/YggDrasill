@@ -17,13 +17,10 @@ class DiffusionModelKey(ModelKey):
 class DiffusionModel:
     # Основные параметры модели
     key: DiffusionModelKey
+    predictor: NoisePredictor
     vae: Optional[VaeModel] = None
 
-    # Параметры, которые можно вынести в функциональный класс
-    batch_size: int = 1
-    do_cfg: bool = False
     use_refiner: bool = False
-    guidance_scale: float = 5.0
     aesthetic_score: float = 6.0
     negative_aesthetic_score: float = 2.5
     text_encoder_projection_dim: Optional[int] = None
@@ -52,6 +49,10 @@ class DiffusionModel:
         return self.predictor.device
 
     @property
+    def model_type(self):
+        return self.key.model_type
+
+    @property
     def sample_size(self):
         return (
             self.predictor.config.sample_size * self.vae.scale_factor
@@ -66,6 +67,19 @@ class DiffusionModel:
             if self.vae is not None else
             self.predictor.config.in_channels
         )
+
+    def maybe_switch_to_refiner(self, use_refiner: bool):
+        if use_refiner:
+            self.predictor = NoisePredictor(
+                model_path="REFINER_PATH",
+                **self.key,
+            )
+            self.use_refiner = True
+
+    def maybe_switch_to_base(self, use_refiner: bool):
+        if not use_refiner:
+            self.predictor = NoisePredictor(**self.key)
+            self.use_refiner = False
     # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #
 
 
@@ -125,19 +139,19 @@ class DiffusionModel:
     # ================================================================================================================ #
     def __call__(
         self,
+        do_cfg: bool = False,
         width: Optional[int] = None,
         height: Optional[int] = None,
         conditions: Optional[Conditions] = None,
-        mask_image: Optional[torch.FloatTensor] = None,
-        masked_image: Optional[torch.FloatTensor] = None,
         **kwargs,
-    ) -> Tuple[BackwardDiffusion, Optional[Conditions]]:
+    ) -> Optional[Conditions]:
     # ================================================================================================================ #
         """
         Вызов данной модели работает как фабрика, выплёвывающая нужную реализацию
         пайплайна BackwardDiffusion
         """
         print("DiffusionModel --->")
+
         
         if "1. Дополняет условия в соответствии с моделью":
             if conditions is not None:
@@ -163,7 +177,7 @@ class DiffusionModel:
                     )
                     add_time_ids = add_time_ids.repeat(self.batch_size, 1)
                     add_neg_time_ids = add_neg_time_ids.repeat(self.batch_size, 1)
-                    if self.do_cfg:
+                    if do_cfg:
                         add_time_ids = torch.cat([add_neg_time_ids, add_time_ids], dim=0)
                     
                     conditions.added_cond_kwargs["time_ids"] = add_time_ids.to(self.device)
@@ -174,5 +188,5 @@ class DiffusionModel:
                     pass
 
 
-            return mask_image, masked_image, conditions
+            return conditions
     # ================================================================================================================ #

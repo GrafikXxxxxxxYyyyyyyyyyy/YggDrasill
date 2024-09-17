@@ -1,6 +1,6 @@
 import torch
 
-from typing import Optional
+from typing import Optional, Dict
 
 from .models.clip_te_model import CLIPTextEncoderModel
 
@@ -27,6 +27,9 @@ class TextEncoderModel:
         )
 
         # self.transformer_encoder = 
+
+        self.model_path = model_path
+        self.model_type = model_type or "sd15"
 
 
     

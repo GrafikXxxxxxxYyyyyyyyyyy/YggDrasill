@@ -28,7 +28,7 @@ class VaePipelineOutput(BaseOutput):
 
 
 class VaePipeline:
-    def process_images(
+    def pre_post_process(
         self, 
         width: Optional[int] = None,
         height: Optional[int] = None,
@@ -145,7 +145,7 @@ class VaePipeline:
             mask_latents, 
             image_latents, 
             masked_image_latents,
-        ) = self.process_images(**input)
+        ) = self.pre_post_process(**input)
 
         return VaePipelineOutput(
             images=images,
