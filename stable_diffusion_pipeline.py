@@ -4,15 +4,20 @@ from typing import Optional
 from dataclasses import dataclass
 from diffusers.utils import BaseOutput
 
+from .stable_diffusion_model import (
+    Conditions, 
+    StableDiffusionModel, 
+    StableDiffusionModelKey,
+)
+from .core.diffusion_pipeline import (
+    DiffusionPipeline, 
+    DiffusionPipelineInput,
+    DiffusionPipelineOutput,
+)
 from .pipelines.text_encoder_pipeline import (
     TextEncoderPipeline,
     TextEncoderPipelineInput,
-)
-from .stable_diffusion_model import StableDiffusionModel
-from .core.diffusion_pipeline import (
-    Conditions,
-    DiffusionPipeline, 
-    DiffusionPipelineInput
+    TextEncoderPipelineOutput,
 )
 
 
@@ -34,6 +39,22 @@ class StableDiffusionPipeline(
     DiffusionPipeline,
     TextEncoderPipeline,  
 ):  
+    sd: StableDiffusionModel
+
+    def __init__(
+        self,
+        model_key: Optional[StableDiffusionModelKey] = None,
+        **kwargs,
+    ):
+        if model_key is not None:
+            self.sd = StableDiffusionModel(**model_key)
+            self.diffuser = self.sd.diffuser
+            self.text_encoder = self.sd.text_encoder
+            self.vae = self.sd.diffuser.vae
+            self.predictor = self.sd.diffuser.predictor
+            self.scheduler = self.sd.diffuser.scheduler
+
+
     def __call__(
         self,
         model: StableDiffusionModel,
@@ -51,10 +72,7 @@ class StableDiffusionPipeline(
 
         if "1. Собираем и преобразуем обуславливающую информацию":
             if model.text_encoder is not None and te_input is not None:
-                te_output = self.get_prompt_embeddings(
-                    model.text_encoder,
-                    **te_input,
-                )
+                te_output = self.get_prompt_embeddings(**te_input)
 
                 self.do_cfg = te_output.do_cfg
                 self.guidance_scale = guidance_scale
@@ -64,7 +82,7 @@ class StableDiffusionPipeline(
 
         # Вызываем модель с доп аргументами, чтобы создать из эмбеддингов
         # входы для диффузионной модели
-        conditions = model(
+        conditions = self.sd(
             te_output=te_output,
             use_refiner=use_refiner,
             aesthetic_score=aesthetic_score,
@@ -78,16 +96,13 @@ class StableDiffusionPipeline(
             **diffusion_input,
         )
         if "2. Учитывая переданные аргументы, используем полученный/ые пайплайны":
-            diffusion_output = self.diffusion_process(
-                model.diffuser,
-                **diffusion_input,
-            )
+            diffusion_output = self.diffusion_process(**diffusion_input)
 
         
 
-        # return StableDiffusionPipelineOutput(
-        #     images=output.images
-        # )
+        return StableDiffusionPipelineOutput(
+            images=diffusion_output.images
+        )
 
 
 

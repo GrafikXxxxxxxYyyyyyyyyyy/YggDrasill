@@ -1,10 +1,19 @@
 import torch
 
+from typing import Optional
 from dataclasses import dataclass
-from typing import Optional, Dict, Any, Tuple
 
-from .core.diffusion_model import Conditions, DiffusionModel, DiffusionModelKey
-from .pipelines.text_encoder_pipeline import TextEncoderModel, TextEncoderPipelineOutput
+
+from .stable_diffusion_pipeline import TextEncoderPipelineOutput
+from .core.diffusion_model import (
+    Conditions, 
+    DiffusionModel, 
+    DiffusionModelKey
+)
+from .models.text_encoder_model import (
+    TextEncoderModel,
+    CLIPTextEncoderModel,
+)
 
 
 @dataclass

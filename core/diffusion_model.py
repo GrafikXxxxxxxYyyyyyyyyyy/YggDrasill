@@ -4,8 +4,8 @@ from dataclasses import dataclass
 from typing import Optional, Tuple
 
 from .models.vae_model import VaeModel
-from .models.noise_predictor import ModelKey, NoisePredictor
-from .pipelines.backward_diffusion import Conditions, BackwardDiffusion
+from .models.noise_scheduler import NoiseScheduler
+from .models.noise_predictor import ModelKey, Conditions,  NoisePredictor
 
 
 @dataclass
@@ -14,9 +14,9 @@ class DiffusionModelKey(ModelKey):
     scheduler_name: str = "euler"
 
 
-class DiffusionModel:
+class DiffusionModel(DiffusionModelKey):
     # Основные параметры модели
-    key: DiffusionModelKey
+    scheduler: NoiseScheduler
     predictor: NoisePredictor
     vae: Optional[VaeModel] = None
 
@@ -32,10 +32,9 @@ class DiffusionModel:
         scheduler_name: Optional[str] = None,
         **kwargs,
     ):     
-        self.key = DiffusionModelKey(
-            scheduler_name=scheduler_name,
-            is_latent_model=is_latent_model,
-            **kwargs,
+        self.scheduler = NoiseScheduler(
+            scheduler_name=scheduler_name, 
+            **kwargs
         )
         self.predictor = NoisePredictor(**kwargs)
         self.vae = VaeModel(**kwargs) if is_latent_model else None
@@ -47,10 +46,6 @@ class DiffusionModel:
     @property
     def device(self):
         return self.predictor.device
-
-    @property
-    def model_type(self):
-        return self.key.model_type
 
     @property
     def sample_size(self):

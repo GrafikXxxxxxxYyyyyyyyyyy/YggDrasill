@@ -6,6 +6,7 @@ from diffusers.utils import BaseOutput
 from diffusers.image_processor import VaeImageProcessor, PipelineImageInput
 
 from ..models.vae_model import VaeModel
+from ..diffusion_model import DiffusionModelKey
 
 
 @dataclass
@@ -28,11 +29,21 @@ class VaePipelineOutput(BaseOutput):
 
 
 class VaePipeline:
+    vae: Optional[VaeModel] = None
+
+    def __init__(
+        self,
+        model_key: Optional[DiffusionModelKey] = None,
+        **kwargs,
+    ):
+        if model_key is not None:
+            self.vae = VaeModel(**model_key)
+
+
     def pre_post_process(
         self, 
         width: Optional[int] = None,
         height: Optional[int] = None,
-        vae: Optional[VaeModel] = None,
         image: Optional[PipelineImageInput] = None,
         generator: Optional[torch.Generator] = None,
         mask_image: Optional[PipelineImageInput] = None,
@@ -44,19 +55,19 @@ class VaePipeline:
         2) Кодирует картинку (и маски) в латентное представление
         3) Декодирует пришедшие на вход латентные представления
         """
-        use_vae = True if vae is not None else False
+        use_vae = True if self.vae is not None else False
 
         # Инициализируем необходимые классы
         image_processor = VaeImageProcessor(
             vae_scale_factor=(
-                vae.scale_factor
+                self.vae.scale_factor
                 if use_vae else
                 1
             )
         )
         mask_processor = VaeImageProcessor(
             vae_scale_factor=(
-                vae.scale_factor
+                self.vae.scale_factor
                 if use_vae else
                 1
             ), 
@@ -83,7 +94,7 @@ class VaePipeline:
                 # Возвращает либо латентное представление картинки
                 # либо запроцешенную картинку
                 image_latents = (
-                    vae(
+                    self.vae(
                         images=image,
                         generator=generator,
                     )[0]
@@ -103,8 +114,8 @@ class VaePipeline:
                     torch.nn.functional.interpolate(
                         mask_image, 
                         size=(
-                            height // vae.scale_factor, 
-                            width // vae.scale_factor
+                            height // self.vae.scale_factor, 
+                            width // self.vae.scale_factor
                         )
                     )
                     if use_vae else
@@ -112,7 +123,7 @@ class VaePipeline:
                 )
 
                 masked_image_latents = (
-                    vae(
+                    self.vae(
                         images=masked_image,
                         generator=generator,
                     )[0]
@@ -122,36 +133,34 @@ class VaePipeline:
 
         if latents is not None:
             images = (
-                vae(latents=latents)[1]
+                self.vae(latents=latents)[1]
                 if use_vae else
                 latents
             )
             output.images = image_processor.postprocess(images.detach())
 
         
-        return images, mask_latents, image_latents, masked_image_latents
+        return VaePipelineOutput(
+            images=images,
+            mask_latents=mask_latents,
+            image_latents=image_latents,
+            masked_image_latents=masked_image_latents
+        )
     
 
 
     def __call__(
         self, 
         input: VaePipelineInput,
+        vae: Optional[VaeModel] = None,
         **kwargs,
     ) -> VaePipelineOutput:  
         print("VaePipeline --->")
-    
-        (
-            images, 
-            mask_latents, 
-            image_latents, 
-            masked_image_latents,
-        ) = self.pre_post_process(**input)
 
-        return VaePipelineOutput(
-            images=images,
-            mask_latents=mask_latents,
-            image_latents=image_latents,
-            masked_image_latents=masked_image_latents,
-        )
+        if vae is not None:
+            self.vae = vae
+    
+        return self.pre_post_process(**input)
+
 
 

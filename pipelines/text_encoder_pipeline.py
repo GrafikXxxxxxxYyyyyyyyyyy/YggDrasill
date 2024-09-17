@@ -6,13 +6,14 @@ from typing import List, Optional, Union, Dict, Any
 
 from .pipelines.clip_te_pipeline import (
     CLIPTextEncoderPipeline, 
-    CLIPTextEncoderPipelineInput
+    CLIPTextEncoderPipelineInput,
+    CLIPTextEncoderPipelineOutput,
 )
 # from .pipelines.transformer_te_pipeline import (
 #     TransformerTextEncoderPipeline,
 #     TransformerTextEncoderPipelineInput,
 # )
-from ..models.text_encoder_model import TextEncoderModel
+from ..stable_diffusion_model import TextEncoderModel, StableDiffusionModelKey
 
 
 @dataclass
@@ -36,10 +37,23 @@ class TextEncoderPipelineOutput(BaseOutput):
 
 class TextEncoderPipeline(
     CLIPTextEncoderPipeline,
-):
+    # TransformerTextEncoderPipeline
+):  
+    text_encoder: Optional[TextEncoderModel] = None
+
+    def __init__(
+        self,
+        model_key: Optional[StableDiffusionModelKey] = None,
+        **kwargs,
+    ):
+        if model_key is not None:
+            self.text_encoder = TextEncoderModel(**model_key)
+            self.clip_encoder = self.text_encoder.clip_encoder
+
+
+
     def get_prompt_embeddings(
         self,
-        text_encoder: TextEncoderModel,
         num_images_per_prompt: int = 1,
         clip_skip: Optional[int] = None,
         lora_scale: Optional[float] = None,
@@ -73,7 +87,6 @@ class TextEncoderPipeline(
         
         if "2. Получаем эмбеддинги с моделей":
             clip_output = self.encode_clip_prompt(
-                text_encoder.clip_encoder,
                 prompt = prompt,
                 prompt_2 = prompt_2,
                 clip_skip = clip_skip,
@@ -87,7 +100,6 @@ class TextEncoderPipeline(
             # И применяем инструкции cfg если необходимо
             if do_cfg:
                 negative_clip_output = self.encode_clip_prompt(
-                    text_encoder.clip_encoder,
                     prompt = negative_prompt,
                     prompt_2 = negative_prompt_2,
                     clip_skip = clip_skip,
@@ -134,17 +146,17 @@ class TextEncoderPipeline(
 
     def __call__(
         self,
-        text_encoder: TextEncoderModel,
         input: TextEncoderPipelineInput,
+        text_encoder: Optional[TextEncoderModel] = None,
         **kwargs,
     ) -> TextEncoderPipelineOutput:
         print("TextEncoderPipeline --->")
 
+        if text_encoder is not None:
+            self.text_encoder = text_encoder
+            self.clip_encoder = text_encoder.clip_encoder
 
-        return self.get_prompt_embeddings(
-            text_encoder=text_encoder,
-            **input,
-        )
+        return self.get_prompt_embeddings(**input)
 
     
 

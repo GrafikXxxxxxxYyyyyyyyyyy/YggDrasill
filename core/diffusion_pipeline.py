@@ -7,16 +7,15 @@ from diffusers.utils import BaseOutput
 from diffusers.image_processor import PipelineImageInput
 
 from .pipelines.vae_pipeline import VaePipeline
-from .diffusion_model import DiffusionModel
 from .pipelines.forward_diffusion import (
     ForwardDiffusion,
     ForwardDiffusionInput,
 )
 from .pipelines.backward_diffusion import (
-    Conditions,
     BackwardDiffusion,
     BackwardDiffusionInput
 )
+from .diffusion_model import Conditions, DiffusionModel, DiffusionModelKey
 
 
 @dataclass
@@ -47,9 +46,23 @@ class DiffusionPipeline(
     Данный класс служит для того, чтобы выполнять полностью проход
     прямого и обратного диффузионного процессов и учитывать использование VAE
     """
+    diffuser: DiffusionModel
+
+    def __init__(
+        self,
+        model_key: Optional[DiffusionModelKey] = None,
+        **kwargs,
+    ):
+        if model_key is not None:
+            self.diffuser = DiffusionModel(**model_key)
+            self.vae = self.diffuser.vae
+            self.predictor = self.diffuser.predictor
+            self.scheduler = self.diffuser.scheduler
+
+
     def diffusion_process(
         self,
-        diffuser: DiffusionModel,
+        # diffuser: DiffusionModel,
         batch_size: int = 1,
         width: Optional[int] = None,
         height: Optional[int] = None,
@@ -67,7 +80,6 @@ class DiffusionPipeline(
             image_latents, 
             masked_image_latents,
         ) = self.pre_post_process(
-            vae = diffuser.vae,
             width = width,
             height = height,
             image = image,
@@ -82,8 +94,8 @@ class DiffusionPipeline(
         if initial_image is not None:
             width, height = initial_image.shape[2:]
         else:
-            width = width or diffuser.sample_size
-            height = height or diffuser.sample_size
+            width = width or self.diffuser.sample_size
+            height = height or self.diffuser.sample_size
 
         
         # Учитываем CFG для масок и картинок
@@ -115,7 +127,7 @@ class DiffusionPipeline(
         forward_output = self.forward_pass(
             shape=(
                 batch_size,
-                diffuser.num_channels,
+                self.diffuser.num_channels,
                 width,
                 height,
             ),
@@ -124,7 +136,7 @@ class DiffusionPipeline(
 
 
 
-        conditions = diffuser(
+        conditions = self.diffuser(
             batch_size=batch_size,
             do_cfg=self.do_cfg,
             width=width,
@@ -146,7 +158,7 @@ class DiffusionPipeline(
             print(f"Step: {t}")
             backward_input.timestep = t
             backward_input = self.backward_step(
-                diffuser.predictor,
+                # diffuser.predictor,
                 **backward_input
             )
             print(f"Back step: {t}")
@@ -156,7 +168,6 @@ class DiffusionPipeline(
 
         
         images, _ = self.pre_post_process(
-            vae=diffuser.vae,
             latents=backward_input.noisy_sample,
         )
 
@@ -175,7 +186,9 @@ class DiffusionPipeline(
     ):  
         print("DiffusionPipeline --->")
 
+        self.diffuser = diffuser
+
         return self.diffusion_process(
-            diffuser=diffuser,
+            # diffuser=diffuser,
             **input,
         )
