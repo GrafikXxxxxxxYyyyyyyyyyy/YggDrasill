@@ -38,15 +38,15 @@ class DiffusionModel(
         **kwargs,
     ):  
     # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #
-        # Инитим основную модель предсказания шума
-        NoisePredictor.__init__(
-            self, 
-            **kwargs
-        )
         # Инитим self.scheduler 
         NoiseScheduler.__init__(
             self, 
             scheduler_name=scheduler_name,
+            **kwargs
+        )
+        # Инитим основную модель предсказания шума
+        NoisePredictor.__init__(
+            self, 
             **kwargs
         )
         # Если необходимо инитим self.vae
@@ -67,7 +67,7 @@ class DiffusionModel(
     @property
     def sample_size(self):
         return (
-            self.predictor.config.sample_size * self.vae.scale_factor
+            self.predictor.config.sample_size * self.vae_scale_factor
             if self.vae is not None else
             self.predictor.config.sample_size    
         )

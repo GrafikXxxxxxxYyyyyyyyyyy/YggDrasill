@@ -115,7 +115,7 @@ class VaeModel:
         return images
 
 
-    def pre_or_post_process(
+    def get_processed_latents_or_images(
         self,
         images: Optional[torch.FloatTensor] = None,
         latents: Optional[torch.FloatTensor] = None,
@@ -155,7 +155,7 @@ class VaeModel:
         Получает на вход изображение и/или латенты 
         В зависимости от входа кодирует и/или декодирует данные
         """
-        return self.pre_or_post_process(
+        return self.get_processed_latents_or_images(
             images=images,
             latents=latents,
             generator=generator,

@@ -17,7 +17,12 @@ class BackwardDiffusionInput(BaseOutput):
 
 
 class BackwardDiffusion(NoiseScheduler):
-    predictor: Optional[NoisePredictor] = None
+    model: Optional[NoisePredictor] = None
+
+    do_cfg: bool = False
+    guidance_scale: float = 5.0
+    mask_sample: Optional[torch.FloatTensor] = None
+    masked_sample: Optional[torch.FloatTensor] = None
 
     def __init__(
         self,
@@ -30,12 +35,13 @@ class BackwardDiffusion(NoiseScheduler):
     ):  
         if model_key is not None:
             super().__init__(**model_key)
-            self.predictor = NoisePredictor(**model_key)
+            self.model = NoisePredictor(**model_key)
 
         self.do_cfg = do_cfg
         self.guidance_scale = guidance_scale
         self.mask_sample = mask_sample
         self.masked_sample = masked_sample
+
 
 
     def backward_step(
@@ -62,27 +68,25 @@ class BackwardDiffusion(NoiseScheduler):
 
         # Конкатит маску и маскированную картинку для inpaint модели
         if (
-            self.predictor.is_inpainting_model
+            self.model.is_inpainting_model
             and self.mask_sample is not None
             and self.masked_sample is not None
         ):
             model_input = torch.cat([model_input, self.mask_sample, self.masked_sample], dim=1)   
         
-        print(f"Step: {timestep}")
         # Получаем предсказание шума
-        noise_predict = self.predictor(
+        noise_predict = self.model.get_noise_predict(
             timestep=timestep,
             noisy_sample=model_input,
             conditions=conditions,
         )
-        print(f"Back step: {timestep}")
 
         # Учитываем CFG
         if self.do_cfg:
             negative_noise_pred, noise_pred = noise_predict.chunk(2)
             noise_predict = self.guidance_scale * (noise_pred - negative_noise_pred) + negative_noise_pred
 
-        # Делаем шаг расшумления изображения 
+        # Делает шаг расшумления изображения 
         less_noisy_sample = self.scheduler.step(
             timestep=timestep,
             sample=noisy_sample,
@@ -108,8 +112,11 @@ class BackwardDiffusion(NoiseScheduler):
         """
         print("BackwardDiffusion --->")
 
-        if predictor is not None:
-            self.predictor = predictor
+        if (
+            predictor is not None
+            and isinstance(predictor, NoisePredictor)    
+        ):
+            self.model = predictor
 
         return self.backward_step(**input)
 

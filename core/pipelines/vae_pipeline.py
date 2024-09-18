@@ -29,7 +29,7 @@ class VaePipelineOutput(BaseOutput):
 
 
 class VaePipeline:
-    vae: Optional[VaeModel] = None
+    model: Optional[VaeModel] = None
 
     def __init__(
         self,
@@ -55,19 +55,23 @@ class VaePipeline:
         2) Кодирует картинку (и маски) в латентное представление
         3) Декодирует пришедшие на вход латентные представления
         """
-        use_vae = True if self.vae is not None else False
+        use_vae = (
+            True 
+            if hasattr(self.model, "vae") and self.model.vae is not None else
+            False
+        )
 
         # Инициализируем необходимые классы
         image_processor = VaeImageProcessor(
             vae_scale_factor=(
-                self.vae.scale_factor
+                self.model.vae_scale_factor
                 if use_vae else
                 1
             )
         )
         mask_processor = VaeImageProcessor(
             vae_scale_factor=(
-                self.vae.scale_factor
+                self.model.vae_scale_factor
                 if use_vae else
                 1
             ), 
@@ -94,7 +98,7 @@ class VaePipeline:
                 # Возвращает либо латентное представление картинки
                 # либо запроцешенную картинку
                 image_latents = (
-                    self.vae(
+                    self.model.get_processed_latents_or_images(
                         images=image,
                         generator=generator,
                     )[0]
@@ -123,7 +127,7 @@ class VaePipeline:
                 )
 
                 masked_image_latents = (
-                    self.vae(
+                    self.model.get_processed_latents_or_images(
                         images=masked_image,
                         generator=generator,
                     )[0]
@@ -133,7 +137,9 @@ class VaePipeline:
 
         if latents is not None:
             images = (
-                self.vae(latents=latents)[1]
+                self.model.get_processed_latents_or_images(
+                    latents=latents
+                )[1]
                 if use_vae else
                 latents
             )

@@ -10,8 +10,10 @@ from ..models.noise_scheduler import NoiseScheduler
 
 @dataclass
 class ForwardDiffusionInput(BaseOutput):
+    device: str = "cuda"
     strength: float = 1.0
     num_inference_steps: int = 30
+    dtype: torch.dtype = torch.float16
     timesteps: Optional[List[int]] = None
     denoising_end: Optional[float] = None
     denoising_start: Optional[float] = None
@@ -34,8 +36,10 @@ class ForwardDiffusion(NoiseScheduler):
     def forward_pass(
         self,
         shape: Tuple[int, int, int, int],
+        device: str = "cuda",
         strength: float = 1.0, 
         num_inference_steps: int = 30, 
+        dtype: torch.dtype = torch.float16,
         timesteps: Optional[List[int]] = None,
         denoising_end: Optional[float] = None,
         denoising_start: Optional[float] = None,
@@ -112,8 +116,8 @@ class ForwardDiffusion(NoiseScheduler):
                 noise = randn_tensor(
                     shape=shape,
                     generator=generator, 
-                    device=self.device, 
-                    dtype=self.dtype,
+                    device=device, 
+                    dtype=dtype,
                 )
 
                 # Добавляем шум к входным данным

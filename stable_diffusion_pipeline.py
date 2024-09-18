@@ -12,12 +12,10 @@ from .stable_diffusion_model import (
 from .core.diffusion_pipeline import (
     DiffusionPipeline, 
     DiffusionPipelineInput,
-    DiffusionPipelineOutput,
 )
 from .pipelines.text_encoder_pipeline import (
     TextEncoderPipeline,
     TextEncoderPipelineInput,
-    TextEncoderPipelineOutput,
 )
 
 
@@ -26,6 +24,8 @@ class StableDiffusionPipelineInput(BaseOutput):
     diffusion_input: DiffusionPipelineInput
     use_refiner: bool = False
     guidance_scale: float = 5.0
+    aesthetic_score: float = 6.0
+    negative_aesthetic_score: float = 2.5
     te_input: Optional[TextEncoderPipelineInput] = None
 
 
@@ -39,40 +39,35 @@ class StableDiffusionPipeline(
     DiffusionPipeline,
     TextEncoderPipeline,  
 ):  
-    sd: StableDiffusionModel
+    model: Optional[StableDiffusionModel] = None
 
     def __init__(
         self,
+            # use_refiner: bool = False,
+            # refiner_steps: Optional[int] = None,
+            # refiner_scale: Optional[float] = None,
         model_key: Optional[StableDiffusionModelKey] = None,
         **kwargs,
     ):
         if model_key is not None:
-            self.sd = StableDiffusionModel(**model_key)
-            self.diffuser = self.sd.diffuser
-            self.text_encoder = self.sd.text_encoder
-            self.vae = self.sd.diffuser.vae
-            self.predictor = self.sd.diffuser.predictor
-            self.scheduler = self.sd.diffuser.scheduler
+            self.model = StableDiffusionModel(**model_key)
+            self.device = self.model.device
+            self.dtype = self.model.dtype
 
 
-    def __call__(
+    def stable_diffusion_process(
         self,
-        model: StableDiffusionModel,
         diffusion_input: DiffusionPipelineInput,
-        te_input: Optional[TextEncoderPipelineInput] = None,
         use_refiner: bool = False,
         guidance_scale: float = 5.0,
-            # refiner_steps: Optional[int] = None,
-            # refiner_scale: Optional[float] = None,
         aesthetic_score: float = 6.0,
         negative_aesthetic_score: float = 2.5,
+        te_input: Optional[TextEncoderPipelineInput] = None,
         **kwargs,
     ):
-        print("StableDiffusionPipeline --->")
-
         if "1. Собираем и преобразуем обуславливающую информацию":
-            if model.text_encoder is not None and te_input is not None:
-                te_output = self.get_prompt_embeddings(**te_input)
+            if self.model.use_text_encoder is not None and te_input is not None:
+                te_output = self.encode_prompt(**te_input)
 
                 self.do_cfg = te_output.do_cfg
                 self.guidance_scale = guidance_scale
@@ -82,7 +77,7 @@ class StableDiffusionPipeline(
 
         # Вызываем модель с доп аргументами, чтобы создать из эмбеддингов
         # входы для диффузионной модели
-        conditions = self.sd(
+        conditions = self.model.get_conditions(
             te_output=te_output,
             use_refiner=use_refiner,
             aesthetic_score=aesthetic_score,
@@ -98,11 +93,27 @@ class StableDiffusionPipeline(
         if "2. Учитывая переданные аргументы, используем полученный/ые пайплайны":
             diffusion_output = self.diffusion_process(**diffusion_input)
 
-        
 
         return StableDiffusionPipelineOutput(
             images=diffusion_output.images
-        )
+        )  
+
+
+    def __call__(
+        self,
+        input: StableDiffusionPipelineInput,
+        model: Optional[StableDiffusionModel] = None,
+        **kwargs,
+    ):
+        print("StableDiffusionPipeline --->")
+
+        if (
+            model is not None 
+            and isinstance(model, StableDiffusionModel)
+        ):
+            self.model = model
+
+        return self.stable_diffusion_process(**input)
 
 
 

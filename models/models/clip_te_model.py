@@ -99,17 +99,6 @@ class CLIPTextEncoderModel:
         self.text_encoder_1 = self.text_encoder_1.to(device, dtype=dtype)
         if hasattr(self, "text_encoder_2") and self.text_encoder_2 is not None:
             self.text_encoder_2 = self.text_encoder_2.to(device, dtype=dtype)
-
-    def reload(self, 
-        model_type: str,
-        model_path: str,
-        device: str = "cuda",
-    ):
-        self.__init__(
-            model_path=model_path,
-            model_type=model_type, 
-            device=self.device,
-        )
     # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #
 
 

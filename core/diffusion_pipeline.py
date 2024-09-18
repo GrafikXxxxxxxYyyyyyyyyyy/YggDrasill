@@ -46,7 +46,11 @@ class DiffusionPipeline(
     Данный класс служит для того, чтобы выполнять полностью проход
     прямого и обратного диффузионного процессов и учитывать использование VAE
     """
-    diffuser: DiffusionModel
+    model: Optional[DiffusionModel] = None
+
+    use_refiner: bool = False,
+    aesthetic_score: float = 6.0
+    negative_aesthetic_score: float = 2.5
 
     def __init__(
         self,
@@ -54,10 +58,7 @@ class DiffusionPipeline(
         **kwargs,
     ):
         if model_key is not None:
-            self.diffuser = DiffusionModel(**model_key)
-            self.vae = self.diffuser.vae
-            self.predictor = self.diffuser.predictor
-            self.scheduler = self.diffuser.scheduler
+            self.model = DiffusionModel(**model_key)
 
 
     def diffusion_process(
@@ -74,12 +75,7 @@ class DiffusionPipeline(
         **kwargs,
     ):  
         # Препроцессим выходные данные
-        (
-            _, 
-            mask_latents, 
-            image_latents, 
-            masked_image_latents,
-        ) = self.pre_post_process(
+        processor_output = self.pre_post_process(
             width = width,
             height = height,
             image = image,
@@ -87,20 +83,20 @@ class DiffusionPipeline(
             mask_image = mask_image,
         )
 
-        initial_image = image_latents
+        initial_image = processor_output.image_latents
 
 
         # Учитываем возможные пользовательские размеры изображений
         if initial_image is not None:
             width, height = initial_image.shape[2:]
         else:
-            width = width or self.diffuser.sample_size
-            height = height or self.diffuser.sample_size
+            width = width or self.model.sample_size
+            height = height or self.model.sample_size
 
         
         # Учитываем CFG для масок и картинок
-        if mask_latents is not None:
-            mask_latents = mask_latents.repeat(
+        if processor_output.mask_latents is not None:
+            mask_latents = processor_output.mask_latents.repeat(
                 batch_size // mask_latents.shape[0], 1, 1, 1
             )
             self.mask_sample = (
@@ -108,8 +104,8 @@ class DiffusionPipeline(
                 if self.do_cfg else
                 mask_latents
             )
-        if masked_image_latents is not None:
-            masked_image_latents = masked_image_latents.repeat(
+        if processor_output.masked_image_latents is not None:
+            masked_image_latents = processor_output.masked_image_latents.repeat(
                 batch_size // masked_image_latents.shape[0], 1, 1, 1
             )
             self.masked_sample = (
@@ -118,49 +114,48 @@ class DiffusionPipeline(
                 masked_image_latents
             )
 
-        
-        # Дополняем входы Forward пайпа и запускаем 
-        forward_input.sample = initial_image
-        forward_input.generator = generator
-        # forward_input.denoising_end = 
-        # forward_input.denoising_start = 
-        forward_output = self.forward_pass(
-            shape=(
-                batch_size,
-                self.diffuser.num_channels,
-                width,
-                height,
-            ),
-            **forward_input
-        )   
+
+        if "Выполняется ForwardDiffusion":
+            forward_input.generator = generator
+            forward_input.sample = initial_image
+            forward_input.dtype = self.model.dtype
+            forward_input.device = self.model.device
+            # forward_input.denoising_end = 
+            # forward_input.denoising_start = 
+            forward_output = self.forward_pass(
+                shape=(
+                    batch_size,
+                    self.diffuser.num_channels,
+                    width,
+                    height,
+                ),
+                **forward_input
+            )   
 
 
+        if "Возможно если будет использован контролнет, надо будет убрать это в цикл":
+            extended_conditions = self.model.get_extended_conditions(
+                batch_size=batch_size,
+                do_cfg=self.do_cfg,
+                width=width,
+                height=height,
+                conditions=conditions,
+            )
 
-        conditions = self.diffuser(
-            batch_size=batch_size,
-            do_cfg=self.do_cfg,
-            width=width,
-            height=height,
-            conditions=conditions,
-        )
+            #  Аналогично для Backward но в цикле
+            backward_input = BackwardDiffusionInput(
+                timestep=-1,
+                noisy_sample=forward_output.noisy_sample, 
+                conditions=extended_conditions,
+            )
 
-
-        #  Аналогично для Backward но в цикле
-        backward_input = BackwardDiffusionInput(
-            timestep=-1,
-            noisy_sample=forward_output.noisy_sample, 
-            # conditions=Conditions(**conditions),
-            conditions=conditions,
-        )
         for i, t in tqdm(enumerate(forward_output.timesteps)):
             # TODO: Добавить расширение условий за счёт ControlNet
             # <...>
+
             print(f"Step: {t}")
             backward_input.timestep = t
-            backward_input = self.backward_step(
-                # diffuser.predictor,
-                **backward_input
-            )
+            backward_input = self.backward_step(**backward_input)
             print(f"Back step: {t}")
             
             # TODO: Добавить обработку маски через image

@@ -53,21 +53,7 @@ class StableDiffusionModel(
 
 
     
-    # def get_conditions(
-    #     self,
-    #     use_refiner: bool = False,
-    #     aesthetic_score: float = 6.0,
-    #     negative_aesthetic_score: float = 2.5,
-    #     te_output: Optional[TextEncoderPipelineOutput] = None,
-    #     # ie_output: Optional[ImageEncoderPipelineOutput] = None,
-    #     **kwargs,
-    # ) -> Conditions:
-    #     pass
-
-
-
-    # ================================================================================================================ #
-    def __call__(
+    def get_conditions(
         self,
         use_refiner: bool = False,
         aesthetic_score: float = 6.0,
@@ -76,14 +62,6 @@ class StableDiffusionModel(
         # ie_output: Optional[ImageEncoderPipelineOutput] = None,
         **kwargs,
     ) -> Conditions:
-    # ================================================================================================================ #
-        """
-        Подготавливает нужную последовательность входных аргументов
-        и обуславливающих значений, соответсвующих заданной модели диффузии
-        Также перенастраивает саму модельку
-        """
-        print("StableDiffusionModel --->")
-
         # Устанавливаем собственные аргументы модели
         # TODO: Вот эту хуйню надо переделать
         self.maybe_switch_to_refiner(use_refiner)
@@ -96,6 +74,7 @@ class StableDiffusionModel(
         
         # Собираем текстовые и картиночные условия генерации
         conditions = Conditions()
+
         if te_output is not None:
             conditions.cross_attention_kwargs = te_output.cross_attention_kwargs
 
@@ -123,5 +102,27 @@ class StableDiffusionModel(
         
         
         return conditions
+
+
+
+    # ================================================================================================================ #
+    def __call__(
+        self,
+        use_refiner: bool = False,
+        aesthetic_score: float = 6.0,
+        negative_aesthetic_score: float = 2.5,
+        te_output: Optional[TextEncoderPipelineOutput] = None,
+        # ie_output: Optional[ImageEncoderPipelineOutput] = None,
+        **kwargs,
+    ) -> Conditions:
+    # ================================================================================================================ #
+        """
+        Подготавливает нужную последовательность входных аргументов
+        и обуславливающих значений, соответсвующих заданной модели диффузии
+        Также перенастраивает саму модельку
+        """
+        print("StableDiffusionModel --->")
+
+        return self.get_conditions()
     # ================================================================================================================ #
         
