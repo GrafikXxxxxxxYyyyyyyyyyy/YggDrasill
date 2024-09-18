@@ -22,6 +22,9 @@ class DiffusionModel(
     NoisePredictor,
     DiffusionModelKey
 ):
+    """
+    
+    """
     use_refiner: bool = False
     aesthetic_score: float = 6.0
     negative_aesthetic_score: float = 2.5
@@ -143,7 +146,7 @@ class DiffusionModel(
         return add_time_ids, add_neg_time_ids
 
 
-    def internal_conditioning(
+    def get_extended_conditions(
         self,
         batch_size: int = 1,
         do_cfg: bool = False,
@@ -203,6 +206,6 @@ class DiffusionModel(
     # ================================================================================================================ #
         print("DiffusionModel --->")
 
-        return self.internal_conditioning(**kwargs)
+        return self.get_extended_conditions(**kwargs)
     # ================================================================================================================ #
     

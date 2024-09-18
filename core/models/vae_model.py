@@ -45,7 +45,7 @@ class VaeModel:
         return self.vae.device
 
     @property
-    def scale_factor(self) -> int:
+    def vae_scale_factor(self) -> int:
         return 2 ** (len(self.config.block_out_channels) - 1)
     # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #
 
@@ -136,7 +136,6 @@ class VaeModel:
         
         return encoded_images, decoded_images
     # ################################################################################################################ #
-
 
 
 

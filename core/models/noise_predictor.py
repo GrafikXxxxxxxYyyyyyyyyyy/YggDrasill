@@ -107,7 +107,7 @@ class NoisePredictor(ModelKey):
 
 
     # TODO: Переделать метод так, чтобы собирал сразу мапу аргов под нужную архитектуру модели
-    def conditioned_noise_predict(
+    def get_noise_predict(
         self,
         timestep: int,
         noisy_sample: torch.FloatTensor,
@@ -161,7 +161,7 @@ class NoisePredictor(ModelKey):
         Выполняет шаг предсказания шума на метке t для любого
         типа входных данных любой из имеющихся моделей
         """
-        return self.conditioned_noise_predict(
+        return self.get_noise_predict(
             timestep=timestep,
             conditions=conditions,
             noisy_sample=noisy_sample,
