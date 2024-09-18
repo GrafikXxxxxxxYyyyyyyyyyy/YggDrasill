@@ -9,12 +9,9 @@ from .pipelines.clip_te_pipeline import (
     CLIPTextEncoderPipelineInput,
     CLIPTextEncoderPipelineOutput,
 )
-# from .pipelines.transformer_te_pipeline import (
-#     TransformerTextEncoderPipeline,
-#     TransformerTextEncoderPipelineInput,
-# )
 from ..models.text_encoder_model import TextEncoderModel
-from ..stable_diffusion_model import StableDiffusionModelKey
+# from ..stable_diffusion_model import StableDiffusionModelKey
+
 
 
 @dataclass
@@ -22,6 +19,7 @@ class TextEncoderPipelineInput(CLIPTextEncoderPipelineInput):
     prompt: Optional[Union[str, List[str]]] = None,
     negative_prompt: Optional[Union[str, List[str]]] = None
     negative_prompt_2: Optional[Union[str, List[str]]] = None
+
 
 
 @dataclass
@@ -40,20 +38,18 @@ class TextEncoderPipeline(
     CLIPTextEncoderPipeline,
     # TransformerTextEncoderPipeline
 ):  
-    text_encoder: Optional[TextEncoderModel] = None
+    model: Optional[TextEncoderModel] = None
 
     def __init__(
         self,
-        model_key: Optional[StableDiffusionModelKey] = None,
+        model_key = None,
         **kwargs,
     ):
         if model_key is not None:
-            self.text_encoder = TextEncoderModel(**model_key)
-            self.clip_encoder = self.text_encoder.clip_encoder
+            self.model = TextEncoderModel(**model_key)
 
 
-
-    def get_prompt_embeddings(
+    def encode_prompt(
         self,
         num_images_per_prompt: int = 1,
         clip_skip: Optional[int] = None,
@@ -116,22 +112,14 @@ class TextEncoderPipeline(
                 print(clip_output.prompt_embeds_2.shape)
                 print(clip_output.pooled_prompt_embeds.shape)
 
-
-            # Получаем эмбеддинги с модели Transformer
-            # if text_encoder.transformer_encoder is not None:
-            #     transformer_pipeline = TransformerTextEncoderPipeline()
-            #     output.t5_embeds = transformer_pipeline(
-            #         text_encoder.transformer_encoder,
-            #         **te_input,
-            #     )
-
+            # TODO: Получаем эмбеддинги с модели Transformer
+            # <...>
 
         cross_attention_kwargs = (
             {"scale": lora_scale}
             if lora_scale is not None else
             None
         )
-
 
         return TextEncoderPipelineOutput(
             do_cfg=do_cfg,
@@ -143,7 +131,6 @@ class TextEncoderPipeline(
         )
     
     
-    
 
     def __call__(
         self,
@@ -153,11 +140,15 @@ class TextEncoderPipeline(
     ) -> TextEncoderPipelineOutput:
         print("TextEncoderPipeline --->")
 
-        if text_encoder is not None:
-            self.text_encoder = text_encoder
-            self.clip_encoder = text_encoder.clip_encoder
+        # Если на вход передана модель, то устанавливаем её в качестве собственной
+        if (
+            text_encoder is not None 
+            and isinstance(text_encoder, TextEncoderModel)
+        ):
+            self.model = text_encoder
 
-        return self.get_prompt_embeddings(**input)
+
+        return self.encode_prompt(**input)
 
     
 

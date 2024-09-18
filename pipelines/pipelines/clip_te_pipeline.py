@@ -4,8 +4,8 @@ from dataclasses import dataclass
 from typing import List, Optional, Union
 from diffusers.utils import BaseOutput
 
-from ...stable_diffusion_model import StableDiffusionModelKey
 from ...models.models.clip_te_model import CLIPTextEncoderModel
+
 
 
 @dataclass
@@ -17,6 +17,7 @@ class CLIPTextEncoderPipelineInput(BaseOutput):
     prompt_2: Optional[Union[str, List[str]]] = None
 
 
+
 @dataclass
 class CLIPTextEncoderPipelineOutput(BaseOutput):
     prompt_embeds_1: torch.FloatTensor
@@ -26,15 +27,20 @@ class CLIPTextEncoderPipelineOutput(BaseOutput):
 
 
 class CLIPTextEncoderPipeline:
-    clip_encoder: Optional[CLIPTextEncoderModel] = None
+    model: Optional[CLIPTextEncoderModel] = None
 
     def __init__(
         self,
-        model_key: Optional[StableDiffusionModelKey] = None,
+        # model_key: Optional[StableDiffusionModelKey] = None,
+        model_key = None,
         **kwargs,
     ):
+        """
+        Если на вход передан ModelKey то инициализирует из него собственную внутренню 
+        модель, которую и использует
+        """
         if model_key is not None:
-            self.clip_encoder = CLIPTextEncoderModel(**model_key)
+            self.model = CLIPTextEncoderModel(**model_key)
 
 
     def encode_clip_prompt(
@@ -45,12 +51,12 @@ class CLIPTextEncoderPipeline:
         lora_scale: Optional[float] = None,
         prompt_2: Optional[List[str]] = None,
     ) -> CLIPTextEncoderPipelineOutput:  
-        # Получаем выходы всех энкодеров модели
+        # Получаем выходы всех энкодеров модели через .get_clip_embeddings()
         (
             prompt_embeds_1, 
             prompt_embeds_2, 
             pooled_prompt_embeds
-        ) = self.clip_encoder(
+        ) = self.model.get_clip_embeddings(
             prompt=prompt,
             prompt_2=prompt_2,
             clip_skip=clip_skip,
@@ -87,8 +93,13 @@ class CLIPTextEncoderPipeline:
     ) -> CLIPTextEncoderPipelineOutput:  
         print("CLIPTextEncoderPipeline --->")
 
-        if clip_encoder is not None:
-            self.clip_encoder = clip_encoder
+        # Если на вход передана модель, то устанавливаем её в качестве собственной
+        if (
+            clip_encoder is not None 
+            and isinstance(clip_encoder, CLIPTextEncoderModel)
+        ):
+            self.model = clip_encoder
+            
         
         return self.encode_clip_prompt(**input)
     

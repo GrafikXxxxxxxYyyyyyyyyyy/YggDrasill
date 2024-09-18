@@ -5,7 +5,7 @@ from transformers import (
     CLIPTokenizer,
     CLIPTextModelWithProjection,
 )
-from typing import Any, Dict, List, Optional, Union
+from typing import List, Optional, Union
 from diffusers.utils.peft_utils import scale_lora_layers, unscale_lora_layers
 
 
@@ -78,10 +78,10 @@ class CLIPTextEncoderModel:
             raise ValueError(f"Unknown model_type '{self.type}'")   
         self.to(device)
 
-        # Инитим константы
-        self.path = model_path
-        self.type = model_type
+        self.model_type = model_type
+
         print(f"TextEncoder model has successfully loaded from '{model_path}' checkpoint!")
+
 
     @property
     def device(self):
@@ -114,12 +114,8 @@ class CLIPTextEncoderModel:
 
 
 
-    # # TODO: Прикрутить механизм использования лор, как для инференса так и для обучения
-
-
-
-    # ================================================================================================================ #
-    def __call__(
+    # Вынесем в отдельный метод, который будет подтягиваться в методе call
+    def get_clip_embeddings(
         self,
         prompt: List[str],
         clip_skip: Optional[int] = None,
@@ -127,14 +123,6 @@ class CLIPTextEncoderModel:
         prompt_2: Optional[List[str]] = None,
         **kwargs,
     ):
-    # ================================================================================================================ #
-        """
-        Вызов модели возвращает закодированные представления со всех 
-        используемых текстовых моделей
-        """
-        print("CLIPTextEncoderModel --->")
-
-
         if lora_scale is not None:
             scale_lora_layers(self.text_encoder_1, lora_scale) 
             if hasattr(self, "text_encoder_2") and self.text_encoder_2 is not None:
@@ -155,7 +143,7 @@ class CLIPTextEncoderModel:
             output_hidden_states=True
         )
 
-        if self.type == "sd15":
+        if self.model_type == "sd15":
             prompt_embeds_1 = (
                 # We also need to apply the final LayerNorm here to not mess with the
                 # representations. The `last_hidden_states` that we typically use for
@@ -208,6 +196,38 @@ class CLIPTextEncoderModel:
             if hasattr(self, "text_encoder_2") and self.text_encoder_2 is not None:
                 unscale_lora_layers(self.text_encoder_2, lora_scale) 
         
+
+        return prompt_embeds_1, prompt_embeds_2, pooled_prompt_embeds
+
+
+
+    # ================================================================================================================ #
+    def __call__(
+        self,
+        prompt: List[str],
+        clip_skip: Optional[int] = None,
+        lora_scale: Optional[float] = None,
+        prompt_2: Optional[List[str]] = None,
+        **kwargs,
+    ):
+    # ================================================================================================================ #
+        """
+        Вызов модели возвращает закодированные представления со всех 
+        используемых текстовых моделей
+        """
+        print("CLIPTextEncoderModel --->")
+
+        (
+            prompt_embeds_1, 
+            prompt_embeds_2, 
+            pooled_prompt_embeds
+        ) = self.get_clip_embeddings(
+            prompt=prompt,
+            prompt_2=prompt_2,
+            clip_skip=clip_skip,
+            lora_scale=lora_scale,
+            **kwargs,
+        )        
 
         return prompt_embeds_1, prompt_embeds_2, pooled_prompt_embeds
     # ================================================================================================================ #

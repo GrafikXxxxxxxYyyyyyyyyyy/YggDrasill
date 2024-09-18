@@ -6,10 +6,9 @@ from .models.clip_te_model import CLIPTextEncoderModel
 
 
 
-class TextEncoderModel:
-    clip_encoder: CLIPTextEncoderModel
-    # t5_encoder: Optional[TransformerModel] = None
-
+class TextEncoderModel(
+    CLIPTextEncoderModel
+):
     def __init__(
         self,
         model_path: str,
@@ -18,12 +17,13 @@ class TextEncoderModel:
         dtype: torch.dtype = torch.float16,
         **kwargs,
     ) -> None:  
-        # Инитим модель CLIP
-        self.clip_encoder = CLIPTextEncoderModel(
+        # В любом случае инитим clip энкодер
+        CLIPTextEncoderModel.__init__(
+            self, 
+            dtype=dtype,
+            device=device,
             model_path=model_path,
             model_type=model_type,
-            device=device,
-            dtype=dtype,
         )
 
         # self.transformer_encoder = 
@@ -32,4 +32,5 @@ class TextEncoderModel:
         self.model_type = model_type or "sd15"
 
 
+    # def __call__ 
     
