@@ -5,6 +5,7 @@ from diffusers.utils import BaseOutput
 from typing import List, Optional, Tuple
 from diffusers.utils.torch_utils import randn_tensor
 
+from ..models.noise_predictor import ModelKey
 from ..models.noise_scheduler import NoiseScheduler
 
 
@@ -29,10 +30,34 @@ class ForwardDiffusionOutput(BaseOutput):
 
 
 
-class ForwardDiffusion(NoiseScheduler):
+class ForwardDiffusion:
     """
     Данный пайплайн выполняет процедуру прямого диффузионного процесса 
+
+    При чем всегда планировщиком самой модели
     """
+    model: Optional[NoiseScheduler] = None
+    
+    denoising_end: Optional[float] = None,
+    denoising_start: Optional[float] = None,
+
+
+
+    def __init__(
+        self,
+        model_key: Optional[ModelKey] = None,
+        scheduler_name: Optional[str] = None,
+        **kwargs,
+    ):
+        if model_key is not None:
+            self.model = NoiseScheduler(
+                scheduler_name=scheduler_name,
+                **model_key
+            )
+
+
+
+    # TODO: Разбить это на 3 отдельные функции для понятности
     def forward_pass(
         self,
         shape: Tuple[int, int, int, int],
@@ -54,8 +79,8 @@ class ForwardDiffusion(NoiseScheduler):
             init_timestep = min(int(num_inference_steps * strength), num_inference_steps)
             t_start = max(num_inference_steps - init_timestep, 0)
             # Устанавливаются шаги и возвращаются с учтенной силой
-            self.scheduler.set_timesteps(num_inference_steps, device=self.device)
-            timesteps = self.scheduler.timesteps[t_start * self.scheduler.order :]
+            self.model.scheduler.set_timesteps(num_inference_steps, device=device)
+            timesteps = self.model.scheduler.timesteps[t_start * self.model.scheduler.order :]
             num_inference_steps = len(timesteps)
 
         
@@ -68,11 +93,12 @@ class ForwardDiffusion(NoiseScheduler):
             ):
                 discrete_timestep_cutoff = int(
                     round(
-                        self.num_train_timesteps - (denoising_start * self.num_train_timesteps)
+                        self.model.num_train_timesteps 
+                        - (denoising_start * self.model.num_train_timesteps)
                     )
                 )
                 num_inference_steps = (timesteps < discrete_timestep_cutoff).sum().item()
-                if self.order == 2 and num_inference_steps % 2 == 0:
+                if self.model.scheduler.order == 2 and num_inference_steps % 2 == 0:
                     num_inference_steps = num_inference_steps + 1
                 # because t_n+1 >= t_n, we slice the timesteps starting from the end
                 timesteps = timesteps[-num_inference_steps:]
@@ -100,7 +126,8 @@ class ForwardDiffusion(NoiseScheduler):
             ):
                 discrete_timestep_cutoff = int(
                     round(
-                        self.num_train_timesteps - (denoising_end * self.num_train_timesteps)
+                        self.model.num_train_timesteps 
+                        - (denoising_end * self.model.num_train_timesteps)
                     )
                 )
                 num_inference_steps = len(list(filter(lambda ts: ts >= discrete_timestep_cutoff, timesteps)))
@@ -122,16 +149,17 @@ class ForwardDiffusion(NoiseScheduler):
 
                 # Добавляем шум к входным данным
                 noisy_sample = (
-                    self.scheduler.add_noise(sample, noise, initial_timestep)
+                    self.model.scheduler.add_noise(sample, noise, initial_timestep)
                     if sample is not None and not is_strength_max else
                     # scale the initial noise by the standard deviation required by the scheduler
-                    noise * self.scale_factor
+                    noise * self.model.scheduler.init_noise_sigma
                 )
 
             return ForwardDiffusionOutput(
                 timesteps=timesteps,
                 noisy_sample=noisy_sample,
             )
+
 
 
     def __call__(

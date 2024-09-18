@@ -125,7 +125,7 @@ class DiffusionPipeline(
             forward_output = self.forward_pass(
                 shape=(
                     batch_size,
-                    self.diffuser.num_channels,
+                    self.model.num_channels,
                     width,
                     height,
                 ),

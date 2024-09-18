@@ -88,7 +88,7 @@ class CLIPTextEncoderModel:
         return self.text_encoder_1.device
 
     @property
-    def text_encoder_projection_dim(self):
+    def projection_dim(self):
         return (
             self.text_encoder_2.config.projection_dim 
             if hasattr(self, "text_encoder_2") else

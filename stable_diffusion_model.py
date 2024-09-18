@@ -67,9 +67,9 @@ class StableDiffusionModel(
         self.maybe_switch_to_refiner(use_refiner)
         self.aesthetic_score = aesthetic_score
         self.negative_aesthetic_score = negative_aesthetic_score
-
-        # # Хуйня ниже кажется пропадает из-за наследования 
-        # self.text_encoder_projection_dim = self.text_encoder.clip_encoder.text_encoder_projection_dim
+        # Понадобилось так сделать, поскольку диффузионная модель
+        # и текстовая модель лежат на разных ветках 
+        self.text_encoder_projection_dim = self.projection_dim
 
         
         # Собираем текстовые и картиночные условия генерации

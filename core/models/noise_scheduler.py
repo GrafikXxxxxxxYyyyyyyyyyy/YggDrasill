@@ -86,17 +86,9 @@ class NoiseScheduler:
         
         self.scheduler_name = scheduler_name
         print(f"Scheduler has successfully changed to '{scheduler_name}'")
-
-
-    @property
-    def scale_factor(self):
-        return self.scheduler.init_noise_sigma
     
     @property
     def num_train_timesteps(self):
         return self.scheduler.config.num_train_timesteps
     
-    @property
-    def order(self):
-        return self.scheduler.order
 

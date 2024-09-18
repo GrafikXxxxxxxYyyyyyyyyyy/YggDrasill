@@ -16,7 +16,7 @@ class BackwardDiffusionInput(BaseOutput):
 
 
 
-class BackwardDiffusion(NoiseScheduler):
+class BackwardDiffusion:
     model: Optional[NoisePredictor] = None
 
     do_cfg: bool = False
