@@ -26,7 +26,7 @@ class VaeModel:
             variant='fp16', 
             use_safetensors=True
         )
-        self.to(device)
+        self.vae.to(device=device, dtype=dtype)
 
         self.model_path = model_path
         self.model_type = model_type or "sd15"
@@ -47,10 +47,6 @@ class VaeModel:
     @property
     def scale_factor(self) -> int:
         return 2 ** (len(self.config.block_out_channels) - 1)
-    
-
-    def to(self, device=None, dtype=None):
-        self.vae.to(device=device, dtype=dtype)
     # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #
 
 
@@ -117,6 +113,28 @@ class VaeModel:
         images = self.vae.decode(latents, return_dict=False)[0]
 
         return images
+
+
+    def pre_or_post_process(
+        self,
+        images: Optional[torch.FloatTensor] = None,
+        latents: Optional[torch.FloatTensor] = None,
+        generator: Optional[torch.Generator] = None,
+        **kwargs,
+    ) -> Tuple[
+        Optional[torch.FloatTensor],
+        Optional[torch.FloatTensor],
+    ]:
+        encoded_images = images
+        if images is not None:
+            images = images.to(device=self.device, dtype=self.dtype)
+            encoded_images = self.encode(images, generator)
+
+        decoded_images = latents
+        if latents is not None:
+            decoded_images = self.decode(latents)
+        
+        return encoded_images, decoded_images
     # ################################################################################################################ #
 
 
@@ -138,16 +156,12 @@ class VaeModel:
         Получает на вход изображение и/или латенты 
         В зависимости от входа кодирует и/или декодирует данные
         """
-        encoded_images = images
-        if images is not None:
-            images = images.to(device=self.device, dtype=self.dtype)
-            encoded_images = self.encode(images, generator)
-
-        decoded_images = latents
-        if latents is not None:
-            decoded_images = self.decode(latents)
-        
-        return encoded_images, decoded_images
+        return self.pre_or_post_process(
+            images=images,
+            latents=latents,
+            generator=generator,
+            **kwargs,
+        )
     # ================================================================================================================ #
 
 

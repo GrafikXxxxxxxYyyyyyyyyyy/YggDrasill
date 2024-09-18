@@ -11,12 +11,18 @@ from diffusers.utils import BaseOutput
 from typing import Optional, Union, Dict, Any
 
 
+
 @dataclass
 class ModelKey(BaseOutput):
+    """
+    Базовый класс для инициализации всех пайплайнов и
+    моделей которые используются в проекте
+    """
     dtype: torch.dtype = torch.float16
     device: str = "cuda"
     model_type: str = "sdxl"
     model_path: str = "GrafikXxxxxxxYyyyyyyyyyy/sdxl_Juggernaut"
+
 
 
 @dataclass
@@ -27,14 +33,12 @@ class Conditions(BaseOutput):
     """
     # UNet2DModel
     class_labels: Optional[torch.Tensor] = None
-
     # UNet2DConditionModel
     prompt_embeds: Optional[torch.Tensor] = None
     timestep_cond: Optional[torch.Tensor] = None
     attention_mask: Optional[torch.Tensor] = None
     cross_attention_kwargs: Optional[Dict[str, Any]] = None
     added_cond_kwargs: Optional[Dict[str, torch.Tensor]] = None
-    
     # ControlNet
     # ...
 
@@ -58,7 +62,6 @@ class NoisePredictor(ModelKey):
         **kwargs,
     ) -> None:  
     # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #
-        # TODO: Надо добавить выбор самых разных архитектур условных/безусловных/видео/звук(!)
         self.predictor = UNet2DConditionModel.from_pretrained(
             model_path, 
             subfolder='unet', 
@@ -66,7 +69,7 @@ class NoisePredictor(ModelKey):
             variant='fp16',
             use_safetensors=True
         )
-        self.to(device)
+        self.predictor.to(device=device, dtype=dtype)
 
         # Инитим константы
         self.model_path = model_path
@@ -88,10 +91,6 @@ class NoisePredictor(ModelKey):
     @property
     def is_latent_model(self):
         return self.predictor.config.in_channels == 4
-    
-    @property
-    def add_embed_dim(self):
-        return self.predictor.add_embedding.linear_1.in_features
 
     @property
     def is_inpainting_model(self):
@@ -100,43 +99,21 @@ class NoisePredictor(ModelKey):
             or self.predictor.config.in_channels == 7
         )
     
-
-    def to(
-        self, 
-        device=None,
-        dtype=None,
-    ):
-        self.predictor.to(device=device, dtype=dtype)
-
-
-    # def reload(
-    #     self, 
-    #     model_path: str,
-    #     model_type: Optional[str] = None,
-    #     device: str = "cuda",
-    # ):
-    #     self.__init__(
-    #         model_path=model_path,
-    #         device=device,
-    #         model_type=model_type, 
-    #     )
+    @property
+    def add_embed_dim(self):
+        return self.predictor.add_embedding.linear_1.in_features
     # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #
 
 
 
-    # ================================================================================================================ #
-    def __call__(
+    # TODO: Переделать метод так, чтобы собирал сразу мапу аргов под нужную архитектуру модели
+    def conditioned_noise_predict(
         self,
         timestep: int,
         noisy_sample: torch.FloatTensor,
         conditions: Optional[Conditions] = None,
         **kwargs,
     ) -> torch.FloatTensor:          
-    # ================================================================================================================ #
-        """
-        Выполняет шаг предсказания шума на метке t для любого
-        типа входных данных любой из имеющихся моделей
-        """
         extra_kwargs = {}
 
         # Пересобираем пришедшие аргументы под нужную архитектуру(!), если те переданы
@@ -156,6 +133,7 @@ class NoisePredictor(ModelKey):
         elif isinstance(self.predictor, FluxTransformer2DModel):
             pass
 
+
         print(f"Step: {timestep}")
         # Предсказывает шум моделью + собранными параметрами
         predicted_noise = self.predictor(
@@ -165,8 +143,35 @@ class NoisePredictor(ModelKey):
         )
         print(f"Back step: {timestep}")
 
+
         return predicted_noise
+
+
+
     # ================================================================================================================ #
+    def __call__(
+        self,
+        timestep: int,
+        noisy_sample: torch.FloatTensor,
+        conditions: Optional[Conditions] = None,
+        **kwargs,
+    ) -> torch.FloatTensor:          
+    # ================================================================================================================ #
+        """
+        Выполняет шаг предсказания шума на метке t для любого
+        типа входных данных любой из имеющихся моделей
+        """
+        return self.conditioned_noise_predict(
+            timestep=timestep,
+            conditions=conditions,
+            noisy_sample=noisy_sample,
+            **kwargs,
+        )
+    # ================================================================================================================ #
+
+
+
+
 
 
 
@@ -179,6 +184,8 @@ class NoisePredictor(ModelKey):
 #     class_labels: Optional[torch.Tensor] = None,
 #     return_dict: bool = True,
 # ) -> Union[UNet2DOutput, Tuple]:
+
+
 
 
 # def forward(
@@ -202,6 +209,7 @@ class NoisePredictor(ModelKey):
 
 
 
+
 # def forward(
 #         self,
 #         hidden_states: torch.FloatTensor,
@@ -214,6 +222,7 @@ class NoisePredictor(ModelKey):
 #     ) -> Union[torch.FloatTensor, Transformer2DModelOutput]:
 #         """
 #         The [`SD3Transformer2DModel`] forward method.
+
 
 
 

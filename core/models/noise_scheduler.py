@@ -32,8 +32,8 @@ class NoiseScheduler:
         scheduler_name: Optional[str] = None,
         **kwargs,
     ):     
-        # Инитится планировщик (по-умолчанию из эйлера)
         scheduler_name = scheduler_name or "euler"
+
         self.scheduler = EulerDiscreteScheduler.from_pretrained(
             model_path,
             subfolder='scheduler'
@@ -84,27 +84,9 @@ class NoiseScheduler:
         else:
             raise ValueError(f'Unknown scheduler name: {scheduler_name}')
         
-        # Инитим ключ и константы
         self.scheduler_name = scheduler_name
-        self.scheduler_key = {
-            "dtype": dtype,
-            "device": device,
-            "model_path": model_path,
-            "model_type": model_type or "sd15",
-        }
         print(f"Scheduler has successfully changed to '{scheduler_name}'")
 
-    @property
-    def key(self):
-        return self.scheduler_key
-
-    @property
-    def dtype(self):
-        return self.scheduler_key["dtype"]
-    
-    @property
-    def device(self):
-        return torch.device(self.scheduler_key["device"])
 
     @property
     def scale_factor(self):
@@ -117,13 +99,4 @@ class NoiseScheduler:
     @property
     def order(self):
         return self.scheduler.order
-    
-    def reload(
-        self, 
-        scheduler_name: str,
-        device: str = "cuda",
-        dtype: torch.dtype = torch.float16,
-    ):
-        if self.scheduler_name is not scheduler_name:
-            self.__init__(scheduler_name=scheduler_name, **self.key)
 

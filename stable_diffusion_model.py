@@ -3,65 +3,67 @@ import torch
 from typing import Optional
 from dataclasses import dataclass
 
+from .models.text_encoder_model import TextEncoderModel
+from .core.diffusion_model import Conditions, DiffusionModel, DiffusionModelKey
 
-from .core.diffusion_model import (
-    Conditions, 
-    DiffusionModel, 
-    DiffusionModelKey
-)
-from .models.text_encoder_model import (
-    TextEncoderModel,
-    CLIPTextEncoderModel,
-)
+# TODO: Убрать этот аргумент и заменить его прямыми выходами пайплайна на вход call
 from .pipelines.text_encoder_pipeline import TextEncoderPipelineOutput
+
 
 
 @dataclass
 class StableDiffusionModelKey(DiffusionModelKey):
-    pass
+    use_ip_adapter: bool = False
+    use_text_encoder: bool = True
 
 
 
-class StableDiffusionModel:
-    diffuser: DiffusionModel
-    text_encoder: Optional[TextEncoderModel] = None
-    # image_encoder: Optional[ImageEncoderModel] = None
+class StableDiffusionModel(
+    DiffusionModel,
+    TextEncoderModel,
+    # ImageEncoderModel,
+    StableDiffusionModelKey
+):  
+    # Я пока хз делать ли это внутренними полями класса или нет
+    use_ip_adapter: bool = False
+    use_text_encoder: bool = True
 
-    # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #
+    # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #    
     def __init__(
         self,
-        model_path: str,
-        device: str = "cuda",
-        is_latent_model: bool = True,
-        model_type: Optional[str] = None,
-        dtype: torch.dtype = torch.float16,
-        scheduler_name: Optional[str] = None,
+        use_ip_adapter: bool = False,
+        use_text_encoder: bool = True,
         **kwargs,
-    ):
-    # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #
-        self.diffuser = DiffusionModel(
-            model_path=model_path,
-            model_type=model_type,
-            device=device,
-            dtype=dtype,
-            scheduler_name=scheduler_name,
-            is_latent_model=is_latent_model,
-        )
-
-        self.text_encoder = TextEncoderModel(
-            model_path=model_path,
-            model_type=model_type,
-            device=device,
-            dtype=dtype,
-        )
-
-        # self.image_encoder = 
-
-        
-        self.model_path = model_path
-        self.model_type = model_type or "sd15"
+    ): 
     # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #    
+        # В любом случае инитим диффузионную модель
+        DiffusionModel.__init__(self, **kwargs)
+        
+        # Опционально инитим картиночный и текстовый энкодеры
+        if use_ip_adapter:
+            # ImageEncoderModel.__init__(self, **kwargs)
+            pass
+        
+        self.use_text_encoder = use_text_encoder
+        if use_text_encoder:
+            TextEncoderModel.__init__(self, **kwargs)
+
+        print("\t<<<StableDiffusionModel ready!>>>\t")
+    # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #    
+
+
     
+    # def get_conditions(
+    #     self,
+    #     use_refiner: bool = False,
+    #     aesthetic_score: float = 6.0,
+    #     negative_aesthetic_score: float = 2.5,
+    #     te_output: Optional[TextEncoderPipelineOutput] = None,
+    #     # ie_output: Optional[ImageEncoderPipelineOutput] = None,
+    #     **kwargs,
+    # ) -> Conditions:
+    #     pass
+
 
 
     # ================================================================================================================ #
@@ -83,10 +85,13 @@ class StableDiffusionModel:
         print("StableDiffusionModel --->")
 
         # Устанавливаем собственные аргументы модели
-        self.diffuser.maybe_switch_to_refiner(use_refiner)
-        self.diffuser.aesthetic_score = aesthetic_score
-        self.diffuser.negative_aesthetic_score = negative_aesthetic_score
-        self.diffuser.text_encoder_projection_dim = self.text_encoder.clip_encoder.text_encoder_projection_dim
+        # TODO: Вот эту хуйню надо переделать
+        self.maybe_switch_to_refiner(use_refiner)
+        self.aesthetic_score = aesthetic_score
+        self.negative_aesthetic_score = negative_aesthetic_score
+
+        # # Хуйня ниже кажется пропадает из-за наследования 
+        # self.text_encoder_projection_dim = self.text_encoder.clip_encoder.text_encoder_projection_dim
 
         
         # Собираем текстовые и картиночные условия генерации
