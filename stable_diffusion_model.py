@@ -59,19 +59,13 @@ class StableDiffusionModel(
     def get_conditions(
         self,
         use_refiner: bool = False,
-        aesthetic_score: float = 6.0,
-        negative_aesthetic_score: float = 2.5,
         te_output: Optional[TextEncoderPipelineOutput] = None,
         # ie_output: Optional[ImageEncoderPipelineOutput] = None,
         **kwargs,
     ) -> Conditions:
         # Устанавливаем собственные аргументы модели
-        # TODO: Вот эту хуйню надо переделать
         self.maybe_switch_to_refiner(use_refiner)
-        self.aesthetic_score = aesthetic_score
-        self.negative_aesthetic_score = negative_aesthetic_score
-        # Понадобилось так сделать, поскольку диффузионная модель
-        # и текстовая модель лежат на разных ветках 
+        # Переделать хуйню ниже, это ваще бред 
         self.text_encoder_projection_dim = self.projection_dim
 
         

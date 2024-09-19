@@ -37,11 +37,10 @@ class StableDiffusionPipelineOutput(BaseOutput):
 
 
 
-class StableDiffusionPipeline(
-    DiffusionPipeline,
-    TextEncoderPipeline,  
-):  
-    model: Optional[StableDiffusionModel] = None
+class StableDiffusionPipeline:  
+    use_refiner: bool = False
+    refiner_steps: Optional[int] = None
+    refiner_scale: Optional[float] = None
 
     # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #
     def __init__(
@@ -49,83 +48,63 @@ class StableDiffusionPipeline(
             # use_refiner: bool = False,
             # refiner_steps: Optional[int] = None,
             # refiner_scale: Optional[float] = None,
-        model_key: Optional[StableDiffusionModelKey] = None,
         **kwargs,
     ):
     # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #
-        if model_key is not None:
-            self.model = StableDiffusionModel(**model_key)
-            self.scheduler = self.model.scheduler
-            self.device = self.model.device
-            self.dtype = self.model.dtype
+        pass
     # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #
-
-
-
-    def stable_diffusion_process(
-        self,
-        diffusion_input: DiffusionPipelineInput,
-        use_refiner: bool = False,
-        guidance_scale: float = 5.0,
-        aesthetic_score: float = 6.0,
-        negative_aesthetic_score: float = 2.5,
-        te_input: Optional[TextEncoderPipelineInput] = None,
-        **kwargs,
-    ):  
-        print(self.model)
-        if "1. Собираем и преобразуем обуславливающую информацию":
-            if self.model.use_text_encoder and te_input is not None:
-                te_output = self.encode_prompt(**te_input)
-
-                self.do_cfg = te_output.do_cfg
-                self.guidance_scale = guidance_scale
-                # Изменяет размер тензора т.к может быть несколько картинок на промпт
-                diffusion_input.batch_size = te_output.batch_size
-
-
-        # Вызываем модель с доп аргументами, чтобы создать из эмбеддингов
-        # входы для диффузионной модели
-        conditions = self.model.get_conditions(
-            te_output=te_output,
-            use_refiner=use_refiner,
-            aesthetic_score=aesthetic_score,
-            negative_aesthetic_score=negative_aesthetic_score,
-        )
-
-        # Создаём новый расширенный словиями класс инпута
-        diffusion_input = DiffusionPipelineInput(
-            # conditions=Conditions(**conditions),
-            conditions=conditions,
-            **diffusion_input,
-        )
-        if "2. Учитывая переданные аргументы, используем полученный/ые пайплайны":
-            diffusion_output = self.diffusion_process(**diffusion_input)
-
-
-        return StableDiffusionPipelineOutput(
-            images=diffusion_output.images
-        )  
 
 
 
     # ================================================================================================================ #
     def __call__(
         self,
-        input: StableDiffusionPipelineInput,
-        model: Optional[StableDiffusionModel] = None,
+        model: StableDiffusionModel,
+        diffusion_input: DiffusionPipelineInput,
+        aesthetic_score: float = 6.0,
+        negative_aesthetic_score: float = 2.5,
+        te_input: Optional[TextEncoderPipelineInput] = None,
         **kwargs,
-    ):
+    ):  
     # ================================================================================================================ #
-        print("StableDiffusionPipeline --->")
+        if "1. Собираем и преобразуем обуславливающую информацию":
+            if model.use_text_encoder and te_input is not None:
+                # TODO: Заинитить TEPipe
+                te_pipeline = TextEncoderPipeline()
+                te_output = te_pipeline(
+                    text_encoder=model,
+                    **te_input
+                )
 
-        if (
-            model is not None 
-            and isinstance(model, StableDiffusionModel)
-        ):
-            self.model = model
-            self.scheduler = model.scheduler
+                diffusion_input.do_cfg = te_output.do_cfg
+                diffusion_input.batch_size = te_output.batch_size
 
-        return self.stable_diffusion_process(**input)
+
+        # Вызываем модель с доп аргументами, чтобы создать из эмбеддингов
+        # входы для диффузионной модели
+        conditions = model.get_conditions(
+            te_output=te_output,
+        )
+
+        # TODO: Учесть тут процедуру рефайнера
+        # <...>
+        # Создаём новый расширенный Условиями класс инпута
+        diffusion_input = DiffusionPipelineInput(
+            # conditions=Conditions(**conditions),
+            conditions=conditions,
+            **diffusion_input,
+        )
+        if "2. Учитывая переданные аргументы, используем полученный/ые пайплайны":
+            deffusion_pipeline = DiffusionPipeline()
+            diffusion_output = deffusion_pipeline(
+                diffuser=model,
+                **diffusion_input
+            )
+
+
+        return StableDiffusionPipelineOutput(
+            images=diffusion_output.images
+        )  
     # ================================================================================================================ #
 
 

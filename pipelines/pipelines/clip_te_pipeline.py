@@ -27,36 +27,31 @@ class CLIPTextEncoderPipelineOutput(BaseOutput):
 
 
 class CLIPTextEncoderPipeline:
-    model: Optional[CLIPTextEncoderModel] = None
-
     def __init__(
         self,
-        # model_key: Optional[StableDiffusionModelKey] = None,
-        model_key = None,
         **kwargs,
     ):
-        """
-        Если на вход передан ModelKey то инициализирует из него собственную внутренню 
-        модель, которую и использует
-        """
-        if model_key is not None:
-            self.model = CLIPTextEncoderModel(**model_key)
+        pass
+
+        
 
 
-    def encode_clip_prompt(
+    def __call__(
         self,
+        clip_encoder: CLIPTextEncoderModel,
         prompt: List[str],
         num_images_per_prompt: int = 1,
         clip_skip: Optional[int] = None,
         lora_scale: Optional[float] = None,
         prompt_2: Optional[List[str]] = None,
+        **kwargs,
     ) -> CLIPTextEncoderPipelineOutput:  
         # Получаем выходы всех энкодеров модели через .get_clip_embeddings()
         (
             prompt_embeds_1, 
             prompt_embeds_2, 
             pooled_prompt_embeds
-        ) = self.model.get_clip_embeddings(
+        ) = clip_encoder.get_clip_embeddings(
             prompt=prompt,
             prompt_2=prompt_2,
             clip_skip=clip_skip,
@@ -82,26 +77,6 @@ class CLIPTextEncoderPipeline:
             prompt_embeds_2=prompt_embeds_2,
             pooled_prompt_embeds=pooled_prompt_embeds,
         )
-        
-
-
-    def __call__(
-        self,
-        input: CLIPTextEncoderPipelineInput,
-        clip_encoder: Optional[CLIPTextEncoderModel] = None,
-        **kwargs,
-    ) -> CLIPTextEncoderPipelineOutput:  
-        print("CLIPTextEncoderPipeline --->")
-
-        # Если на вход передана модель, то устанавливаем её в качестве собственной
-        if (
-            clip_encoder is not None 
-            and isinstance(clip_encoder, CLIPTextEncoderModel)
-        ):
-            self.model = clip_encoder
-            
-        
-        return self.encode_clip_prompt(**input)
     
 
 

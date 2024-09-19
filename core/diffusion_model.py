@@ -20,7 +20,6 @@ class DiffusionModel(
     VaeModel,
     NoiseScheduler,
     NoisePredictor,
-    DiffusionModelKey
 ):
     """
     
@@ -99,6 +98,7 @@ class DiffusionModel(
     # ################################################################################################################ #
     # Основной функционал модели DiffusionModel
     # ################################################################################################################ #
+    # TODO: А вот этот функционал оставить в модели + добавить ControlNet
     def _get_add_time_ids(
         self,
         original_size,
@@ -146,6 +146,8 @@ class DiffusionModel(
         return add_time_ids, add_neg_time_ids
 
 
+
+    # TODO: Перенести этот функционал в StableDiffusionModel
     def get_extended_conditions(
         self,
         batch_size: int = 1,
@@ -159,6 +161,8 @@ class DiffusionModel(
         Данный метод расширяет набор условий на хвод мордели своими внутренними условиями 
         или дополнительными условиями ControlNet модели
         """
+
+        # TODO: Исправить ошибку с self.text_encoder_projection_dim,
         if conditions is not None:
 
             if self.model_type == "sd15":
