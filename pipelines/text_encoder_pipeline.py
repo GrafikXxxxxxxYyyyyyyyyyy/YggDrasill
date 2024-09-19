@@ -7,10 +7,8 @@ from typing import List, Optional, Union, Dict, Any
 from .pipelines.clip_te_pipeline import (
     CLIPTextEncoderPipeline, 
     CLIPTextEncoderPipelineInput,
-    CLIPTextEncoderPipelineOutput,
 )
-from ..models.text_encoder_model import TextEncoderModel
-# from ..stable_diffusion_model import StableDiffusionModelKey
+from YggDrasill.models.text_encoder_model import TextEncoderModel
 
 
 

@@ -4,16 +4,16 @@ from typing import Optional
 from dataclasses import dataclass
 from diffusers.utils import BaseOutput
 
-from .stable_diffusion_model import (
+from YggDrasill.stable_diffusion_model import (
     Conditions, 
     StableDiffusionModel, 
     StableDiffusionModelKey,
 )
-from .core.diffusion_pipeline import (
+from YggDrasill.core.diffusion_pipeline import (
     DiffusionPipeline, 
     DiffusionPipelineInput,
 )
-from .pipelines.text_encoder_pipeline import (
+from YggDrasill.pipelines.text_encoder_pipeline import (
     TextEncoderPipeline,
     TextEncoderPipelineInput,
 )
@@ -55,6 +55,7 @@ class StableDiffusionPipeline(
     # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #
         if model_key is not None:
             self.model = StableDiffusionModel(**model_key)
+            self.scheduler = self.model.scheduler
             self.device = self.model.device
             self.dtype = self.model.dtype
     # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #
@@ -70,9 +71,10 @@ class StableDiffusionPipeline(
         negative_aesthetic_score: float = 2.5,
         te_input: Optional[TextEncoderPipelineInput] = None,
         **kwargs,
-    ):
+    ):  
+        print(self.model)
         if "1. Собираем и преобразуем обуславливающую информацию":
-            if self.model.use_text_encoder is not None and te_input is not None:
+            if self.model.use_text_encoder and te_input is not None:
                 te_output = self.encode_prompt(**te_input)
 
                 self.do_cfg = te_output.do_cfg

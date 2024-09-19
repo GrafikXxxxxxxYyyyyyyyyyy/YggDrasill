@@ -8,6 +8,7 @@ from ..models.noise_scheduler import NoiseScheduler
 from ..diffusion_model import Conditions, NoisePredictor, ModelKey
 
 
+
 @dataclass
 class BackwardDiffusionInput(BaseOutput):
     timestep: int

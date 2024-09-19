@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Union
 from diffusers.utils import BaseOutput
 
-from ...models.models.clip_te_model import CLIPTextEncoderModel
+from YggDrasill.models.models.clip_te_model import CLIPTextEncoderModel
 
 
 

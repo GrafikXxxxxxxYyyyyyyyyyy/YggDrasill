@@ -3,11 +3,14 @@ import torch
 from typing import Optional
 from dataclasses import dataclass
 
-from .models.text_encoder_model import TextEncoderModel
-from .core.diffusion_model import Conditions, DiffusionModel, DiffusionModelKey
-
+from YggDrasill.core.diffusion_model import (
+    Conditions, 
+    DiffusionModel, 
+    DiffusionModelKey
+)
+from YggDrasill.models.text_encoder_model import TextEncoderModel
 # TODO: Убрать этот аргумент и заменить его прямыми выходами пайплайна на вход call
-from .pipelines.text_encoder_pipeline import TextEncoderPipelineOutput
+from YggDrasill.pipelines.text_encoder_pipeline import TextEncoderPipelineOutput
 
 
 

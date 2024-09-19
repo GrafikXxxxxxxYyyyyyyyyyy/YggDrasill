@@ -9,6 +9,7 @@ from ..models.vae_model import VaeModel
 from ..diffusion_model import DiffusionModelKey
 
 
+
 @dataclass
 class VaePipelineInput(BaseOutput):
     width: Optional[int] = None
@@ -17,6 +18,7 @@ class VaePipelineInput(BaseOutput):
     latents: Optional[torch.FloatTensor] = None
     generator: Optional[torch.Generator] = None
     mask_image: Optional[PipelineImageInput] = None
+
 
 
 @dataclass

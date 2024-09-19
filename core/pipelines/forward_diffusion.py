@@ -9,6 +9,7 @@ from ..models.noise_predictor import ModelKey
 from ..models.noise_scheduler import NoiseScheduler
 
 
+
 @dataclass
 class ForwardDiffusionInput(BaseOutput):
     device: str = "cuda"
@@ -21,6 +22,7 @@ class ForwardDiffusionInput(BaseOutput):
     sample: Optional[torch.FloatTensor] = None
     generator: Optional[torch.Generator] = None
     noisy_sample: Optional[torch.FloatTensor] = None
+
 
 
 @dataclass
