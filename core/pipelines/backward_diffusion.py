@@ -5,7 +5,7 @@ from diffusers.utils import BaseOutput
 from typing import List, Optional, Dict, Any
 
 from ..models.noise_scheduler import NoiseScheduler
-from ..diffusion_model import DiffusionModelKey, Conditions, NoisePredictor
+from ..diffusion_model import Conditions, NoisePredictor, ModelKey
 
 
 @dataclass
@@ -16,7 +16,7 @@ class BackwardDiffusionInput(BaseOutput):
 
 
 
-class BackwardDiffusion:
+class BackwardDiffusion(NoiseScheduler):
     model: Optional[NoisePredictor] = None
 
     do_cfg: bool = False
@@ -24,23 +24,30 @@ class BackwardDiffusion:
     mask_sample: Optional[torch.FloatTensor] = None
     masked_sample: Optional[torch.FloatTensor] = None
 
+    # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #
     def __init__(
         self,
         do_cfg: bool = False,
         guidance_scale: float = 5.0,
-        model_key: Optional[DiffusionModelKey] = None,
+        model_key: Optional[ModelKey] = None,
+        scheduler_name: Optional[str] = None,
         mask_sample: Optional[torch.FloatTensor] = None,
         masked_sample: Optional[torch.FloatTensor] = None,
         **kwargs,
     ):  
+    # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #
         if model_key is not None:
-            super().__init__(**model_key)
+            super().__init__(
+                scheduler_name=scheduler_name, 
+                **model_key
+            )
             self.model = NoisePredictor(**model_key)
 
         self.do_cfg = do_cfg
         self.guidance_scale = guidance_scale
         self.mask_sample = mask_sample
         self.masked_sample = masked_sample
+    # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #
 
 
 
@@ -101,22 +108,31 @@ class BackwardDiffusion:
 
     
     
+    # ================================================================================================================ #
     def __call__(
         self,
         input: BackwardDiffusionInput,
         predictor: Optional[NoisePredictor] = None,
         **kwargs,
     ) -> BackwardDiffusionInput:
+    # ================================================================================================================ #
         """
         Данный пайплайн выполняет один полный шаг снятия шума в диффузионном процессе
         """
         print("BackwardDiffusion --->")
 
-        if (
+        # ВАЖНО! Backward не следит за тем, какой планировщик используется
+        # подразумевается что если происходит запуск из DiffusionPipeline и выше
+        # то автоматически настраивается верный self.scheduler
+        # А если запуск происходит в виде отдельной блочной структуры, то 
+        # как и для ForwardDiffusion планировщик инициализируется свой для 
+        # каждого из пайплайнов
+        if (    
             predictor is not None
             and isinstance(predictor, NoisePredictor)    
         ):
             self.model = predictor
 
         return self.backward_step(**input)
+    # ================================================================================================================ #
 

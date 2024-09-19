@@ -19,6 +19,7 @@ from .pipelines.text_encoder_pipeline import (
 )
 
 
+
 @dataclass
 class StableDiffusionPipelineInput(BaseOutput):
     diffusion_input: DiffusionPipelineInput
@@ -27,6 +28,7 @@ class StableDiffusionPipelineInput(BaseOutput):
     aesthetic_score: float = 6.0
     negative_aesthetic_score: float = 2.5
     te_input: Optional[TextEncoderPipelineInput] = None
+
 
 
 @dataclass
@@ -41,6 +43,7 @@ class StableDiffusionPipeline(
 ):  
     model: Optional[StableDiffusionModel] = None
 
+    # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #
     def __init__(
         self,
             # use_refiner: bool = False,
@@ -49,10 +52,13 @@ class StableDiffusionPipeline(
         model_key: Optional[StableDiffusionModelKey] = None,
         **kwargs,
     ):
+    # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #
         if model_key is not None:
             self.model = StableDiffusionModel(**model_key)
             self.device = self.model.device
             self.dtype = self.model.dtype
+    # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #
+
 
 
     def stable_diffusion_process(
@@ -99,12 +105,15 @@ class StableDiffusionPipeline(
         )  
 
 
+
+    # ================================================================================================================ #
     def __call__(
         self,
         input: StableDiffusionPipelineInput,
         model: Optional[StableDiffusionModel] = None,
         **kwargs,
     ):
+    # ================================================================================================================ #
         print("StableDiffusionPipeline --->")
 
         if (
@@ -112,8 +121,10 @@ class StableDiffusionPipeline(
             and isinstance(model, StableDiffusionModel)
         ):
             self.model = model
+            self.scheduler = model.scheduler
 
         return self.stable_diffusion_process(**input)
+    # ================================================================================================================ #
 
 
 

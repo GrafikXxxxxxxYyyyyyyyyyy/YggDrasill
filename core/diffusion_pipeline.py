@@ -52,13 +52,16 @@ class DiffusionPipeline(
     aesthetic_score: float = 6.0
     negative_aesthetic_score: float = 2.5
 
+    # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #
     def __init__(
         self,
         model_key: Optional[DiffusionModelKey] = None,
         **kwargs,
     ):
+    # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #
         if model_key is not None:
             self.model = DiffusionModel(**model_key)
+    # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #
 
 
     def diffusion_process(
@@ -173,17 +176,28 @@ class DiffusionPipeline(
     
 
 
+    # ================================================================================================================ #
     def __call__(
         self,
-        diffuser: DiffusionModel,
         input: DiffusionPipelineInput,
+        diffuser: Optional[DiffusionModel] = None,
         **kwargs,
     ):  
+    # ================================================================================================================ #
         print("DiffusionPipeline --->")
 
-        self.diffuser = diffuser
+        # Этот и все пайплайны выше начиная с данного, используют в 
+        # качестве своего планировщика model.scheduler если происходит 
+        # запуск с передачей внешней модели
+        # В случае запуска блочной структурой, планировщик вообще не 
+        # инициализируется, поскольку нижестоящие блоки уже инициализировали
+        # свои собственные планировщики
+        if (
+            diffuser is not None
+            and isinstance(diffuser, DiffusionModel)
+        ):
+            self.model = diffuser
+            self.scheduler = diffuser.scheduler
 
-        return self.diffusion_process(
-            # diffuser=diffuser,
-            **input,
-        )
+        return self.diffusion_process(**input)
+    # ================================================================================================================ #
