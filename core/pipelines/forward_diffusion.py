@@ -5,8 +5,11 @@ from diffusers.utils import BaseOutput
 from typing import List, Optional, Tuple
 from diffusers.utils.torch_utils import randn_tensor
 
-from ..models.noise_predictor import ModelKey
-from ..models.noise_scheduler import NoiseScheduler
+from ..models.backward_diffuser import ModelKey
+from ..models.models.noise_scheduler import NoiseScheduler
+
+
+
 
 
 
@@ -25,6 +28,9 @@ class ForwardDiffusionInput(BaseOutput):
 
 
 
+
+
+
 @dataclass
 class ForwardDiffusionOutput(BaseOutput):
     timesteps: List[int]
@@ -32,29 +38,30 @@ class ForwardDiffusionOutput(BaseOutput):
 
 
 
+
+
+# НИ ОТ ЧЕГО НЕ НАСЛЕДУЕТСЯ + ХРАНИТ СВОЙ Scheduler
 class ForwardDiffusion:
-    """
-    Данный пайплайн выполняет процедуру прямого диффузионного процесса 
-    """
-    denoising_end: Optional[float] = None,
-    denoising_start: Optional[float] = None,
+    # Теперь пайплайны хранят свой собственный планировщик шума
+    pipe_scheduler: Optional[NoiseScheduler] = None
 
     # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #
     def __init__(
         self,
+        model_key: Optional[ModelKey] = None,
         **kwargs,
     ):
     # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #
-        pass
-    # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #
+        if model_key is not None:
+            self.pipe_scheduler = NoiseScheduler(**model_key)
+    # ////////////////// ////////////////////////////////////////////////////////////////////////////////////////////// #
 
 
 
-    # ================================================================================================================ #
-    def __call__(
+    def forward_pass(
         self,
         shape: Tuple[int, int, int, int],
-        noise_scheduler: NoiseScheduler,
+            # noise_scheduler: NoiseScheduler,
         device: str = "cuda",
         strength: float = 1.0, 
         num_inference_steps: int = 30, 
@@ -67,19 +74,17 @@ class ForwardDiffusion:
         noisy_sample: Optional[torch.FloatTensor] = None,
         **kwargs,
     ):  
-    # ================================================================================================================ #
-        # Опционально формируем временные шаги, если те не переданы
-        if timesteps is None:
-            # get the original timestep using init_timestep
-            init_timestep = min(int(num_inference_steps * strength), num_inference_steps)
-            t_start = max(num_inference_steps - init_timestep, 0)
-            # Устанавливаются шаги и возвращаются с учтенной силой
-            noise_scheduler.scheduler.set_timesteps(num_inference_steps, device=device)
-            timesteps = noise_scheduler.scheduler.timesteps[t_start * noise_scheduler.scheduler.order :]
-            num_inference_steps = len(timesteps)
+        if "1. Формируем временные шаги, если те не переданы":
+            if timesteps is None:
+                timesteps, num_inference_steps = self.pipe_scheduler.retrieve_timesteps(
+                    device=device,
+                    strength=strength,
+                    num_inference_steps=num_inference_steps,
+                )
 
         
-        if "Применяем логику рефайнера, если переданы параметры start/end":
+
+        if "2. Применяем логику рефайнера, если переданы параметры start/end":
             if (
                 denoising_start is not None
                 and isinstance(denoising_start, float)
@@ -88,15 +93,18 @@ class ForwardDiffusion:
             ):
                 discrete_timestep_cutoff = int(
                     round(
-                        noise_scheduler.num_train_timesteps 
-                        - (denoising_start * noise_scheduler.num_train_timesteps)
+                        self.pipe_scheduler.num_train_timesteps 
+                        - (denoising_start * self.pipe_scheduler.num_train_timesteps)
                     )
                 )
+
                 num_inference_steps = (timesteps < discrete_timestep_cutoff).sum().item()
-                if noise_scheduler.scheduler.order == 2 and num_inference_steps % 2 == 0:
+                if self.pipe_scheduler.order == 2 and num_inference_steps % 2 == 0:
                     num_inference_steps = num_inference_steps + 1
+
                 # because t_n+1 >= t_n, we slice the timesteps starting from the end
                 timesteps = timesteps[-num_inference_steps:]
+
 
             if (
                 denoising_end is not None
@@ -109,10 +117,8 @@ class ForwardDiffusion:
                 and denoising_start < 1.0
                 and denoising_start >= denoising_end
             ):
-                raise ValueError(
-                    f"`denoising_start`: {denoising_start} cannot be larger than or equal to `denoising_end`: "
-                    + f" {denoising_end} when using type float."
-                )
+                raise ValueError("'denoising_start' cannot be larger than or equal to 'denoising_end'")
+            
             elif (
                 denoising_end is not None
                 and isinstance(denoising_end, float)
@@ -121,37 +127,50 @@ class ForwardDiffusion:
             ):
                 discrete_timestep_cutoff = int(
                     round(
-                        noise_scheduler.num_train_timesteps 
-                        - (denoising_end * noise_scheduler.num_train_timesteps)
+                        self.pipe_scheduler.num_train_timesteps 
+                        - (denoising_end * self.pipe_scheduler.num_train_timesteps)
                     )
                 )
+
                 num_inference_steps = len(list(filter(lambda ts: ts >= discrete_timestep_cutoff, timesteps)))
                 timesteps = timesteps[:num_inference_steps]
 
 
-            # Опционально, если не передан шумный семпл, формируем его
+        
+        if "3. Формируем зашумлённый вход, если тот не передан":
             if noisy_sample is None:
-                is_strength_max = strength == 1.0
-                initial_timestep = timesteps[:1].repeat(shape[0])
-
                 # Сэмплируем чистый шум
-                noise = randn_tensor(
+                clear_noise = randn_tensor(
                     shape=shape,
                     generator=generator, 
                     device=device, 
                     dtype=dtype,
                 )
 
-                # Добавляем шум к входным данным
-                noisy_sample = (
-                    noise_scheduler.scheduler.add_noise(sample, noise, initial_timestep)
-                    if sample is not None and not is_strength_max else
-                    # scale the initial noise by the standard deviation required by the scheduler
-                    noise * noise_scheduler.scheduler.init_noise_sigma
+                # Накладываем шум на входные изображения
+                noisy_sample = self.pipe_scheduler.add_noise(
+                    clear_noise,
+                    sample=sample,
+                    is_strength_max=strength == 1.0,
+                    initial_timesteps=timesteps[:1].repeat(shape[0])
                 )
 
-            return ForwardDiffusionOutput(
-                timesteps=timesteps,
-                noisy_sample=noisy_sample,
-            )
+
+        return ForwardDiffusionOutput(
+            timesteps=timesteps,
+            noisy_sample=noisy_sample,
+        )
+
+
+
+    # ================================================================================================================ #
+    def __call__(
+        self,
+        shape: Tuple[int, int, int, int],
+        input: Optional[ForwardDiffusionInput] = None,
+        noise_scheduler: Optional[NoiseScheduler] = None,
+        **kwargs,
+    ):  
+    # ================================================================================================================ #
+        pass
     # ================================================================================================================ #

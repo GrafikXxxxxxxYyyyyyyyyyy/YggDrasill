@@ -1,30 +1,46 @@
 import torch
 
+from typing import Optional
 from dataclasses import dataclass
-from typing import Optional, Tuple
 
 from .models.vae_model import VaeModel
-from .models.noise_scheduler import NoiseScheduler
-from .models.noise_predictor import ModelKey, Conditions,  NoisePredictor
+from .models.backward_diffuser import ModelKey, Conditions, BackwardDiffuser
+
+
+
 
 
 
 @dataclass
 class DiffusionModelKey(ModelKey):
     is_latent_model: bool = True
-    scheduler_name: str = "euler"
+
+
+
+
+
+
+@dataclass
+class DiffusionConditions(Conditions):
+    need_time_ids: bool = True
+    need_timestep_cond: bool = False
+
+    # ControlNet conditions
+    # ...
+
+
+
 
 
 
 class DiffusionModel(
-    VaeModel,
-    NoiseScheduler,
-    NoisePredictor,
-):
-    """
-    
-    """
-    use_refiner: bool = False
+    BackwardDiffuser,
+    DiffusionModelKey,
+):  
+    vae: Optional[VaeModel] = None
+
+    # Непонятно нужно ли пока использовать данные аргументы 
+    # (ИЛИ ЛУЧШЕ ЗАПИХНУТЬ ИХ В ПАЙПЛАЙНЫ)
     aesthetic_score: float = 6.0
     negative_aesthetic_score: float = 2.5
     text_encoder_projection_dim: Optional[int] = None
@@ -32,41 +48,51 @@ class DiffusionModel(
     # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #
     def __init__(
         self,
+        model_path: str,
+        device: str = "cuda",
         is_latent_model: bool = False,
+        model_type: Optional[str] = None,
+        dtype: torch.dtype = torch.float16,
         scheduler_name: Optional[str] = None,
         **kwargs,
     ):  
     # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #
-        # Инитим self.scheduler 
-        NoiseScheduler.__init__(
-            self, 
-            scheduler_name=scheduler_name,
-            **kwargs
-        )
+        # Инитит класс ключа, просто чтобы сохранить параметры модели
+            
+            # DiffusionModelKey.__init__(
+            #     self, 
+            #     dtype=dtype,
+            #     device=device,
+            #     model_path=model_path,
+            #     model_type=model_type,
+            #     scheduler_name=scheduler_name,
+            #     is_latent_model=is_latent_model,
+            # )
+
         # Инитим основную модель предсказания шума
-        NoisePredictor.__init__(
+        BackwardDiffuser.__init__(
             self, 
-            **kwargs
+            dtype=dtype,
+            device=device,
+            model_path=model_path,
+            model_type=model_type,
+            scheduler_name=scheduler_name,
         )
-        # Если необходимо инитим self.vae
+
+        # Если латентная модель, то инитим ещё и vae
         if is_latent_model:
-            VaeModel.__init__(
-                self,
-                **kwargs,
+            self.vae = VaeModel(
+                dtype=dtype,
+                device=device,
+                model_path=model_path,
+                model_type=model_type,
             )
 
-    @property
-    def dtype(self):
-        return self.predictor.dtype
-
-    @property
-    def device(self):
-        return self.predictor.device
 
     @property
     def sample_size(self):
         return (
-            self.predictor.config.sample_size * self.vae_scale_factor
+            self.predictor.config.sample_size * self.vae.scale_factor
             if self.vae is not None else
             self.predictor.config.sample_size    
         )
@@ -78,19 +104,6 @@ class DiffusionModel(
             if self.vae is not None else
             self.predictor.config.in_channels
         )
-
-    def maybe_switch_to_refiner(self, use_refiner: bool):
-        if use_refiner:
-            self.predictor = NoisePredictor(
-                model_path="REFINER_PATH",
-                **self.key,
-            )
-            self.use_refiner = True
-
-    def maybe_switch_to_base(self, use_refiner: bool):
-        if not use_refiner:
-            self.predictor = NoisePredictor(**self.key)
-            self.use_refiner = False
     # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #
 
 

@@ -4,19 +4,12 @@ from typing import Optional
 from dataclasses import dataclass
 from diffusers.utils import BaseOutput
 
-from YggDrasill.stable_diffusion_model import (
-    Conditions, 
-    StableDiffusionModel, 
-    StableDiffusionModelKey,
-)
-from YggDrasill.core.diffusion_pipeline import (
-    DiffusionPipeline, 
-    DiffusionPipelineInput,
-)
-from YggDrasill.pipelines.text_encoder_pipeline import (
-    TextEncoderPipeline,
-    TextEncoderPipelineInput,
-)
+from .core.diffusion_pipeline import DiffusionPipeline, DiffusionPipelineInput
+from .pipelines.text_encoder_pipeline import TextEncoderPipeline, TextEncoderPipelineInput
+from .stable_diffusion_model import StableDiffusionModel, StableDiffusionModelKey, StableDiffusionConditions
+
+
+
 
 
 
@@ -31,13 +24,25 @@ class StableDiffusionPipelineInput(BaseOutput):
 
 
 
+
+
+
 @dataclass
 class StableDiffusionPipelineOutput(BaseOutput):
     images: torch.FloatTensor
 
 
 
-class StableDiffusionPipeline:  
+
+
+
+class StableDiffusionPipeline(
+    DiffusionPipeline,
+    TextEncoderPipeline
+):  
+    model: Optional[StableDiffusionModel] = None
+
+    # REFINER!!! #
     use_refiner: bool = False
     refiner_steps: Optional[int] = None
     refiner_scale: Optional[float] = None
@@ -61,15 +66,14 @@ class StableDiffusionPipeline:
         self,
         model: StableDiffusionModel,
         diffusion_input: DiffusionPipelineInput,
-        aesthetic_score: float = 6.0,
-        negative_aesthetic_score: float = 2.5,
+            # aesthetic_score: float = 6.0,
+            # negative_aesthetic_score: float = 2.5,
         te_input: Optional[TextEncoderPipelineInput] = None,
         **kwargs,
     ):  
     # ================================================================================================================ #
         if "1. Собираем и преобразуем обуславливающую информацию":
             if model.use_text_encoder and te_input is not None:
-                # TODO: Заинитить TEPipe
                 te_pipeline = TextEncoderPipeline()
                 te_output = te_pipeline(
                     text_encoder=model,
@@ -80,14 +84,11 @@ class StableDiffusionPipeline:
                 diffusion_input.batch_size = te_output.batch_size
 
 
-        # Вызываем модель с доп аргументами, чтобы создать из эмбеддингов
-        # входы для диффузионной модели
-        conditions = model.get_conditions(
+        conditions = self.model.retrieve_conditions(
             te_output=te_output,
         )
 
-        # TODO: Учесть тут процедуру рефайнера
-        # <...>
+
         # Создаём новый расширенный Условиями класс инпута
         diffusion_input = DiffusionPipelineInput(
             # conditions=Conditions(**conditions),

@@ -5,6 +5,9 @@ from diffusers import AutoencoderKL
 
 
 
+
+
+
 class VaeModel:
     vae: AutoencoderKL
 
@@ -45,7 +48,7 @@ class VaeModel:
         return self.vae.device
 
     @property
-    def vae_scale_factor(self) -> int:
+    def scale_factor(self) -> int:
         return 2 ** (len(self.config.block_out_channels) - 1)
     # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #
 
@@ -113,29 +116,30 @@ class VaeModel:
         images = self.vae.decode(latents, return_dict=False)[0]
 
         return images
-
-
-    def get_processed_latents_or_images(
-        self,
-        images: Optional[torch.FloatTensor] = None,
-        latents: Optional[torch.FloatTensor] = None,
-        generator: Optional[torch.Generator] = None,
-        **kwargs,
-    ) -> Tuple[
-        Optional[torch.FloatTensor],
-        Optional[torch.FloatTensor],
-    ]:
-        encoded_images = images
-        if images is not None:
-            images = images.to(device=self.device, dtype=self.dtype)
-            encoded_images = self.encode(images, generator)
-
-        decoded_images = latents
-        if latents is not None:
-            decoded_images = self.decode(latents)
-        
-        return encoded_images, decoded_images
     # ################################################################################################################ #
+    
+
+
+    # def get_processed_latents_or_images(
+    #     self,
+    #     images: Optional[torch.FloatTensor] = None,
+    #     latents: Optional[torch.FloatTensor] = None,
+    #     generator: Optional[torch.Generator] = None,
+    #     **kwargs,
+    # ) -> Tuple[
+    #     Optional[torch.FloatTensor],
+    #     Optional[torch.FloatTensor],
+    # ]:
+    #     encoded_images = images
+    #     if images is not None:
+    #         images = images.to(device=self.device, dtype=self.dtype)
+    #         encoded_images = self.encode(images, generator)
+
+    #     decoded_images = latents
+    #     if latents is not None:
+    #         decoded_images = self.decode(latents)
+        
+    #     return encoded_images, decoded_images
 
 
 
@@ -155,12 +159,16 @@ class VaeModel:
         Получает на вход изображение и/или латенты 
         В зависимости от входа кодирует и/или декодирует данные
         """
-        return self.get_processed_latents_or_images(
-            images=images,
-            latents=latents,
-            generator=generator,
-            **kwargs,
-        )
+        encoded_images = images
+        if images is not None:
+            images = images.to(device=self.device, dtype=self.dtype)
+            encoded_images = self.encode(images, generator)
+
+        decoded_images = latents
+        if latents is not None:
+            decoded_images = self.decode(latents)
+        
+        return encoded_images, decoded_images
     # ================================================================================================================ #
 
 

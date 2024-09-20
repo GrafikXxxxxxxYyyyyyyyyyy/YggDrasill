@@ -6,45 +6,11 @@ from diffusers import (
     SD3Transformer2DModel,
     FluxTransformer2DModel,
 )
-from dataclasses import dataclass
-from diffusers.utils import BaseOutput
-from typing import Optional, Union, Dict, Any
+from typing import Optional, Union
 
 
 
-@dataclass
-class ModelKey(BaseOutput):
-    """
-    Базовый класс для инициализации всех пайплайнов и
-    моделей которые используются в проекте
-    """
-    dtype: torch.dtype = torch.float16
-    device: str = "cuda"
-    model_type: str = "sdxl"
-    model_path: str = "GrafikXxxxxxxYyyyyyyyyyy/sdxl_Juggernaut"
-
-
-
-@dataclass
-class Conditions(BaseOutput):
-    """
-    Общий класс всех дополнительных условий для всех
-    моделей которые используются в проекте
-    """
-    # UNet2DModel
-    class_labels: Optional[torch.Tensor] = None
-    # UNet2DConditionModel
-    prompt_embeds: Optional[torch.Tensor] = None
-    timestep_cond: Optional[torch.Tensor] = None
-    attention_mask: Optional[torch.Tensor] = None
-    cross_attention_kwargs: Optional[Dict[str, Any]] = None
-    added_cond_kwargs: Optional[Dict[str, torch.Tensor]] = None
-    # ControlNet
-    # ...
-
-
-
-class NoisePredictor(ModelKey):
+class NoisePredictor:
     predictor: Union[
         UNet2DModel, 
         UNet2DConditionModel,
@@ -106,14 +72,17 @@ class NoisePredictor(ModelKey):
 
 
 
-    # TODO: Переделать метод так, чтобы собирал сразу мапу аргов под нужную архитектуру модели
-    def get_noise_predict(
+    # ================================================================================================================ #
+    def __call__(
         self,
         timestep: int,
         noisy_sample: torch.FloatTensor,
-        conditions: Optional[Conditions] = None,
+        # ПО ИДЕЕ УСЛОВИЯ ТУТ НЕ ДОЛЖНЫ ПЕРЕДАВАТЬСЯ, А ДОЛЖНЫ ПАДАТЬ В КВАРГАХ
+        # СО СЛОЯ ВЫШЕ
+        # conditions: Optional[Conditions] = None,
         **kwargs,
     ) -> torch.FloatTensor:          
+    # ================================================================================================================ #
         extra_kwargs = {}
 
         # Пересобираем пришедшие аргументы под нужную архитектуру(!), если те переданы
@@ -145,28 +114,6 @@ class NoisePredictor(ModelKey):
 
 
         return predicted_noise
-
-
-
-    # ================================================================================================================ #
-    def __call__(
-        self,
-        timestep: int,
-        noisy_sample: torch.FloatTensor,
-        conditions: Optional[Conditions] = None,
-        **kwargs,
-    ) -> torch.FloatTensor:          
-    # ================================================================================================================ #
-        """
-        Выполняет шаг предсказания шума на метке t для любого
-        типа входных данных любой из имеющихся моделей
-        """
-        return self.get_noise_predict(
-            timestep=timestep,
-            conditions=conditions,
-            noisy_sample=noisy_sample,
-            **kwargs,
-        )
     # ================================================================================================================ #
 
 
