@@ -72,6 +72,8 @@ class StableDiffusionPipeline(
         **kwargs,
     ):  
     # ================================================================================================================ #
+        self.model = model
+
         if "1. Собираем и преобразуем обуславливающую информацию":
             if model.use_text_encoder and te_input is not None:
                 te_pipeline = TextEncoderPipeline()

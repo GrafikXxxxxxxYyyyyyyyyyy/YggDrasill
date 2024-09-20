@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from diffusers.utils import BaseOutput
 from diffusers.image_processor import PipelineImageInput
 
-from .diffusion_model import DiffusionModel
+from .diffusion_model import Conditions, DiffusionModel
 from .pipelines.vae_pipeline import VaePipeline
 from .pipelines.forward_diffusion import ForwardDiffusion, ForwardDiffusionInput
 

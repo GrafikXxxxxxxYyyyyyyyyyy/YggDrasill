@@ -32,5 +32,4 @@ class TextEncoderModel(
         self.model_type = model_type or "sd15"
 
 
-    # def __call__ 
     

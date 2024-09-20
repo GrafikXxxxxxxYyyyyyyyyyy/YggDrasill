@@ -4,7 +4,8 @@ from dataclasses import dataclass
 from typing import List, Optional, Union
 from diffusers.utils import BaseOutput
 
-from YggDrasill.models.models.clip_te_model import CLIPTextEncoderModel
+from ...core.models.backward_diffuser import ModelKey
+from ...models.models.clip_te_model import CLIPTextEncoderModel
 
 
 
@@ -27,18 +28,23 @@ class CLIPTextEncoderPipelineOutput(BaseOutput):
 
 
 class CLIPTextEncoderPipeline:
+    clip_encoder: CLIPTextEncoderModel
+
+    # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #
     def __init__(
         self,
+        model_key: Optional[ModelKey] = None,
         **kwargs,
     ):
-        pass
+    # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #
+        if model_key is not None:
+            self.clip_encoder = CLIPTextEncoderModel(**model_key)
+    # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #
 
-        
 
 
-    def __call__(
+    def encode_clip_prompt(
         self,
-        clip_encoder: CLIPTextEncoderModel,
         prompt: List[str],
         num_images_per_prompt: int = 1,
         clip_skip: Optional[int] = None,
@@ -51,7 +57,7 @@ class CLIPTextEncoderPipeline:
             prompt_embeds_1, 
             prompt_embeds_2, 
             pooled_prompt_embeds
-        ) = clip_encoder.get_clip_embeddings(
+        ) = self.clip_encoder.get_clip_embeddings(
             prompt=prompt,
             prompt_2=prompt_2,
             clip_skip=clip_skip,
@@ -77,6 +83,19 @@ class CLIPTextEncoderPipeline:
             prompt_embeds_2=prompt_embeds_2,
             pooled_prompt_embeds=pooled_prompt_embeds,
         )
+    
+
+
+    # ================================================================================================================ #
+    def __call__(
+        self,
+        input: CLIPTextEncoderPipelineInput,
+        clip_encoder: Optional[CLIPTextEncoderModel] = None,
+        **kwargs,
+    ) -> CLIPTextEncoderPipelineOutput:  
+    # ================================================================================================================ #
+        pass
+    # ================================================================================================================ #
     
 
 

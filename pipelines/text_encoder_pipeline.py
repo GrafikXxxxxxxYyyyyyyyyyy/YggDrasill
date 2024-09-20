@@ -5,10 +5,14 @@ from diffusers.utils import BaseOutput
 from typing import List, Optional, Union, Dict, Any
 
 from .pipelines.clip_te_pipeline import (
+    ModelKey,
     CLIPTextEncoderPipeline, 
     CLIPTextEncoderPipelineInput,
 )
-from YggDrasill.models.text_encoder_model import TextEncoderModel
+from ..models.text_encoder_model import TextEncoderModel
+
+
+
 
 
 
@@ -17,6 +21,9 @@ class TextEncoderPipelineInput(CLIPTextEncoderPipelineInput):
     prompt: Optional[Union[str, List[str]]] = None,
     negative_prompt: Optional[Union[str, List[str]]] = None
     negative_prompt_2: Optional[Union[str, List[str]]] = None
+
+
+
 
 
 
@@ -32,12 +39,22 @@ class TextEncoderPipelineOutput(BaseOutput):
 
 
 
+
+
+
 class TextEncoderPipeline:  
+    text_encoder: Optional[TextEncoderModel] = None
+
+    # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #
     def __init__(
         self,
+        model_key: Optional[ModelKey] = None,
         **kwargs,
     ):
-        pass
+    # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #
+        if model_key is not None:
+            self.clip_encoder = TextEncoderModel(**model_key)
+    # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #
     
     
 

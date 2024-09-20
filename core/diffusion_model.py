@@ -88,6 +88,8 @@ class DiffusionModel(
                 model_type=model_type,
             )
 
+        print("\t<<<DiffusionModel ready!>>>\t")
+
 
     @property
     def sample_size(self):
