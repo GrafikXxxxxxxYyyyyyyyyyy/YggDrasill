@@ -71,7 +71,6 @@ class BackwardDiffuser(ModelKey):
         **kwargs,
     ):  
     # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #            
-
         # Инициализируем внутреннюю модель планировщика
         self.scheduler = NoiseScheduler(
             dtype=dtype,
@@ -115,25 +114,60 @@ class BackwardDiffuser(ModelKey):
 
 
 
+    def backward_step(
+        self,
+        timestep: int, 
+        noisy_sample: torch.FloatTensor,
+        do_cfg: bool = False,
+        guidance_scale: float = 5.0,
+        conditions: Optional[Conditions] = None,
+        mask_sample: Optional[torch.FloatTensor] = None,
+        masked_sample: Optional[torch.FloatTensor] = None,
+        **kwargs,
+    ) -> torch.FloatTensor:
+        """
+        Делает один шаг снятия шума
+        """
+        # Вызываем NoiseScheduler
+        noisy_sample = self.scheduler(
+            timestep=timestep,
+            noisy_sample=noisy_sample,
+        )
+
+        # Учитываем CFG
+        if do_cfg:
+            noisy_sample = torch.cat([noisy_sample] * 2)
 
 
 
-
-    # # ================================================================================================================ #
-    # def __call__(
-    #     self,
-    # ):
-    # # ================================================================================================================ #
-    #     """
-    #     Вызов данной модели по сути произовдит просто процедуру одного обратного
-    #     шага диффузионного процесса
-    #     """
-
-    #     pass
-    # # ================================================================================================================ #
-
+        # ############################################################################### #
+        # Учитываем inpaint случай
+        if self.predictor.is_inpainting_model:
+            noisy_sample = torch.cat([noisy_sample, mask_sample, masked_sample], dim=1)   
+        
+        # Вызываем NoisePredictor
+        noise_predict = self.predictor(
+            timestep=timestep,
+            noisy_sample=noisy_sample,
+            **conditions,
+        )
+        # ############################################################################### #
 
 
+
+        # Учитываем CFG
+        if do_cfg:
+            negative_noise_pred, noise_pred = noise_predict.chunk(2)
+            noise_predict = guidance_scale * (noise_pred - negative_noise_pred) + negative_noise_pred
+
+        # Вызываем NoiseScheduler
+        less_noisy_sample = self.scheduler(
+            timestep=timestep,
+            sample=noisy_sample,
+            model_output=noise_predict,
+        )
+
+        return less_noisy_sample
 
 
 
@@ -142,57 +176,16 @@ class BackwardDiffuser(ModelKey):
         self,
         timestep: int, 
         noisy_sample: torch.FloatTensor,
-            # diffuser: DiffusionModel,
         do_cfg: bool = False,
         guidance_scale: float = 5.0,
         conditions: Optional[Conditions] = None,
+        mask_sample: Optional[torch.FloatTensor] = None,
+        masked_sample: Optional[torch.FloatTensor] = None,
         **kwargs,
     ) -> torch.FloatTensor:
     # ================================================================================================================ #
-        """
-        Делает один шаг снятия шума
-        """
-        # Учитываем CFG
-        model_input = (
-            torch.cat([noisy_sample] * 2)
-            if do_cfg else
-            noisy_sample
-        )   
-
-        # Скейлит входы модели
-        model_input = self.scheduler.scale_model_input(
-            timestep=timestep,
-            sample=model_input,
-        )
-
-        # Конкатит маску и маскированную картинку для inpaint модели
-        if (
-            diffuser.is_inpainting_model
-            and self.mask_sample is not None
-            and self.masked_sample is not None
-        ):
-            model_input = torch.cat([model_input, self.mask_sample, self.masked_sample], dim=1)   
-        
-        # Получаем предсказание шума
-        noise_predict = diffuser.get_noise_predict(
-            timestep=timestep,
-            noisy_sample=model_input,
-            conditions=conditions,
-        )
-
-        # Учитываем CFG
-        if self.do_cfg:
-            negative_noise_pred, noise_pred = noise_predict.chunk(2)
-            noise_predict = self.guidance_scale * (noise_pred - negative_noise_pred) + negative_noise_pred
-
-        # Делает шаг расшумления изображения 
-        less_noisy_sample = diffuser.scheduler.step(
-            timestep=timestep,
-            sample=noisy_sample,
-            model_output=noise_predict,
-        )
-
-        return less_noisy_sample
+        return
+    # ================================================================================================================ #    
 
 
 

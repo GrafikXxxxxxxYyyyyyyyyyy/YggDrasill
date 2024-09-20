@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from diffusers.utils import BaseOutput
 from diffusers.image_processor import PipelineImageInput
 
+from .diffusion_model import DiffusionModel
 from .pipelines.vae_pipeline import VaePipeline
-from .diffusion_model import Conditions, BackwardDiffuser
 from .pipelines.forward_diffusion import ForwardDiffusion, ForwardDiffusionInput
 
 
@@ -50,7 +50,7 @@ class DiffusionPipeline(
     Данный класс служит для того, чтобы выполнять полностью проход
     прямого и обратного диффузионного процессов и учитывать использование VAE
     """
-    model: BackwardDiffuser
+    model: Optional[DiffusionModel] = None
 
     aesthetic_score: float = 6.0
     negative_aesthetic_score: float = 2.5
@@ -68,7 +68,6 @@ class DiffusionPipeline(
 
     def diffusion_process(
         self,
-            # diffuser: DiffusionModel,
         batch_size: int = 1,
         do_cfg: bool = False,
         guidance_scale: float = 5.0,
@@ -81,7 +80,10 @@ class DiffusionPipeline(
         forward_input: Optional[ForwardDiffusionInput] = None,
         **kwargs,
     ):  
-    # ================================================================================================================ #
+        """
+        Выполняет полностью ПРЯМОЙ + ОБРАТНЫЙ диффузионные процессы из заданных условий
+        """
+
         if "1. Возможно предобрабатываем входные данные":
             processor_output = self.vae_pipeline_call
 
@@ -112,6 +114,8 @@ class DiffusionPipeline(
             height = height or diffuser.sample_size
 
         
+        # TODO: Перенести механизм CFG полностью на одну какую-то сторону
+
         # Учитываем CFG для масок и картинок
         if processor_output.mask_latents is not None:
             mask_latents = processor_output.mask_latents.repeat(

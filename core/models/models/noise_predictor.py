@@ -58,6 +58,7 @@ class NoisePredictor:
     def is_latent_model(self):
         return self.predictor.config.in_channels == 4
 
+    # ALL RIGHT!
     @property
     def is_inpainting_model(self):
         return (
