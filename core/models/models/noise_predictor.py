@@ -58,7 +58,6 @@ class NoisePredictor:
     def is_latent_model(self):
         return self.predictor.config.in_channels == 4
 
-    # ALL RIGHT!
     @property
     def is_inpainting_model(self):
         return (
@@ -78,9 +77,6 @@ class NoisePredictor:
         self,
         timestep: int,
         noisy_sample: torch.FloatTensor,
-        # ПО ИДЕЕ УСЛОВИЯ ТУТ НЕ ДОЛЖНЫ ПЕРЕДАВАТЬСЯ, А ДОЛЖНЫ ПАДАТЬ В КВАРГАХ
-        # СО СЛОЯ ВЫШЕ
-        # conditions: Optional[Conditions] = None,
         **kwargs,
     ) -> torch.FloatTensor:          
     # ================================================================================================================ #
@@ -88,14 +84,14 @@ class NoisePredictor:
 
         # Пересобираем пришедшие аргументы под нужную архитектуру(!), если те переданы
         if isinstance(self.predictor, UNet2DModel):
-            extra_kwargs["class_labels"] = conditions.class_labels
+            extra_kwargs["class_labels"] = kwargs.get("class_labels", None)
 
         elif isinstance(self.predictor, UNet2DConditionModel):
-            extra_kwargs["class_labels"] = conditions.class_labels
-            extra_kwargs["timestep_cond"] = conditions.timestep_cond
-            extra_kwargs["added_cond_kwargs"] = conditions.added_cond_kwargs
-            extra_kwargs["encoder_hidden_states"] = conditions.prompt_embeds
-            extra_kwargs["cross_attention_kwargs"] = conditions.cross_attention_kwargs
+            extra_kwargs["class_labels"] = kwargs.get("class_labels", None)
+            extra_kwargs["timestep_cond"] = kwargs.get("timestep_cond", None)
+            extra_kwargs["added_cond_kwargs"] = kwargs.get("added_cond_kwargs", None)
+            extra_kwargs["encoder_hidden_states"] = kwargs.get("prompt_embeds", None)
+            extra_kwargs["cross_attention_kwargs"] = kwargs.get("cross_attention_kwargs", None)
 
         elif isinstance(self.predictor, SD3Transformer2DModel):
             pass
@@ -104,14 +100,12 @@ class NoisePredictor:
             pass
 
 
-        print(f"Step: {timestep}")
         # Предсказывает шум моделью + собранными параметрами
         predicted_noise = self.predictor(
             timestep=timestep,
             sample=noisy_sample,
             **extra_kwargs,
         )
-        print(f"Back step: {timestep}")
 
 
         return predicted_noise
