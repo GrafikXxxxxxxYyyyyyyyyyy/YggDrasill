@@ -68,6 +68,8 @@ class BackwardDiffuser(NoiseScheduler):
         self.model_type = model_type or "sd15"
         self.device = torch.device(device)
 
+        print("\t<<<BackwardDiffuser ready!>>>\t")
+
         return
 
 

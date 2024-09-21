@@ -24,6 +24,7 @@ class StableDiffusionConditions(DiffusionConditions):
 
 class StableDiffusionModel(DiffusionModel):  
     text_encoder: Optional[TextEncoderModel] = None
+        # image_encoder: Optional[ImageEncoderModel] = None
 
     # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #    
     def __init__(
@@ -32,6 +33,7 @@ class StableDiffusionModel(DiffusionModel):
         device: str = "cuda",
         use_text_encoder: bool = True,
         is_latent_model: bool = False,
+        use_image_encoder: bool = False,
         model_type: Optional[str] = None,
         dtype: torch.dtype = torch.float16,
         scheduler_name: Optional[str] = None,
