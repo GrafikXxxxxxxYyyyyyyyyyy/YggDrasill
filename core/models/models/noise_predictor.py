@@ -6,7 +6,26 @@ from diffusers import (
     SD3Transformer2DModel,
     FluxTransformer2DModel,
 )
-from typing import Optional, Union
+from dataclasses import dataclass
+from diffusers.utils import BaseOutput
+from typing import Optional, Union, Dict, Any
+
+
+
+@dataclass
+class Conditions(BaseOutput):
+    """
+    Общий класс всех дополнительных условий для всех
+    моделей которые используются в проекте
+    """
+    # UNet2DModel
+    class_labels: Optional[torch.Tensor] = None
+    # UNet2DConditionModel
+    prompt_embeds: Optional[torch.Tensor] = None
+    timestep_cond: Optional[torch.Tensor] = None
+    attention_mask: Optional[torch.Tensor] = None
+    cross_attention_kwargs: Optional[Dict[str, Any]] = None
+    added_cond_kwargs: Optional[Dict[str, torch.Tensor]] = None
 
 
 
@@ -70,7 +89,7 @@ class NoisePredictor:
         return self.predictor.add_embedding.linear_1.in_features
     # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #
 
-
+    # Не имеет других методов кроме вызова
 
     # ================================================================================================================ #
     def __call__(
@@ -80,18 +99,18 @@ class NoisePredictor:
         **kwargs,
     ) -> torch.FloatTensor:          
     # ================================================================================================================ #
-        extra_kwargs = {}
+        conditions = {}
 
         # Пересобираем пришедшие аргументы под нужную архитектуру(!), если те переданы
         if isinstance(self.predictor, UNet2DModel):
-            extra_kwargs["class_labels"] = kwargs.get("class_labels", None)
+            conditions["class_labels"] = kwargs.get("class_labels", None)
 
         elif isinstance(self.predictor, UNet2DConditionModel):
-            extra_kwargs["class_labels"] = kwargs.get("class_labels", None)
-            extra_kwargs["timestep_cond"] = kwargs.get("timestep_cond", None)
-            extra_kwargs["added_cond_kwargs"] = kwargs.get("added_cond_kwargs", None)
-            extra_kwargs["encoder_hidden_states"] = kwargs.get("prompt_embeds", None)
-            extra_kwargs["cross_attention_kwargs"] = kwargs.get("cross_attention_kwargs", None)
+            conditions["class_labels"] = kwargs.get("class_labels", None)
+            conditions["timestep_cond"] = kwargs.get("timestep_cond", None)
+            conditions["added_cond_kwargs"] = kwargs.get("added_cond_kwargs", None)
+            conditions["encoder_hidden_states"] = kwargs.get("prompt_embeds", None)
+            conditions["cross_attention_kwargs"] = kwargs.get("cross_attention_kwargs", None)
 
         elif isinstance(self.predictor, SD3Transformer2DModel):
             pass
@@ -104,7 +123,7 @@ class NoisePredictor:
         predicted_noise = self.predictor(
             timestep=timestep,
             sample=noisy_sample,
-            **extra_kwargs,
+            **conditions,
         )
 
 

@@ -4,25 +4,8 @@ from dataclasses import dataclass
 from diffusers.utils import BaseOutput
 from typing import Optional, Union, Dict, Any
 
-from .models.noise_predictor import NoisePredictor
 from .models.noise_scheduler import NoiseScheduler
-
-
-
-@dataclass
-class Conditions(BaseOutput):
-    """
-    Общий класс всех дополнительных условий для всех
-    моделей которые используются в проекте
-    """
-    # UNet2DModel
-    class_labels: Optional[torch.Tensor] = None
-    # UNet2DConditionModel
-    prompt_embeds: Optional[torch.Tensor] = None
-    timestep_cond: Optional[torch.Tensor] = None
-    attention_mask: Optional[torch.Tensor] = None
-    cross_attention_kwargs: Optional[Dict[str, Any]] = None
-    added_cond_kwargs: Optional[Dict[str, torch.Tensor]] = None
+from .models.noise_predictor import Conditions, NoisePredictor
 
 
 
@@ -137,17 +120,10 @@ class BackwardDiffuser(NoiseScheduler):
     # ================================================================================================================ #
     def __call__(
         self,
-        timestep: int, 
-        noisy_sample: torch.FloatTensor,
-        do_cfg: bool = False,
-        guidance_scale: float = 5.0,
-        conditions: Optional[Conditions] = None,
-        mask_sample: Optional[torch.FloatTensor] = None,
-        masked_sample: Optional[torch.FloatTensor] = None,
         **kwargs,
     ) -> torch.FloatTensor:
     # ================================================================================================================ #
-        return
+        return self.backward_step(**kwargs)
     # ================================================================================================================ #    
 
 
