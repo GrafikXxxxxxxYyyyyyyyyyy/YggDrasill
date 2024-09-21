@@ -5,10 +5,7 @@ from dataclasses import dataclass
 
 from .models.text_encoder_model import TextEncoderModel
 from .pipelines.text_encoder_pipeline import TextEncoderPipelineOutput
-from .core.diffusion_model import DiffusionModel, DiffusionModelKey, DiffusionConditions
-
-
-
+from .core.diffusion_model import DiffusionModelKey, DiffusionConditions, DiffusionModel
 
 
 
@@ -19,32 +16,20 @@ class StableDiffusionModelKey(DiffusionModelKey):
 
 
 
-
-
-
 @dataclass
 class StableDiffusionConditions(DiffusionConditions):
     pass
 
 
 
-
-
-
-class StableDiffusionModel(
-    DiffusionModel,
-    # TODO: Сделать ключ внутренним полем классов-моделей
-    StableDiffusionModelKey
-):  
+class StableDiffusionModel(DiffusionModel):  
     text_encoder: Optional[TextEncoderModel] = None
-    # image_encoder:
 
     # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #    
     def __init__(
         self,
         model_path: str,
         device: str = "cuda",
-        use_ip_adapter: bool = False,
         use_text_encoder: bool = True,
         is_latent_model: bool = False,
         model_type: Optional[str] = None,
@@ -53,24 +38,8 @@ class StableDiffusionModel(
         **kwargs,
     ): 
     # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #    
-        # Инитит класс ключа, просто чтобы сохранить параметры модели
-
-            # TODO: Просто сохранять внутри модели поле ключа-класса
-            # StableDiffusionModelKey.__init__(
-            #     self, 
-            #     dtype=dtype,
-            #     device=device,
-            #     model_path=model_path,
-            #     model_type=model_type,
-            #     scheduler_name=scheduler_name,
-            #     is_latent_model=is_latent_model,
-            #     use_ip_adapter=use_ip_adapter,
-            #     use_text_encoder=use_text_encoder,
-            # )
-
         # Инитим диффузионную модель
-        DiffusionModel.__init__(
-            self, 
+        super().__init__(
             dtype=dtype,
             device=device,
             model_path=model_path,
@@ -80,36 +49,34 @@ class StableDiffusionModel(
         )
         
         # Опционально инитим текстовый энкодер
-        if use_text_encoder:
-            self.text_encoder = TextEncoderModel(
+        self.text_encoder = (
+            TextEncoderModel(
                 dtype=dtype,
                 device=device,
                 model_path=model_path,
                 model_type=model_type,
             )
+            if use_text_encoder else
+            None
+        )
 
         print("\t<<<StableDiffusionModel ready!>>>\t")
     # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #    
 
 
 
+    # TODO: Тут что-то должна делать модель self.text_encoder если она есть
     def retrieve_conditions(
         self,
-        # REFINER!!! #
         use_refiner: bool = False,
         aesthetic_score: float = 6.0,
         negative_aesthetic_score: float = 2.5,
         te_output: Optional[TextEncoderPipelineOutput] = None,
-        # ie_output: Optional[ImageEncoderPipelineOutput] = None,
         **kwargs,
     ) -> StableDiffusionConditions:
         """
+        Подготавливает условные аргументы с энкодеров и самой модели
         """
-            # # Устанавливаем собственные аргументы модели
-            # self.maybe_switch_to_refiner(use_refiner)
-            # # Переделать хуйню ниже, это ваще бред 
-            # self.text_encoder_projection_dim = self.projection_dim
-
         # Собираем текстовые и картиночные условия генерации
         conditions = StableDiffusionConditions()
 
@@ -144,22 +111,11 @@ class StableDiffusionModel(
 
 
 
-    # # ================================================================================================================ #
-    # def __call__(
-    #     self,
-    #     use_refiner: bool = False,
-    #     aesthetic_score: float = 6.0,
-    #     negative_aesthetic_score: float = 2.5,
-    #     # te_output: Optional[TextEncoderPipelineOutput] = None,
-    #     # ie_output: Optional[ImageEncoderPipelineOutput] = None,
-    #     **kwargs,
-    # ) -> StableDiffusionConditions:
-    # # ================================================================================================================ #
-    #     """
-    #     Подготавливает нужную последовательность входных аргументов
-    #     и обуславливающих значений, соответсвующих заданной модели диффузии
-    #     Также перенастраивает саму модельку
-    #     """ 
-    #     pass
-    # # ================================================================================================================ #
+    # ================================================================================================================ #
+    def __call__(self, **kwargs):
+    # ================================================================================================================ #
+        print("DiffusionModel --->")
+
+        return self.retrieve_conditions(**kwargs)
+    # ================================================================================================================ #
         

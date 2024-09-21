@@ -8,15 +8,9 @@ from .models.backward_diffuser import ModelKey, Conditions, BackwardDiffuser
 
 
 
-
-
-
 @dataclass
 class DiffusionModelKey(ModelKey):
     is_latent_model: bool = True
-
-
-
 
 
 
@@ -24,19 +18,12 @@ class DiffusionModelKey(ModelKey):
 class DiffusionConditions(Conditions):
     need_time_ids: bool = True
     need_timestep_cond: bool = False
-
     # ControlNet conditions
     # ...
 
 
 
-
-
-
-class DiffusionModel(
-    BackwardDiffuser,
-    DiffusionModelKey,
-):  
+class DiffusionModel(BackwardDiffuser):  
     vae: Optional[VaeModel] = None
 
     # Непонятно нужно ли пока использовать данные аргументы 
@@ -57,21 +44,8 @@ class DiffusionModel(
         **kwargs,
     ):  
     # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #
-        # Инитит класс ключа, просто чтобы сохранить параметры модели
-            
-            # DiffusionModelKey.__init__(
-            #     self, 
-            #     dtype=dtype,
-            #     device=device,
-            #     model_path=model_path,
-            #     model_type=model_type,
-            #     scheduler_name=scheduler_name,
-            #     is_latent_model=is_latent_model,
-            # )
-
         # Инитим основную модель предсказания шума
-        BackwardDiffuser.__init__(
-            self, 
+        super().__init__( 
             dtype=dtype,
             device=device,
             model_path=model_path,
@@ -80,13 +54,16 @@ class DiffusionModel(
         )
 
         # Если латентная модель, то инитим ещё и vae
-        if is_latent_model:
-            self.vae = VaeModel(
+        self.vae = (
+            VaeModel(
                 dtype=dtype,
                 device=device,
                 model_path=model_path,
                 model_type=model_type,
             )
+            if is_latent_model else
+            None
+        )
 
         print("\t<<<DiffusionModel ready!>>>\t")
 
