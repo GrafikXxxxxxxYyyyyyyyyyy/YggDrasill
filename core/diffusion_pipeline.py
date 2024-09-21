@@ -85,111 +85,85 @@ class DiffusionPipeline(
         """
 
         if "1. Возможно предобрабатываем входные данные":
-            processor_output = self.vae_pipeline_call
+            # Должен быть self.vae: VaeModel
+            processor_output = self.vae_pipeline_call(
+                width = width,
+                height = height,
+                image = image,
+                generator = generator,
+                mask_image = mask_image,
+            )
+
+            initial_image = processor_output.image_latents
+
+            # Учитываем возможные пользовательские размеры изображений
+            if initial_image is not None:
+                width, height = initial_image.shape[2:]
+            else:
+                width = width or self.model.sample_size
+                height = height or self.model.sample_size
+
+            # Учитываем batch_size если он был изменен
+            if processor_output.mask_latents is not None:
+                processor_output.mask_latents = processor_output.mask_latents.repeat(
+                    batch_size // processor_output.mask_latents.shape[0], 1, 1, 1
+                )
+            if processor_output.masked_image_latents is not None:
+                processor_output.masked_image_latents = processor_output.masked_image_latents.repeat(
+                    batch_size // processor_output.masked_image_latents.shape[0], 1, 1, 1
+                )
+
+            print(processor_output)
 
 
 
+        if "Выполняется ForwardDiffusion":
+            forward_input.generator = generator
+            forward_input.sample = initial_image
+            forward_input.dtype = self.model.dtype
+            forward_input.device = self.model.device
+            # forward_input.denoising_end = 
+            # forward_input.denoising_start = 
 
-    
-        # Препроцессим выходные данные
-        processor_pipeline = VaePipeline()
-        processor_output = processor_pipeline(
-            width = width,
-            height = height,
-            image = image,
-            generator = generator,
-            mask_image = mask_image,
-            vae = diffuser if diffuser.is_latent_model else None,
-        )
+            
+            forward_output = self.forward_pass(
+                shape=(
+                    batch_size,
+                    self.model.num_channels,
+                    width,
+                    height,
+                ),
+                **forward_input,
+            )
 
-        initial_image = processor_output.image_latents
+            print(forward_output)
 
 
-        # Учитываем возможные пользовательские размеры изображений
-        # И пришедший на вход параметр do_cfg
-        if initial_image is not None:
-            width, height = initial_image.shape[2:]
-        else:
-            width = width or diffuser.sample_size
-            height = height or diffuser.sample_size
-
-        
-        # TODO: Перенести механизм CFG полностью на одну какую-то сторону
 
         # Учитываем CFG для масок и картинок
-        if processor_output.mask_latents is not None:
-            mask_latents = processor_output.mask_latents.repeat(
-                batch_size // mask_latents.shape[0], 1, 1, 1
+        if do_cfg:
+            processor_output.mask_latents = torch.cat([processor_output.mask_latents] * 2)
+            processor_output.masked_image_latents = torch.cat([processor_output.masked_image_latents] * 2)
+
+
+        noisy_sample = forward_output.noisy_sample
+        for i, t in tqdm(enumerate(forward_output.timesteps)):
+            # Учитываем что может быть inpaint модель
+            if self.model.predictor.is_inpainting_model:
+                noisy_sample = torch.cat([
+                    noisy_sample, processor_output.mask_latents, processor_output.masked_image_latents
+                ], dim=1)   
+                
+            noisy_sample = self.model.backward_step(
+                timestep=t,
+                noisy_sample=noisy_sample,
+                do_cfg=do_cfg,
+                guidance_scale=guidance_scale,
+                conditions=conditions,
             )
-            processor_output.mask_latents = (
-                torch.cat([mask_latents] * 2)
-                if do_cfg else
-                mask_latents
-            )
-        if processor_output.masked_image_latents is not None:
-            masked_image_latents = processor_output.masked_image_latents.repeat(
-                batch_size // masked_image_latents.shape[0], 1, 1, 1
-            )
-            processor_output.masked_image_latents = (
-                torch.cat([masked_image_latents] * 2)
-                if do_cfg else
-                masked_image_latents
-            )
-
-
-        # if "Выполняется ForwardDiffusion":
-        #     forward_input.generator = generator
-        #     forward_input.sample = initial_image
-        #     forward_input.dtype = diffuser.dtype
-        #     forward_input.device = diffuser.device
-        #     # forward_input.denoising_end = 
-        #     # forward_input.denoising_start = 
-        #     forward_pipeline = ForwardDiffusion()
-        #     forward_output = forward_pipeline(
-        #         shape=(
-        #             batch_size,
-        #             diffuser.num_channels,
-        #             width,
-        #             height,
-        #         ),
-        #         noise_scheduler=diffuser,
-        #         **forward_input
-        #     )   
-
-
-        # # Инитим пайп обратного шага
-        # backward_pipeline = BackwardDiffusion(
-        #     do_cfg=do_cfg,
-        #     guidance_scale=guidance_scale,
-        #     mask_sample=processor_output.mask_latents,
-        #     masked_sample=processor_output.masked_image_latents,
-        # )
-
-        # if "Возможно если будет использован контролнет, надо будет убрать это в цикл":
-        #     extended_conditions = diffuser.get_extended_conditions(
-        #         batch_size=batch_size,
-        #         do_cfg=do_cfg,
-        #         width=width,
-        #         height=height,
-        #         conditions=conditions,
-        #     )
-
-        #     #  Аналогично для Backward но в цикле
-        #     backward_input = BackwardDiffusionInput(
-        #         timestep=-1,
-        #         noisy_sample=forward_output.noisy_sample, 
-        #         conditions=extended_conditions,
-        #     )
-
-        # for i, t in tqdm(enumerate(forward_output.timesteps)):
-        #     backward_input.timestep = t
-        #     backward_input = backward_pipeline(
-        #         diffuser=diffuser,
-        #         **backward_input
-        #     )
             
-        #     # TODO: Добавить обработку маски через image
-        #     # в случае если модель не для inpainting
+            # TODO: Добавить обработку маски через image
+            # в случае если модель не для inpainting
 
         
         # images, _ = processor_pipeline(

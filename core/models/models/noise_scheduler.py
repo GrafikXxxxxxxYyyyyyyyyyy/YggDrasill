@@ -1,3 +1,8 @@
+# 1) Планировщик - единственная модель, которая не имеет своего собственного метода .call
+# 2) Связующая модель, от которой наследуются и модели диффузии и пайплайны
+# 3) Сам он в свою очередь наследуется от класса-ключа для всех моделей
+
+
 import torch
 
 from diffusers import (
@@ -8,11 +13,27 @@ from diffusers import (
     PNDMScheduler,
     UniPCMultistepScheduler,
 )
+from dataclasses import dataclass
+from diffusers.utils import BaseOutput
 from typing import Optional, Union, List, Tuple
 
 
 
-class NoiseScheduler:
+@dataclass
+class ModelKey(BaseOutput):
+    """
+    Базовый класс для инициализации всех 
+    моделей которые используются в проекте
+    """
+    dtype: torch.dtype = torch.float16
+    device: str = "cuda"
+    model_type: str = "sdxl"
+    scheduler_name: str = "euler"
+    model_path: str = "GrafikXxxxxxxYyyyyyyyyyy/sdxl_Juggernaut"
+
+
+
+class NoiseScheduler(ModelKey):
     scheduler: Union[
         DDIMScheduler,
         EulerDiscreteScheduler,
@@ -100,9 +121,6 @@ class NoiseScheduler:
 
 
 
-    # ################################################################################################################ #
-    # НУЖНО ДЛЯ FORWARD
-    # ################################################################################################################ #
     def retrieve_timesteps(
         self, 
         num_inference_steps: int, 
@@ -123,6 +141,7 @@ class NoiseScheduler:
         return timesteps, len(timesteps)
 
 
+
     def add_noise(
         self,
         noise: torch.FloatTensor,
@@ -131,7 +150,7 @@ class NoiseScheduler:
         initial_timesteps: Optional[torch.LongTensor] = None,
     ) -> torch.Tensor:
         """
-        Накладывает шум на оригинальные изображения или просто шум возвращает
+        Накладывает шум на оригинальные изображения
         """
 
         noisy_sample = (
@@ -145,42 +164,7 @@ class NoiseScheduler:
         )
 
         return noisy_sample
-    # ################################################################################################################ #
-
-
-
-    # ================================================================================================================ #
-    # НУЖНО ДЛЯ BACKWARD
-    # ================================================================================================================ #
-    def __call__(
-        self, 
-        timestep: int, 
-        noisy_sample: torch.FloatTensor,
-        noise_predict: Optional[torch.FloatTensor] = None,
-    ) -> torch.FloatTensor:        
-    # ================================================================================================================ #
-        """
-        Если передано предсказание шума:
-            Вычисляет шумный sample с предыдущего шага 
-            noisy_sample[t] -> noisy_sample[t-1] 
-        Если предсказание шума не передано:
-            То скейлит noisy_sample с текущего шага 
-            noisy_sample[t] -> scaled_noisy_sample[t]
-        """
-        return (
-            self.scheduler.step(
-                timestep=timestep,
-                sample=noisy_sample,
-                model_output=noise_predict,
-            )
-            if noise_predict is not None else
-            self.scheduler.scale_model_input(
-                sample=noisy_sample,
-                timestep=timestep,
-            )
-        )
-    # ================================================================================================================ #
-
+        
 
 
 

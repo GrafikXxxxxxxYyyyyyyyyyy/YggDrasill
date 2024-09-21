@@ -61,7 +61,6 @@ class ForwardDiffusion:
     def forward_pass(
         self,
         shape: Tuple[int, int, int, int],
-            # noise_scheduler: NoiseScheduler,
         device: str = "cuda",
         strength: float = 1.0, 
         num_inference_steps: int = 30, 
