@@ -51,28 +51,35 @@ class StableDiffusionModel(DiffusionModel):
         )
         
         # Опционально инитим текстовый энкодер
-        self.text_encoder = (
-            TextEncoderModel(
+        self.use_text_encoder = use_text_encoder
+        if use_text_encoder:
+            self.text_encoder = TextEncoderModel(
                 dtype=dtype,
                 device=device,
                 model_path=model_path,
                 model_type=model_type,
             )
-            if use_text_encoder else
-            None
-        )
+
+            # # Аналогично с картиночным
+            # self.use_image_encoder = use_image_encoder
+            # if use_image_encoder:
+            #     pass
+
 
         print("\t<<<StableDiffusionModel ready!>>>\t")
     # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #    
 
 
 
-    # TODO: Тут что-то должна делать модель self.text_encoder если она есть
+    # def _process_text_encoder_
+
+
+
     def retrieve_conditions(
         self,
         use_refiner: bool = False,
-        aesthetic_score: float = 6.0,
-        negative_aesthetic_score: float = 2.5,
+            # aesthetic_score: float = 6.0,
+            # negative_aesthetic_score: float = 2.5,
         te_output: Optional[TextEncoderPipelineOutput] = None,
         **kwargs,
     ) -> StableDiffusionConditions:

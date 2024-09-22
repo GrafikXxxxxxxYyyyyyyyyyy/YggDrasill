@@ -70,10 +70,7 @@ class TextEncoderPipeline(
 
 
 
-        ########################################################################################################################
-        # TODO: Вытащить это на сторону CLIP и трансформер пайплайнов
-        ########################################################################################################################
-        if "1. Подготавливаем необходимые аргументы":
+        if "1. Нормализуем входные промпты":
             prompt = prompt or ""
             prompt = [prompt] if isinstance(prompt, str) else prompt
             prompt_2 = prompt_2 or prompt
@@ -89,11 +86,10 @@ class TextEncoderPipeline(
                 negative_prompt_2 = [negative_prompt_2] if isinstance(negative_prompt_2, str) else negative_prompt_2
 
             batch_size = len(prompt) * num_images_per_prompt
-        ########################################################################################################################
 
         
 
-        if "2. Получаем эмбеддинги с моделей":
+        if "2. Получаем эмбеддинги со всех моделей что имеются":
             clip_output = self.encode_clip_prompt(
                 prompt = prompt,
                 prompt_2 = prompt_2,
@@ -116,9 +112,10 @@ class TextEncoderPipeline(
                 clip_output.prompt_embeds_2 = torch.cat([negative_clip_output.prompt_embeds_2, clip_output.prompt_embeds_2], dim=0)
                 clip_output.pooled_prompt_embeds = torch.cat([negative_clip_output.pooled_prompt_embeds, clip_output.pooled_prompt_embeds], dim=0)
 
-
-            # TODO: Получаем эмбеддинги с модели Transformer
+            # TODO: Аналогично получаем эмбеддинги с модели Transformer
             # <...>
+
+
 
         cross_attention_kwargs = (
             {"scale": lora_scale}

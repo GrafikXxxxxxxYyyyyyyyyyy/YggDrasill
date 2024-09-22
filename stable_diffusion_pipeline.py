@@ -75,12 +75,8 @@ class StableDiffusionPipeline(
         self.model = model
 
         if "1. Собираем и преобразуем обуславливающую информацию":
-            if model.use_text_encoder and te_input is not None:
-                te_pipeline = TextEncoderPipeline()
-                te_output = te_pipeline(
-                    text_encoder=model,
-                    **te_input
-                )
+            if self.model.use_text_encoder and te_input is not None:
+                te_output = self.encode_prompt(**te_input)
 
                 diffusion_input.do_cfg = te_output.do_cfg
                 diffusion_input.batch_size = te_output.batch_size
@@ -90,24 +86,26 @@ class StableDiffusionPipeline(
             te_output=te_output,
         )
 
-
-        # Создаём новый расширенный Условиями класс инпута
-        diffusion_input = DiffusionPipelineInput(
-            # conditions=Conditions(**conditions),
-            conditions=conditions,
-            **diffusion_input,
-        )
-        if "2. Учитывая переданные аргументы, используем полученный/ые пайплайны":
-            deffusion_pipeline = DiffusionPipeline()
-            diffusion_output = deffusion_pipeline(
-                diffuser=model,
-                **diffusion_input
-            )
+        print(conditions)
 
 
-        return StableDiffusionPipelineOutput(
-            images=diffusion_output.images
-        )  
+        # # Создаём новый расширенный Условиями класс инпута
+        # diffusion_input = DiffusionPipelineInput(
+        #     # conditions=Conditions(**conditions),
+        #     conditions=conditions,
+        #     **diffusion_input,
+        # )
+        # if "2. Учитывая переданные аргументы, используем полученный/ые пайплайны":
+        #     deffusion_pipeline = DiffusionPipeline()
+        #     diffusion_output = deffusion_pipeline(
+        #         diffuser=model,
+        #         **diffusion_input
+        #     )
+
+
+        # return StableDiffusionPipelineOutput(
+        #     images=diffusion_output.images
+        # )  
     # ================================================================================================================ #
 
 
