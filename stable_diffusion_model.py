@@ -22,7 +22,8 @@ class StableDiffusionModelKey(DiffusionModelKey):
 
 @dataclass
 class StableDiffusionConditions(DiffusionConditions):
-    pass
+    use_refiner: bool = False
+
 
 
 
@@ -64,11 +65,12 @@ class StableDiffusionModel(DiffusionModel, ConditionerModel):
 
 
 
-    def get_diffusion_conditions(
-        self, 
-        **kwargs
-    ):
-        pass
+    # def get_diffusion_conditions(
+    #     self, 
+    #     use_refiner:
+    #     **kwargs
+    # ):
+    #     pass
 
 
 

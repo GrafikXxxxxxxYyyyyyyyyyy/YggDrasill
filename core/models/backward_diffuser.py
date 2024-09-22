@@ -4,32 +4,35 @@ from dataclasses import dataclass
 from diffusers.utils import BaseOutput
 from typing import Optional, Union, Dict, Any
 
-from .models.noise_predictor import NoisePredictor
-from .models.noise_scheduler import NoiseScheduler, ModelKey
+from .models.noise_scheduler import NoiseScheduler
+from .models.noise_predictor import ModelKey, Conditions, NoisePredictor
+
+
 
 
 
 @dataclass
-class Conditions(BaseOutput):
-    """
-    Общий класс всех дополнительных условий для всех
-    моделей которые используются в проекте
-    """
-    # UNet2DModel
-    class_labels: Optional[torch.Tensor] = None
-    # UNet2DConditionModel
-    prompt_embeds: Optional[torch.Tensor] = None
-    timestep_cond: Optional[torch.Tensor] = None
-    attention_mask: Optional[torch.Tensor] = None
-    cross_attention_kwargs: Optional[Dict[str, Any]] = None
-    added_cond_kwargs: Optional[Dict[str, torch.Tensor]] = None
+class BackwardDiffuserKey(ModelKey):
+    scheduler_name: str = "euler"
+
+
+
+
+
+@dataclass
+class BackwardDiffuserConditions(BaseOutput):
+    do_cfg: bool = False
+    guidance_scale: float = 5.0
+    conditions: Optional[Conditions] = None
+    mask_sample: Optional[torch.FloatTensor] = None
+    masked_sample: Optional[torch.FloatTensor] = None
+
+
 
 
 
 # МОДЕЛЬ НАСЛЕДУЕТСЯ ОТ ПЛАНИРОВЩИКА
 class BackwardDiffuser(NoiseScheduler):
-    # НО ХРАНИТ ВЫЗЫВАЕМЫЙ ПРЕДИКТОР
-    # model_key: ModelKey
     predictor: NoisePredictor
     
     use_refiner: bool = False

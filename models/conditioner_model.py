@@ -3,6 +3,7 @@ import torch
 from typing import Optional
 
 from .models.text_encoder_model import TextEncoderModel
+from ..stable_diffusion_model import StableDiffusionModelKey
 
 
 
@@ -11,10 +12,11 @@ class ConditionerModel(TextEncoderModel):
 
     def __init__(
         self,
+        model_key: StableDiffusionModelKey,
         use_image_encoder: bool = False,
         **kwargs,
     ):
-        super().__init__(**kwargs)
+        super().__init__(**model_key)
 
         # if use_image_encoder:
         #     self.image_encoder = ImageEncoderModel(**kwargs)

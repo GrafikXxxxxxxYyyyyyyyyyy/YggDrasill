@@ -13,27 +13,11 @@ from diffusers import (
     PNDMScheduler,
     UniPCMultistepScheduler,
 )
-from dataclasses import dataclass
-from diffusers.utils import BaseOutput
 from typing import Optional, Union, List, Tuple
 
 
 
-@dataclass
-class ModelKey(BaseOutput):
-    """
-    Базовый класс для инициализации всех 
-    моделей которые используются в проекте
-    """
-    dtype: torch.dtype = torch.float16
-    device: str = "cuda"
-    model_type: str = "sdxl"
-    scheduler_name: str = "euler"
-    model_path: str = "GrafikXxxxxxxYyyyyyyyyyy/sdxl_Juggernaut"
-
-
-
-class NoiseScheduler(ModelKey):
+class NoiseScheduler:
     scheduler: Union[
         DDIMScheduler,
         EulerDiscreteScheduler,
