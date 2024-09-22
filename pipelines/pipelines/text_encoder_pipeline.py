@@ -9,7 +9,7 @@ from .pipelines.clip_te_pipeline import (
     CLIPTextEncoderPipeline, 
     CLIPTextEncoderPipelineInput,
 )
-from ..models.models.text_encoder_model import TextEncoderModel
+from ...models.models.text_encoder_model import TextEncoderModel
 
 
 
@@ -34,7 +34,8 @@ class TextEncoderPipelineOutput(BaseOutput):
 
 
 class TextEncoderPipeline(
-    CLIPTextEncoderPipeline
+    CLIPTextEncoderPipeline,
+        # TransformerTextEncoderPipeline
 ):  
     model: Optional[TextEncoderModel] = None
 

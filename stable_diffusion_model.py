@@ -3,10 +3,11 @@ import torch
 from typing import Optional
 from dataclasses import dataclass
 
-# from .models.models.text_encoder_model import TextEncoderModel
-# from .pipelines.text_encoder_pipeline import TextEncoderPipelineOutput
+
 from .models.conditioner_model import ConditionerModel
 from .core.diffusion_model import DiffusionModelKey, DiffusionConditions, DiffusionModel
+
+
 
 
 
@@ -17,9 +18,13 @@ class StableDiffusionModelKey(DiffusionModelKey):
 
 
 
+
+
 @dataclass
 class StableDiffusionConditions(DiffusionConditions):
     pass
+
+
 
 
 
@@ -39,7 +44,8 @@ class StableDiffusionModel(DiffusionModel, ConditionerModel):
     ): 
     # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #    
         # Инитим диффузионную модель
-        super().__init__(
+        DiffusionModel.__init__(
+            self,
             dtype=dtype,
             device=device,
             model_path=model_path,
@@ -48,73 +54,21 @@ class StableDiffusionModel(DiffusionModel, ConditionerModel):
             is_latent_model=is_latent_model,
         )
         
-        # Опционально инитим текстовый энкодер
-        self.use_text_encoder = use_text_encoder
-        if use_text_encoder:
-            self.text_encoder = TextEncoderModel(
-                dtype=dtype,
-                device=device,
-                model_path=model_path,
-                model_type=model_type,
-            )
-
-            # # Аналогично с картиночным
-            # self.use_image_encoder = use_image_encoder
-            # if use_image_encoder:
-            #     pass
-
+        ConditionerModel.__init__(
+            self,
+            use_image_encoder=use_image_encoder,
+        )
 
         print("\t<<<StableDiffusionModel ready!>>>\t")
     # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #    
 
 
 
-    # def _process_text_encoder_
-
-
-
-    def retrieve_conditions(
-        self,
-        use_refiner: bool = False,
-            # aesthetic_score: float = 6.0,
-            # negative_aesthetic_score: float = 2.5,
-        te_output: Optional[TextEncoderPipelineOutput] = None,
-        **kwargs,
-    ) -> StableDiffusionConditions:
-        """
-        Подготавливает условные аргументы с энкодеров и самой модели
-        """
-        # Собираем текстовые и картиночные условия генерации
-        conditions = StableDiffusionConditions()
-
-        if te_output is not None:
-            conditions.cross_attention_kwargs = te_output.cross_attention_kwargs
-
-            if self.model_type == "sd15":
-                conditions.prompt_embeds = te_output.clip_embeds_1
-
-            elif self.model_type == "sdxl":
-                pooled_prompt_embeds = te_output.pooled_clip_embeds
-                added_cond_kwargs = {
-                    "text_embeds": pooled_prompt_embeds,
-                }
-
-                conditions.added_cond_kwargs = added_cond_kwargs
-                conditions.prompt_embeds = (
-                    te_output.clip_embeds_2
-                    if use_refiner else
-                    torch.concat([te_output.clip_embeds_1, te_output.clip_embeds_2], dim=-1)       
-                )
-            
-            elif self.model_type == "sd3":
-                pass
-
-            elif self.model_type == "flux":
-                pass
-        
-        
-        return conditions
-        
+    def get_diffusion_conditions(
+        self, 
+        **kwargs
+    ):
+        pass
 
 
 
@@ -123,6 +77,6 @@ class StableDiffusionModel(DiffusionModel, ConditionerModel):
     # ================================================================================================================ #
         print("DiffusionModel --->")
 
-        return self.retrieve_conditions(**kwargs)
+        return self.get_diffusion_conditions(**kwargs)
     # ================================================================================================================ #
         

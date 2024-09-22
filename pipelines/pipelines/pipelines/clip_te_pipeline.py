@@ -4,8 +4,8 @@ from dataclasses import dataclass
 from typing import List, Optional, Union
 from diffusers.utils import BaseOutput
 
-from ...core.models.backward_diffuser import ModelKey
-from ...models.models.clip_te_model import CLIPTextEncoderModel
+from ....core.models.backward_diffuser import ModelKey
+from ....models.models.models.clip_te_model import CLIPTextEncoderModel
 
 
 
