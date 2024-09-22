@@ -21,7 +21,6 @@ class DiffusionModelKey(BackwardDiffuserKey):
 
 @dataclass
 class DiffusionModelConditions(BaseOutput):
-
     need_time_ids: bool = True
     aesthetic_score: float = 6.0
     negative_aesthetic_score: float = 2.5
@@ -162,10 +161,10 @@ class DiffusionModel(BackwardDiffuser):
     def get_internal_conditions(
         self,
     ):
-        if self.model.model_type == "sd15":
+        if self.model_type == "sd15":
             pass
 
-        elif self.model.model_type == "sdxl":
+        elif self.model_type == "sdxl":
             # Для модели SDXL почему-то нужно обязательно расширить 
             # дополнительные аргументы временными метками 
             add_time_ids, add_neg_time_ids = self._get_add_time_ids(

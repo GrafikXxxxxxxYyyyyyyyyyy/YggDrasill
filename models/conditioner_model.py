@@ -2,8 +2,8 @@ import torch
 
 from typing import Optional
 
+from ..core.diffusion_model import DiffusionModelKey
 from .models.text_encoder_model import TextEncoderModel
-from ..stable_diffusion_model import StableDiffusionModelKey
 
 
 
@@ -12,11 +12,19 @@ class ConditionerModel(TextEncoderModel):
 
     def __init__(
         self,
-        model_key: StableDiffusionModelKey,
+        model_path: str,
+        device: str = "cuda",
+        model_type: Optional[str] = None,
+        dtype: torch.dtype = torch.float16,
         use_image_encoder: bool = False,
         **kwargs,
-    ):
-        super().__init__(**model_key)
+    ):  
+        super().__init__(
+            dtype=dtype,
+            device=device,
+            model_path=model_path,
+            model_type=model_type,
+        )
 
         # if use_image_encoder:
         #     self.image_encoder = ImageEncoderModel(**kwargs)
@@ -25,7 +33,7 @@ class ConditionerModel(TextEncoderModel):
 
 
 
-    def get_conditions_from_embeddings(
+    def get_external_conditions(
         self,
         clip_embeds_1: torch.FloatTensor,
         clip_embeds_2: Optional[torch.FloatTensor] = None,
@@ -43,16 +51,11 @@ class ConditionerModel(TextEncoderModel):
             output = (clip_embeds_1, None, None)
 
         elif self.model_type == "sdxl":
-            # prompt_embeds = (
-            #     clip_embeds_2
-            #     if self.use_refiner else
-            #     torch.concat([clip_embeds_1, clip_embeds_2], dim=-1)
-            # )
-
             output = (
                 torch.concat([clip_embeds_1, clip_embeds_2], dim=-1),
                 pooled_clip_embeds,
-                clip_embeds_2 if use_refiner else None,
+                # clip_embeds_2 if use_refiner else None,
+                None
             )
 
         elif self.model_type == "sd3":

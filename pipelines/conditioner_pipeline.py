@@ -63,8 +63,6 @@ class ConditionerPipeline(
     ):
     # ################################################################################################################ #
         # Собираем текстовые и картиночные условия генерации
-        conditions = StableDiffusionConditions()
-
         te_output: Optional[TextEncoderPipelineOutput] = None
         if "1. Вызывам собственный энкодер":
             te_output = self.encode_prompt(**te_input)
@@ -80,7 +78,7 @@ class ConditionerPipeline(
                 prompt_embeds, 
                 text_embeds, 
                 refiner_prompt_embeds
-            ) = self.model.get_conditions_from_embeddings(
+            ) = self.model.get_external_conditions(
                 **te_output
             )
         

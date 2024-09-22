@@ -72,16 +72,14 @@ class StableDiffusionPipeline(ConditionerPipeline, DiffusionPipeline):
         self.model = model
 
         if "1. Собираем и преобразуем обуславливающую информацию":
-            conditioner_output = self.retrieve_conditions(**conditioner_input)
+            conditioner_output = self.retrieve_external_conditions(**conditioner_input)
 
         print(conditioner_output)
             
-        if "2. Вызываем лежащую внутри модельку":
-            conditions = self.model.get_diffusion_conditions(
+        # if "2. Вызываем лежащую внутри модельку":
+        #     conditions = self.model.get_diffusion_conditions(
 
-            )
-
-
+        #     )
 
         if "2. Запускаем диффузионный процесс с учётом условной информации":
             diffusion_output = self.diffusion_process(

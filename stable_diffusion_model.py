@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 
 from .models.conditioner_model import ConditionerModel
-from .core.diffusion_model import DiffusionModelKey, DiffusionConditions, DiffusionModel
+from .core.diffusion_model import DiffusionModelKey, DiffusionModelConditions, DiffusionModel
 
 
 
@@ -21,7 +21,7 @@ class StableDiffusionModelKey(DiffusionModelKey):
 
 
 @dataclass
-class StableDiffusionConditions(DiffusionConditions):
+class StableDiffusionConditions(DiffusionModelConditions):
     use_refiner: bool = False
 
 
@@ -54,11 +54,17 @@ class StableDiffusionModel(DiffusionModel, ConditionerModel):
             scheduler_name=scheduler_name,
             is_latent_model=is_latent_model,
         )
-        
-        ConditionerModel.__init__(
-            self,
-            use_image_encoder=use_image_encoder,
-        )
+
+        # И возможно условную модель, если нужно обуславливание
+        if use_text_encoder:
+            ConditionerModel.__init__(
+                self,
+                dtype=dtype,
+                device=device,
+                model_path=model_path,
+                model_type=model_type,
+                use_image_encoder=use_image_encoder,
+            )
 
         print("\t<<<StableDiffusionModel ready!>>>\t")
     # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #    
