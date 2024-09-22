@@ -177,6 +177,7 @@ class CLIPTextEncoderModel:
     clip_encoder_1: CLIPModel
     clip_encoder_2: Optional[CLIPModelWithProjection] = None
 
+    # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #
     def __init__(
         self,
         model_path: str,
@@ -185,6 +186,7 @@ class CLIPTextEncoderModel:
         dtype: torch.dtype = torch.float16,
         **kwargs,
     ):  
+    # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #
         model_type = model_type or "sd15"
 
         if model_type == "sd15":
@@ -234,6 +236,37 @@ class CLIPTextEncoderModel:
             if self.clip_encoder_2 is not None else
             None
         )
+    # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #
+    
+
+
+    def get_clip_embeddings(
+        self,
+        prompt: List[str],
+        clip_skip: Optional[int] = None,
+        lora_scale: Optional[float] = None,
+        prompt_2: Optional[List[str]] = None,
+        **kwargs,
+    ):  
+        # Энкодим первый промпт первой моделью
+        prompt_embeds_1 = self.clip_encoder_1(
+            prompt=prompt,
+            clip_skip=clip_skip,
+            lora_scale=lora_scale,
+        )
+        output = (prompt_embeds_1, )
+
+        # И второй если есть, второй моделью 
+        if prompt_2 is not None:
+            prompt_embeds_2, pooled_prompt_embeds = self.clip_encoder_2(
+                prompt=prompt_2,
+                clip_skip=clip_skip,
+                lora_scale=lora_scale,
+            )
+            output += (prompt_embeds_2, pooled_prompt_embeds)
+        
+        return output
+    
 
 
     # ================================================================================================================ #
@@ -246,22 +279,7 @@ class CLIPTextEncoderModel:
         **kwargs,
     ):  
     # ================================================================================================================ #
-        prompt_embeds_1 = self.clip_encoder_1(
-            prompt=prompt,
-            clip_skip=clip_skip,
-            lora_scale=lora_scale,
-        )
-        output = (prompt_embeds_1, )
-
-        if prompt_2 is not None:
-            prompt_embeds_2, pooled_prompt_embeds = self.clip_encoder_2(
-                prompt=prompt_2,
-                clip_skip=clip_skip,
-                lora_scale=lora_scale,
-            )
-            output += (prompt_embeds_2, pooled_prompt_embeds)
-        
-        return output
+        return self.get_clip_embeddings()
     # ================================================================================================================ #
 
 

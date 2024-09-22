@@ -13,17 +13,11 @@ from ..models.text_encoder_model import TextEncoderModel
 
 
 
-
-
-
 @dataclass
 class TextEncoderPipelineInput(CLIPTextEncoderPipelineInput):
     prompt: Optional[Union[str, List[str]]] = None,
     negative_prompt: Optional[Union[str, List[str]]] = None
     negative_prompt_2: Optional[Union[str, List[str]]] = None
-
-
-
 
 
 
@@ -39,11 +33,10 @@ class TextEncoderPipelineOutput(BaseOutput):
 
 
 
-
-
-
-class TextEncoderPipeline:  
-    text_encoder: Optional[TextEncoderModel] = None
+class TextEncoderPipeline(
+    CLIPTextEncoderPipeline
+):  
+    model: Optional[TextEncoderModel] = None
 
     # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #
     def __init__(
@@ -55,12 +48,11 @@ class TextEncoderPipeline:
         if model_key is not None:
             self.clip_encoder = TextEncoderModel(**model_key)
     # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #
-    
-    
 
-    def __call__(
+
+
+    def encode_prompt(
         self,
-        text_encoder: TextEncoderModel,
         num_images_per_prompt: int = 1,
         clip_skip: Optional[int] = None,
         lora_scale: Optional[float] = None,
@@ -71,11 +63,16 @@ class TextEncoderPipeline:
         **kwargs,
     ) -> TextEncoderPipelineOutput:
         """
+        Кодирует полученные промпты и моделью CLIP и моделью Transformer (возможно)
         """
         # Устанавливаем метку do_cfg исходя из наличия негативного промпта
         do_cfg = True if negative_prompt is not None else False
-        
+
+
+
+        ########################################################################################################################
         # TODO: Вытащить это на сторону CLIP и трансформер пайплайнов
+        ########################################################################################################################
         if "1. Подготавливаем необходимые аргументы":
             prompt = prompt or ""
             prompt = [prompt] if isinstance(prompt, str) else prompt
@@ -92,27 +89,22 @@ class TextEncoderPipeline:
                 negative_prompt_2 = [negative_prompt_2] if isinstance(negative_prompt_2, str) else negative_prompt_2
 
             batch_size = len(prompt) * num_images_per_prompt
+        ########################################################################################################################
 
         
-        if "2. Получаем эмбеддинги с моделей":
-            clip_pipeline = CLIPTextEncoderPipeline()
 
-            clip_output = clip_pipeline(
-                clip_encoder = text_encoder,
+        if "2. Получаем эмбеддинги с моделей":
+            clip_output = self.encode_clip_prompt(
                 prompt = prompt,
                 prompt_2 = prompt_2,
                 clip_skip = clip_skip,
                 lora_scale = lora_scale,
                 num_images_per_prompt = num_images_per_prompt,
             )
-            print(clip_output.prompt_embeds_1.shape)
-            print(clip_output.prompt_embeds_2.shape)
-            print(clip_output.pooled_prompt_embeds.shape)
 
             # И применяем инструкции cfg если необходимо
             if do_cfg:
-                negative_clip_output = clip_pipeline(
-                    clip_encoder = text_encoder,
+                negative_clip_output = self.encode_clip_prompt(
                     prompt = negative_prompt,
                     prompt_2 = negative_prompt_2,
                     clip_skip = clip_skip,
@@ -124,10 +116,6 @@ class TextEncoderPipeline:
                 clip_output.prompt_embeds_2 = torch.cat([negative_clip_output.prompt_embeds_2, clip_output.prompt_embeds_2], dim=0)
                 clip_output.pooled_prompt_embeds = torch.cat([negative_clip_output.pooled_prompt_embeds, clip_output.pooled_prompt_embeds], dim=0)
 
-                print(clip_output.prompt_embeds_1.shape)
-                print(clip_output.prompt_embeds_2.shape)
-                print(clip_output.pooled_prompt_embeds.shape)
-
 
             # TODO: Получаем эмбеддинги с модели Transformer
             # <...>
@@ -138,6 +126,8 @@ class TextEncoderPipeline:
             None
         )
 
+
+
         return TextEncoderPipelineOutput(
             do_cfg=do_cfg,
             batch_size=batch_size,
@@ -146,6 +136,24 @@ class TextEncoderPipeline:
             pooled_clip_embeds=clip_output.pooled_prompt_embeds,
             cross_attention_kwargs=cross_attention_kwargs
         )
+
+    
+    
+    # ================================================================================================================ #
+    def __call__(
+        self,
+        text_encoder: Optional[TextEncoderModel] = None,
+        **kwargs,
+    ) -> TextEncoderPipelineOutput:
+    # ================================================================================================================ #
+        if (
+            text_encoder is not None 
+            and isinstance(text_encoder, TextEncoderModel)
+        ):
+            self.model = text_encoder
+
+        return self.encode_prompt(**kwargs)
+    # ================================================================================================================ #
 
     
 

@@ -6,8 +6,7 @@ from .models.clip_te_model import CLIPTextEncoderModel
 
 
 
-class TextEncoderModel:
-    clip_encoder: CLIPTextEncoderModel
+class TextEncoderModel(CLIPTextEncoderModel):
         # transformer_encoder: 
 
     def __init__(
@@ -18,7 +17,7 @@ class TextEncoderModel:
         dtype: torch.dtype = torch.float16,
         **kwargs,
     ):  
-        self.clip_encoder = CLIPTextEncoderModel(
+        super().__init__(
             dtype=dtype,
             device=device,
             model_path=model_path,
@@ -29,7 +28,11 @@ class TextEncoderModel:
         self.model_type = model_type or "sd15"
 
 
-    # def __call__(
-        
-    # )
-    
+
+    def __call__(
+        self,
+    ):
+        """
+        По идее должен делать что-то типа подготовки нужных аргументов для модели 
+        """
+        return

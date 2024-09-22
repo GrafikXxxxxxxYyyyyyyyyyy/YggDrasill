@@ -28,7 +28,7 @@ class CLIPTextEncoderPipelineOutput(BaseOutput):
 
 
 class CLIPTextEncoderPipeline:
-    clip_encoder: CLIPTextEncoderModel
+    model: Optional[CLIPTextEncoderModel] = None
 
     # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #
     def __init__(
@@ -52,23 +52,26 @@ class CLIPTextEncoderPipeline:
         prompt_2: Optional[List[str]] = None,
         **kwargs,
     ) -> CLIPTextEncoderPipelineOutput:  
-        # Получаем выходы всех энкодеров модели через .get_clip_embeddings()
-        (
-            prompt_embeds_1, 
-            prompt_embeds_2, 
-            pooled_prompt_embeds
-        ) = self.clip_encoder.get_clip_embeddings(
+        # Получаем выходы всех CLIP энкодеров модели через .get_clip_embeddings()
+        clip_output = self.model.get_clip_embeddings(
             prompt=prompt,
             prompt_2=prompt_2,
             clip_skip=clip_skip,
             lora_scale=lora_scale,
         )
         
+        if len(clip_output) == 1:
+            prompt_embeds_1 = clip_output
+        elif len(clip_output) == 3:
+            (prompt_embeds_1, prompt_embeds_2, pooled_prompt_embeds) = clip_output
+        
         # Запоминаем форму тензора
         bs_embed, seq_len, _ = prompt_embeds_1.shape
+        
         # Мультиплицируем количество промптов под заданные параметры
         prompt_embeds_1 = prompt_embeds_1.repeat(1, num_images_per_prompt, 1)
         prompt_embeds_1 = prompt_embeds_1.view(bs_embed * num_images_per_prompt, seq_len, -1)
+
         if prompt_embeds_2 is not None:
             prompt_embeds_2 = prompt_embeds_2.repeat(1, num_images_per_prompt, 1)
             prompt_embeds_2 = prompt_embeds_2.view(bs_embed * num_images_per_prompt, seq_len, -1)
@@ -89,12 +92,17 @@ class CLIPTextEncoderPipeline:
     # ================================================================================================================ #
     def __call__(
         self,
-        input: CLIPTextEncoderPipelineInput,
         clip_encoder: Optional[CLIPTextEncoderModel] = None,
         **kwargs,
     ) -> CLIPTextEncoderPipelineOutput:  
     # ================================================================================================================ #
-        pass
+        if (
+            clip_encoder is not None 
+            and isinstance(clip_encoder, CLIPTextEncoderModel)
+        ):
+            self.model = clip_encoder
+
+        return self.encode_clip_prompt(**kwargs)
     # ================================================================================================================ #
     
 
