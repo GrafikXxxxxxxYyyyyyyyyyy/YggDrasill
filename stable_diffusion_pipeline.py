@@ -82,30 +82,27 @@ class StableDiffusionPipeline(
                 diffusion_input.batch_size = te_output.batch_size
 
 
+        # Вызов StableDiffusionModel
         conditions = self.model.retrieve_conditions(
             te_output=te_output,
         )
-
         print(conditions)
 
 
-        # # Создаём новый расширенный Условиями класс инпута
-        # diffusion_input = DiffusionPipelineInput(
-        #     # conditions=Conditions(**conditions),
-        #     conditions=conditions,
-        #     **diffusion_input,
-        # )
-        # if "2. Учитывая переданные аргументы, используем полученный/ые пайплайны":
-        #     deffusion_pipeline = DiffusionPipeline()
-        #     diffusion_output = deffusion_pipeline(
-        #         diffuser=model,
-        #         **diffusion_input
-        #     )
+
+        if "2. Запускаем диффузионный процесс с учётом условной информации":
+            # Создаём новый расширенный Условиями класс инпута
+            diffusion_input = DiffusionPipelineInput(
+                conditions=conditions,
+                **diffusion_input,
+            )
+
+            diffusion_output = self.diffusion_process(**diffusion_input)
 
 
-        # return StableDiffusionPipelineOutput(
-        #     images=diffusion_output.images
-        # )  
+        return StableDiffusionPipelineOutput(
+            images=diffusion_output.images
+        )  
     # ================================================================================================================ #
 
 

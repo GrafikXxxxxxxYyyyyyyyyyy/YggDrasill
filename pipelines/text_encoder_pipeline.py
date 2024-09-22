@@ -9,7 +9,7 @@ from .pipelines.clip_te_pipeline import (
     CLIPTextEncoderPipeline, 
     CLIPTextEncoderPipelineInput,
 )
-from ..models.text_encoder_model import TextEncoderModel
+from ..models.models.text_encoder_model import TextEncoderModel
 
 
 

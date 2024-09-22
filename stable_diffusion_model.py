@@ -3,8 +3,9 @@ import torch
 from typing import Optional
 from dataclasses import dataclass
 
-from .models.text_encoder_model import TextEncoderModel
-from .pipelines.text_encoder_pipeline import TextEncoderPipelineOutput
+# from .models.models.text_encoder_model import TextEncoderModel
+# from .pipelines.text_encoder_pipeline import TextEncoderPipelineOutput
+from .models.conditioner_model import ConditionerModel
 from .core.diffusion_model import DiffusionModelKey, DiffusionConditions, DiffusionModel
 
 
@@ -22,10 +23,7 @@ class StableDiffusionConditions(DiffusionConditions):
 
 
 
-class StableDiffusionModel(DiffusionModel):  
-    text_encoder: Optional[TextEncoderModel] = None
-        # image_encoder: Optional[ImageEncoderModel] = None
-
+class StableDiffusionModel(DiffusionModel, ConditionerModel):  
     # //////////////////////////////////////////////////////////////////////////////////////////////////////////////// #    
     def __init__(
         self,
