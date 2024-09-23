@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from diffusers.utils import BaseOutput
 
 from .core.diffusion_pipeline import DiffusionPipeline, DiffusionPipelineInput
-from .pipelines.conditioner_pipeline import ConditionerPipeline, ConditionerPipelineInput
+from .conditioner.conditioner_pipeline import ConditionerPipeline, ConditionerPipelineInput
 from .stable_diffusion_model import StableDiffusionModel, StableDiffusionModelKey, StableDiffusionConditions
 
 

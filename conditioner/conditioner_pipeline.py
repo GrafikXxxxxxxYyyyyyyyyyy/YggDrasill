@@ -4,9 +4,9 @@ from dataclasses import dataclass
 from diffusers.utils import BaseOutput
 from typing import List, Optional, Union, Dict, Any
 
-from ..models.conditioner_model import ConditionerModel
+from .conditioner_model import ConditionerModel
 from ..stable_diffusion_model import StableDiffusionModelKey, StableDiffusionConditions
-from .pipelines.text_encoder_pipeline import TextEncoderPipeline, TextEncoderPipelineInput, TextEncoderPipelineOutput
+from ..pipelines.pipelines.text_encoder_pipeline import TextEncoderPipeline, TextEncoderPipelineInput, TextEncoderPipelineOutput
 
 
 

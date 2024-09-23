@@ -4,7 +4,7 @@ from typing import Optional
 from dataclasses import dataclass
 
 
-from .models.conditioner_model import ConditionerModel
+from .conditioner.conditioner_model import ConditionerModel
 from .core.diffusion_model import DiffusionModelKey, DiffusionModelConditions, DiffusionModel
 
 
