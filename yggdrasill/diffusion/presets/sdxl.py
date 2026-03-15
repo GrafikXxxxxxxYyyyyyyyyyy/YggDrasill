@@ -50,7 +50,6 @@ def build_sdxl_text2img_graph(
     )
     prompt_enc = SDXLPromptEncoderNode(
         "prompt_enc",
-        tokenizer=None, tokenizer_2=None,
         text_encoder=text_encoder, text_encoder_2=text_encoder_2,
         config={"clip_skip": cfg.get("clip_skip")},
     )
@@ -153,8 +152,7 @@ def build_sdxl_img2img_graph(
 
     tok_node = SDXLTokenizerNode("tokenizer", tokenizer=tokenizer, tokenizer_2=tokenizer_2)
     prompt_enc = SDXLPromptEncoderNode(
-        "prompt_enc", tokenizer=None, tokenizer_2=None,
-        text_encoder=text_encoder, text_encoder_2=text_encoder_2,
+        "prompt_enc", text_encoder=text_encoder, text_encoder_2=text_encoder_2,
     )
     added_cond = SDXLAddedConditioningNode("added_cond", config={
         "original_size": cfg.get("original_size", (1024, 1024)),
@@ -253,8 +251,7 @@ def build_sdxl_inpaint_graph(
 
     tok_node = SDXLTokenizerNode("tokenizer", tokenizer=tokenizer, tokenizer_2=tokenizer_2)
     prompt_enc = SDXLPromptEncoderNode(
-        "prompt_enc", tokenizer=None, tokenizer_2=None,
-        text_encoder=text_encoder, text_encoder_2=text_encoder_2,
+        "prompt_enc", text_encoder=text_encoder, text_encoder_2=text_encoder_2,
     )
     added_cond = SDXLAddedConditioningNode("added_cond", config={
         "original_size": cfg.get("original_size", (1024, 1024)),

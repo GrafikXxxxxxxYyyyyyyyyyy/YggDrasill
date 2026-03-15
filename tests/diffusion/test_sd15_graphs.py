@@ -38,6 +38,7 @@ class TestSD15Text2ImgGraph:
 
     def test_has_required_nodes(self, sd15_kwargs):
         g = build_sd15_text2img_graph(**sd15_kwargs)
+        assert "tokenizer" in g.node_ids
         assert "prompt_enc" in g.node_ids
         assert "unet" in g.node_ids
         assert "vae_decode" in g.node_ids

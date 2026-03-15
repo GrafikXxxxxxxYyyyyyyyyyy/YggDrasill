@@ -233,7 +233,9 @@ class Hypergraph:
             )
             self._ensure_implicit_component_nodes(
                 component_type,
+                pretrained=pretrained,
                 config=config,
+                **kwargs,
             )
             return
 
@@ -270,22 +272,39 @@ class Hypergraph:
 
         self._ensure_implicit_component_nodes(
             component_type,
+            pretrained=pretrained,
             config=config,
+            **kwargs,
         )
 
     def _ensure_implicit_component_nodes(
         self,
         component_type: str,
         *,
+        pretrained: Optional[str] = None,
         config: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
     ) -> None:
         """Auto-insert helper nodes required by ergonomic component APIs.
 
-        These nodes are implementation details of the graph runtime and
-        should not need to be listed explicitly by users when assembling
-        a graph with high-level component types.
+        When adding prompt_encoder (Conjector), ensure tokenizer (Converter)
+        exists (canon: strict separation). Also adds latent_init, added_conditioning.
         """
         family = component_type.split(".", 1)[0]
+
+        # Canon: Tokenizer (Converter) must exist when Conjector (prompt_encoder) is used
+        tokenizer_type = f"{family}.tokenizer"
+        if component_type in (f"{family}.prompt_encoder", f"{family}.text_encoder"):
+            if self._find_node_id_by_block_type(f"{family}/tokenizer") is None and pretrained:
+                self.add_node(
+                    "__auto_" + family + "_tokenizer",
+                    type=tokenizer_type,
+                    pretrained=pretrained,
+                    auto_connect=True,
+                    config=config,
+                    **kwargs,
+                )
+
         implicit_specs: Dict[str, List[tuple[str, str]]] = {
             "sd15": [
                 ("sd15/latent_init", "__auto_sd15_latent_init"),

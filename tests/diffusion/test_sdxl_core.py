@@ -23,7 +23,6 @@ class TestSDXLPromptEncoder:
         from yggdrasill.integrations.diffusers.sdxl.prompt_encoder import SDXLPromptEncoderNode
         node = SDXLPromptEncoderNode(
             "enc",
-            tokenizer=FakeTokenizer(), tokenizer_2=FakeTokenizer(),
             text_encoder=FakeTextEncoder(), text_encoder_2=FakeTextEncoder2(),
         )
         ports = node.declare_ports()
@@ -35,7 +34,6 @@ class TestSDXLPromptEncoder:
         from yggdrasill.integrations.diffusers.sdxl.prompt_encoder import SDXLPromptEncoderNode
         node = SDXLPromptEncoderNode(
             "enc",
-            tokenizer=FakeTokenizer(), tokenizer_2=FakeTokenizer(),
             text_encoder=FakeTextEncoder(), text_encoder_2=FakeTextEncoder2(),
         )
         ports = node.declare_ports()
@@ -49,22 +47,20 @@ class TestSDXLPromptEncoder:
         from yggdrasill.integrations.diffusers.sdxl.prompt_encoder import SDXLPromptEncoderNode
         node = SDXLPromptEncoderNode(
             "enc",
-            tokenizer=FakeTokenizer(), tokenizer_2=FakeTokenizer(),
             text_encoder=FakeTextEncoder(), text_encoder_2=FakeTextEncoder2(),
         )
         assert node.block_type == "sdxl/prompt_encoder"
 
-    def test_dual_prompt(self):
+    def test_dual_encoder_input_ports(self):
         from yggdrasill.integrations.diffusers.sdxl.prompt_encoder import SDXLPromptEncoderNode
         node = SDXLPromptEncoderNode(
             "enc",
-            tokenizer=FakeTokenizer(), tokenizer_2=FakeTokenizer(),
             text_encoder=FakeTextEncoder(), text_encoder_2=FakeTextEncoder2(),
         )
         ports = node.declare_ports()
         in_names = {p.name for p in ports if p.direction == PortDirection.IN}
-        assert C.PORT_PROMPT in in_names
-        assert C.PORT_PROMPT_2 in in_names
+        assert C.PORT_INPUT_IDS in in_names
+        assert C.PORT_INPUT_IDS_2 in in_names
 
 
 class TestSDXLAddedConditioning:

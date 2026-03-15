@@ -24,7 +24,6 @@ class TestFluxPromptEncoder:
         from yggdrasill.integrations.diffusers.flux.prompt_encoder import FluxPromptEncoderNode
         node = FluxPromptEncoderNode(
             "enc",
-            tokenizer=FakeTokenizer(), tokenizer_2=FakeT5Tokenizer(),
             text_encoder=FakeCLIPEncoderWithPooler(), text_encoder_2=FakeT5Encoder(),
         )
         ports = node.declare_ports()
@@ -36,7 +35,6 @@ class TestFluxPromptEncoder:
         from yggdrasill.integrations.diffusers.flux.prompt_encoder import FluxPromptEncoderNode
         node = FluxPromptEncoderNode(
             "enc",
-            tokenizer=FakeTokenizer(), tokenizer_2=FakeT5Tokenizer(),
             text_encoder=FakeCLIPEncoderWithPooler(), text_encoder_2=FakeT5Encoder(),
         )
         ports = node.declare_ports()
@@ -49,7 +47,6 @@ class TestFluxPromptEncoder:
         from yggdrasill.integrations.diffusers.flux.prompt_encoder import FluxPromptEncoderNode
         node = FluxPromptEncoderNode(
             "enc",
-            tokenizer=FakeTokenizer(), tokenizer_2=FakeT5Tokenizer(),
             text_encoder=FakeCLIPEncoderWithPooler(), text_encoder_2=FakeT5Encoder(),
         )
         assert node.block_type == "flux/prompt_encoder"
@@ -58,7 +55,6 @@ class TestFluxPromptEncoder:
         from yggdrasill.integrations.diffusers.flux.prompt_encoder import FluxPromptEncoderNode
         node = FluxPromptEncoderNode(
             "enc",
-            tokenizer=FakeTokenizer(), tokenizer_2=FakeT5Tokenizer(),
             text_encoder=FakeCLIPEncoderWithPooler(), text_encoder_2=FakeT5Encoder(),
         )
         ports = node.declare_ports()

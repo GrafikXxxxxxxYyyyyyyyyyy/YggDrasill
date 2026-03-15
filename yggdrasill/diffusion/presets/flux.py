@@ -23,7 +23,7 @@ def build_flux_text2img_graph(
 
     Graph structure::
 
-        prompt ──► FluxPromptEncoder ──► FluxTransformer ◄── FluxLatentInit
+        prompt ──► Converter (tokenizer) ──► Conjector (text_encoder) ──► FluxTransformer ◄── FluxLatentInit
                                              │                     ▲
                                              ▼                     │
                                        FluxSchedulerStep ──────────┘
@@ -31,6 +31,7 @@ def build_flux_text2img_graph(
                                              ▼
                                         FluxVAEDecode ──► output
     """
+    from yggdrasill.integrations.diffusers.flux.tokenizer import FluxTokenizerNode
     from yggdrasill.integrations.diffusers.flux.prompt_encoder import FluxPromptEncoderNode
     from yggdrasill.integrations.diffusers.flux.transformer import FluxTransformerNode
     from yggdrasill.integrations.diffusers.flux.scheduler import (
@@ -43,9 +44,13 @@ def build_flux_text2img_graph(
 
     h = Hypergraph(graph_id="flux_text2img")
 
+    tok_node = FluxTokenizerNode(
+        "tokenizer",
+        tokenizer=tokenizer, tokenizer_2=tokenizer_2,
+        config={"max_sequence_length": cfg.get("max_sequence_length", 512)},
+    )
     prompt_enc = FluxPromptEncoderNode(
         "prompt_enc",
-        tokenizer=tokenizer, tokenizer_2=tokenizer_2,
         text_encoder=text_encoder, text_encoder_2=text_encoder_2,
         config={"max_sequence_length": cfg.get("max_sequence_length", 512)},
     )
@@ -77,12 +82,14 @@ def build_flux_text2img_graph(
     })
 
     for nid, node in [
-        ("prompt_enc", prompt_enc), ("sched_setup", sched_setup),
+        ("tokenizer", tok_node), ("prompt_enc", prompt_enc), ("sched_setup", sched_setup),
         ("latent_init", lat_init), ("transformer", transformer_node),
         ("sched_step", sched_step), ("vae_decode", vae_dec),
     ]:
         h.add_node(nid, node)
 
+    h.add_edge(Edge("tokenizer", C.PORT_INPUT_IDS, "prompt_enc", C.PORT_INPUT_IDS))
+    h.add_edge(Edge("tokenizer", C.PORT_INPUT_IDS_2, "prompt_enc", C.PORT_INPUT_IDS_2))
     h.add_edge(Edge("sched_setup", C.PORT_SCHEDULER_STATE, "latent_init", C.PORT_SCHEDULER_STATE))
     h.add_edge(Edge("prompt_enc", C.PORT_PROMPT_EMBEDS, "transformer", C.PORT_PROMPT_EMBEDS))
     h.add_edge(Edge("prompt_enc", C.PORT_POOLED_PROMPT_EMBEDS, "transformer", C.PORT_POOLED_PROJECTIONS))
@@ -93,8 +100,8 @@ def build_flux_text2img_graph(
     h.add_edge(Edge("sched_step", "next_latent", "transformer", C.PORT_PACKED_LATENTS))
     h.add_edge(Edge("sched_step", "next_latent", "vae_decode", C.PORT_PACKED_LATENTS))
 
-    h.expose_input("prompt_enc", C.PORT_PROMPT, C.PORT_PROMPT)
-    h.expose_input("prompt_enc", C.PORT_PROMPT_2, C.PORT_PROMPT_2)
+    h.expose_input("tokenizer", C.PORT_PROMPT, C.PORT_PROMPT)
+    h.expose_input("tokenizer", C.PORT_PROMPT_2, C.PORT_PROMPT_2)
     h.expose_input("transformer", C.PORT_GUIDANCE, C.PORT_GUIDANCE)
     h.expose_output("vae_decode", C.PORT_DECODED_IMAGE, C.PORT_OUTPUT_IMAGE)
 
@@ -115,6 +122,7 @@ def build_flux_img2img_graph(
     config: Optional[Dict[str, Any]] = None,
 ) -> Hypergraph:
     """Build a canonical FLUX image-to-image hypergraph."""
+    from yggdrasill.integrations.diffusers.flux.tokenizer import FluxTokenizerNode
     from yggdrasill.integrations.diffusers.flux.prompt_encoder import FluxPromptEncoderNode
     from yggdrasill.integrations.diffusers.flux.transformer import FluxTransformerNode
     from yggdrasill.integrations.diffusers.flux.scheduler import (
@@ -126,10 +134,12 @@ def build_flux_img2img_graph(
     cfg = config or {}
     h = Hypergraph(graph_id="flux_img2img")
 
+    tok_node = FluxTokenizerNode(
+        "tokenizer", tokenizer=tokenizer, tokenizer_2=tokenizer_2,
+        config={"max_sequence_length": cfg.get("max_sequence_length", 512)},
+    )
     prompt_enc = FluxPromptEncoderNode(
-        "prompt_enc",
-        tokenizer=tokenizer, tokenizer_2=tokenizer_2,
-        text_encoder=text_encoder, text_encoder_2=text_encoder_2,
+        "prompt_enc", text_encoder=text_encoder, text_encoder_2=text_encoder_2,
         config={"max_sequence_length": cfg.get("max_sequence_length", 512)},
     )
     img_enc = FluxVAEEncodeNode("img_encode", vae=vae, config={
@@ -160,13 +170,15 @@ def build_flux_img2img_graph(
     })
 
     for nid, node in [
-        ("prompt_enc", prompt_enc), ("img_encode", img_enc),
+        ("tokenizer", tok_node), ("prompt_enc", prompt_enc), ("img_encode", img_enc),
         ("sched_setup", sched_setup), ("latent_init", lat_init),
         ("transformer", transformer_node), ("sched_step", sched_step),
         ("vae_decode", vae_dec),
     ]:
         h.add_node(nid, node)
 
+    h.add_edge(Edge("tokenizer", C.PORT_INPUT_IDS, "prompt_enc", C.PORT_INPUT_IDS))
+    h.add_edge(Edge("tokenizer", C.PORT_INPUT_IDS_2, "prompt_enc", C.PORT_INPUT_IDS_2))
     h.add_edge(Edge("img_encode", C.PORT_LATENTS, "latent_init", C.PORT_INIT_LATENTS))
     h.add_edge(Edge("sched_setup", C.PORT_SCHEDULER_STATE, "latent_init", C.PORT_SCHEDULER_STATE))
     h.add_edge(Edge("prompt_enc", C.PORT_PROMPT_EMBEDS, "transformer", C.PORT_PROMPT_EMBEDS))
@@ -178,7 +190,7 @@ def build_flux_img2img_graph(
     h.add_edge(Edge("sched_step", "next_latent", "transformer", C.PORT_PACKED_LATENTS))
     h.add_edge(Edge("sched_step", "next_latent", "vae_decode", C.PORT_PACKED_LATENTS))
 
-    h.expose_input("prompt_enc", C.PORT_PROMPT, C.PORT_PROMPT)
+    h.expose_input("tokenizer", C.PORT_PROMPT, C.PORT_PROMPT)
     h.expose_input("img_encode", C.PORT_INIT_IMAGE, C.PORT_INIT_IMAGE)
     h.expose_input("transformer", C.PORT_GUIDANCE, C.PORT_GUIDANCE)
     h.expose_output("vae_decode", C.PORT_DECODED_IMAGE, C.PORT_OUTPUT_IMAGE)
@@ -199,6 +211,7 @@ def build_flux_inpaint_graph(
     config: Optional[Dict[str, Any]] = None,
 ) -> Hypergraph:
     """Build a canonical FLUX inpainting hypergraph."""
+    from yggdrasill.integrations.diffusers.flux.tokenizer import FluxTokenizerNode
     from yggdrasill.integrations.diffusers.flux.prompt_encoder import FluxPromptEncoderNode
     from yggdrasill.integrations.diffusers.flux.transformer import FluxTransformerNode
     from yggdrasill.integrations.diffusers.flux.scheduler import (
@@ -211,10 +224,12 @@ def build_flux_inpaint_graph(
     cfg = config or {}
     h = Hypergraph(graph_id="flux_inpaint")
 
+    tok_node = FluxTokenizerNode(
+        "tokenizer", tokenizer=tokenizer, tokenizer_2=tokenizer_2,
+        config={"max_sequence_length": cfg.get("max_sequence_length", 512)},
+    )
     prompt_enc = FluxPromptEncoderNode(
-        "prompt_enc",
-        tokenizer=tokenizer, tokenizer_2=tokenizer_2,
-        text_encoder=text_encoder, text_encoder_2=text_encoder_2,
+        "prompt_enc", text_encoder=text_encoder, text_encoder_2=text_encoder_2,
         config={"max_sequence_length": cfg.get("max_sequence_length", 512)},
     )
     mask_prep = SD15MaskPrepNode("mask_prep", vae=vae, config={
@@ -246,13 +261,15 @@ def build_flux_inpaint_graph(
     })
 
     for nid, node in [
-        ("prompt_enc", prompt_enc), ("mask_prep", mask_prep),
+        ("tokenizer", tok_node), ("prompt_enc", prompt_enc), ("mask_prep", mask_prep),
         ("sched_setup", sched_setup), ("latent_init", lat_init),
         ("transformer", transformer_node), ("sched_step", sched_step),
         ("vae_decode", vae_dec),
     ]:
         h.add_node(nid, node)
 
+    h.add_edge(Edge("tokenizer", C.PORT_INPUT_IDS, "prompt_enc", C.PORT_INPUT_IDS))
+    h.add_edge(Edge("tokenizer", C.PORT_INPUT_IDS_2, "prompt_enc", C.PORT_INPUT_IDS_2))
     h.add_edge(Edge("sched_setup", C.PORT_SCHEDULER_STATE, "latent_init", C.PORT_SCHEDULER_STATE))
     h.add_edge(Edge("prompt_enc", C.PORT_PROMPT_EMBEDS, "transformer", C.PORT_PROMPT_EMBEDS))
     h.add_edge(Edge("prompt_enc", C.PORT_POOLED_PROMPT_EMBEDS, "transformer", C.PORT_POOLED_PROJECTIONS))
@@ -263,7 +280,7 @@ def build_flux_inpaint_graph(
     h.add_edge(Edge("sched_step", "next_latent", "transformer", C.PORT_PACKED_LATENTS))
     h.add_edge(Edge("sched_step", "next_latent", "vae_decode", C.PORT_PACKED_LATENTS))
 
-    h.expose_input("prompt_enc", C.PORT_PROMPT, C.PORT_PROMPT)
+    h.expose_input("tokenizer", C.PORT_PROMPT, C.PORT_PROMPT)
     h.expose_input("mask_prep", C.PORT_INIT_IMAGE, C.PORT_INIT_IMAGE)
     h.expose_input("mask_prep", C.PORT_MASK_IMAGE, C.PORT_MASK_IMAGE)
     h.expose_input("transformer", C.PORT_GUIDANCE, C.PORT_GUIDANCE)
@@ -286,6 +303,7 @@ def build_flux_controlnet_text2img_graph(
     config: Optional[Dict[str, Any]] = None,
 ) -> Hypergraph:
     """Build a FLUX text-to-image hypergraph with ControlNet conditioning."""
+    from yggdrasill.integrations.diffusers.flux.tokenizer import FluxTokenizerNode
     from yggdrasill.integrations.diffusers.flux.prompt_encoder import FluxPromptEncoderNode
     from yggdrasill.integrations.diffusers.flux.transformer import FluxTransformerNode
     from yggdrasill.integrations.diffusers.flux.scheduler import (
@@ -299,10 +317,12 @@ def build_flux_controlnet_text2img_graph(
 
     h = Hypergraph(graph_id="flux_controlnet_text2img")
 
+    tok_node = FluxTokenizerNode(
+        "tokenizer", tokenizer=tokenizer, tokenizer_2=tokenizer_2,
+        config={"max_sequence_length": cfg.get("max_sequence_length", 512)},
+    )
     prompt_enc = FluxPromptEncoderNode(
-        "prompt_enc",
-        tokenizer=tokenizer, tokenizer_2=tokenizer_2,
-        text_encoder=text_encoder, text_encoder_2=text_encoder_2,
+        "prompt_enc", text_encoder=text_encoder, text_encoder_2=text_encoder_2,
         config={"max_sequence_length": cfg.get("max_sequence_length", 512)},
     )
     sched_setup = FluxSchedulerSetupNode("sched_setup", scheduler=scheduler, config={
@@ -333,15 +353,16 @@ def build_flux_controlnet_text2img_graph(
     })
 
     for nid, node in [
-        ("prompt_enc", prompt_enc), ("sched_setup", sched_setup),
+        ("tokenizer", tok_node), ("prompt_enc", prompt_enc), ("sched_setup", sched_setup),
         ("latent_init", lat_init), ("controlnet", cn_node),
         ("transformer", transformer_node), ("sched_step", sched_step),
         ("vae_decode", vae_dec),
     ]:
         h.add_node(nid, node)
 
+    h.add_edge(Edge("tokenizer", C.PORT_INPUT_IDS, "prompt_enc", C.PORT_INPUT_IDS))
+    h.add_edge(Edge("tokenizer", C.PORT_INPUT_IDS_2, "prompt_enc", C.PORT_INPUT_IDS_2))
     h.add_edge(Edge("sched_setup", C.PORT_SCHEDULER_STATE, "latent_init", C.PORT_SCHEDULER_STATE))
-
     h.add_edge(Edge("prompt_enc", C.PORT_PROMPT_EMBEDS, "transformer", C.PORT_PROMPT_EMBEDS))
     h.add_edge(Edge("prompt_enc", C.PORT_POOLED_PROMPT_EMBEDS, "transformer", C.PORT_POOLED_PROJECTIONS))
     h.add_edge(Edge("prompt_enc", C.PORT_TXT_IDS, "transformer", C.PORT_TXT_IDS))
@@ -361,7 +382,7 @@ def build_flux_controlnet_text2img_graph(
     h.add_edge(Edge("sched_step", "next_latent", "transformer", C.PORT_PACKED_LATENTS))
     h.add_edge(Edge("sched_step", "next_latent", "vae_decode", C.PORT_PACKED_LATENTS))
 
-    h.expose_input("prompt_enc", C.PORT_PROMPT, C.PORT_PROMPT)
+    h.expose_input("tokenizer", C.PORT_PROMPT, C.PORT_PROMPT)
     h.expose_input("controlnet", C.PORT_CONTROL_IMAGE, C.PORT_CONTROL_IMAGE)
     h.expose_input("transformer", C.PORT_GUIDANCE, C.PORT_GUIDANCE)
     h.expose_output("vae_decode", C.PORT_DECODED_IMAGE, C.PORT_OUTPUT_IMAGE)

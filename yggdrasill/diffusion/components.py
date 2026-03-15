@@ -89,15 +89,11 @@ _SD15_COMPONENTS: Dict[str, ComponentSpec] = {
         load_keys=["tokenizer"],
         constructor_map={"sd15/tokenizer": {"tokenizer": "tokenizer"}},
     ),
+    # Conjector: TextEncoder only. Tokenizer = Converter (sd15.tokenizer).
     "sd15.prompt_encoder": ComponentSpec(
         block_types=["sd15/prompt_encoder"],
-        load_keys=["tokenizer", "text_encoder"],
-        constructor_map={
-            "sd15/prompt_encoder": {
-                "tokenizer": "tokenizer",
-                "text_encoder": "text_encoder",
-            },
-        },
+        load_keys=["text_encoder"],
+        constructor_map={"sd15/prompt_encoder": {"text_encoder": "text_encoder"}},
         group="sd15.prompt_encoder",
     ),
     "sd15.text_encoder": ComponentSpec(
@@ -151,23 +147,16 @@ _SDXL_COMPONENTS: Dict[str, ComponentSpec] = {
             "sdxl/tokenizer": {"tokenizer": "tokenizer", "tokenizer_2": "tokenizer_2"},
         },
     ),
+    # Conjector: TextEncoder only. Tokenizer = Converter (sdxl.tokenizer).
     "sdxl.prompt_encoder": ComponentSpec(
         block_types=["sdxl/prompt_encoder"],
-        load_keys=["tokenizer", "tokenizer_2", "text_encoder", "text_encoder_2"],
+        load_keys=["text_encoder", "text_encoder_2"],
         constructor_map={
             "sdxl/prompt_encoder": {
-                "tokenizer": "tokenizer",
-                "tokenizer_2": "tokenizer_2",
                 "text_encoder": "text_encoder",
                 "text_encoder_2": "text_encoder_2",
             },
         },
-        group="sdxl.prompt_encoder",
-    ),
-    "sdxl.tokenizer_2": ComponentSpec(
-        block_types=["sdxl/prompt_encoder"],
-        load_keys=["tokenizer_2"],
-        constructor_map={"sdxl/prompt_encoder": {"tokenizer_2": "tokenizer_2"}},
         group="sdxl.prompt_encoder",
     ),
     "sdxl.text_encoder": ComponentSpec(
@@ -232,23 +221,16 @@ _FLUX_COMPONENTS: Dict[str, ComponentSpec] = {
             "flux/tokenizer": {"tokenizer": "tokenizer", "tokenizer_2": "tokenizer_2"},
         },
     ),
+    # Conjector: TextEncoder only. Tokenizer = Converter (flux.tokenizer).
     "flux.prompt_encoder": ComponentSpec(
         block_types=["flux/prompt_encoder"],
-        load_keys=["tokenizer", "tokenizer_2", "text_encoder", "text_encoder_2"],
+        load_keys=["text_encoder", "text_encoder_2"],
         constructor_map={
             "flux/prompt_encoder": {
-                "tokenizer": "tokenizer",
-                "tokenizer_2": "tokenizer_2",
                 "text_encoder": "text_encoder",
                 "text_encoder_2": "text_encoder_2",
             },
         },
-        group="flux.prompt_encoder",
-    ),
-    "flux.tokenizer_2": ComponentSpec(
-        block_types=["flux/prompt_encoder"],
-        load_keys=["tokenizer_2"],
-        constructor_map={"flux/prompt_encoder": {"tokenizer_2": "tokenizer_2"}},
         group="flux.prompt_encoder",
     ),
     "flux.text_encoder": ComponentSpec(

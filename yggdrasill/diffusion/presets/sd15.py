@@ -28,7 +28,7 @@ def build_sd15_text2img_graph(
 
     Graph structure::
 
-        prompt ──► PromptEncoder ──► UNet ◄── LatentInit
+        prompt ──► Converter (tokenizer) ──► Conjector (text_encoder) ──► UNet ◄── LatentInit
                                       │              ▲
                                       ▼              │
                                 SchedulerStep ──────┘
@@ -36,6 +36,7 @@ def build_sd15_text2img_graph(
                                       ▼
                                   VAEDecode ──► [Safety] ──► output
     """
+    from yggdrasill.integrations.diffusers.sd15.tokenizer import SD15TokenizerNode
     from yggdrasill.integrations.diffusers.sd15.prompt_encoder import SD15PromptEncoderNode
     from yggdrasill.integrations.diffusers.sd15.unet import SD15UNetNode
     from yggdrasill.integrations.diffusers.sd15.scheduler import (
@@ -50,7 +51,8 @@ def build_sd15_text2img_graph(
 
     h = Hypergraph(graph_id="sd15_text2img")
 
-    enc = SD15PromptEncoderNode("prompt_enc", tokenizer=tokenizer, text_encoder=text_encoder,
+    tok_node = SD15TokenizerNode("tokenizer", tokenizer=tokenizer)
+    enc = SD15PromptEncoderNode("prompt_enc", text_encoder=text_encoder,
                                  config={"clip_skip": cfg.get("clip_skip")})
     sched_setup = SD15SchedulerSetupNode("sched_setup", scheduler=scheduler,
                                           config={"num_inference_steps": cfg.get("num_inference_steps", 50),
@@ -71,6 +73,7 @@ def build_sd15_text2img_graph(
         "output_type": cfg.get("output_type", "pil"),
     })
 
+    h.add_node("tokenizer", tok_node)
     h.add_node("prompt_enc", enc)
     h.add_node("sched_setup", sched_setup)
     h.add_node("latent_init", lat_init)
@@ -78,6 +81,8 @@ def build_sd15_text2img_graph(
     h.add_node("sched_step", sched_step)
     h.add_node("vae_decode", vae_dec)
 
+    h.add_edge(Edge("tokenizer", C.PORT_INPUT_IDS, "prompt_enc", C.PORT_INPUT_IDS))
+    h.add_edge(Edge("tokenizer", C.PORT_NEGATIVE_INPUT_IDS, "prompt_enc", C.PORT_NEGATIVE_INPUT_IDS))
     h.add_edge(Edge("sched_setup", C.PORT_SCHEDULER_STATE, "latent_init", C.PORT_SCHEDULER_STATE))
     h.add_edge(Edge("prompt_enc", C.PORT_PROMPT_EMBEDS, "unet", C.PORT_PROMPT_EMBEDS))
     h.add_edge(Edge("prompt_enc", C.PORT_NEGATIVE_PROMPT_EMBEDS, "unet", C.PORT_NEGATIVE_PROMPT_EMBEDS))
@@ -86,8 +91,8 @@ def build_sd15_text2img_graph(
     h.add_edge(Edge("sched_step", "next_latent", "unet", C.PORT_LATENTS))
     h.add_edge(Edge("sched_step", "next_latent", "vae_decode", C.PORT_LATENTS))
 
-    h.expose_input("prompt_enc", C.PORT_PROMPT, C.PORT_PROMPT)
-    h.expose_input("prompt_enc", C.PORT_NEGATIVE_PROMPT, C.PORT_NEGATIVE_PROMPT)
+    h.expose_input("tokenizer", C.PORT_PROMPT, C.PORT_PROMPT)
+    h.expose_input("tokenizer", C.PORT_NEGATIVE_PROMPT, C.PORT_NEGATIVE_PROMPT)
     h.expose_output("vae_decode", C.PORT_DECODED_IMAGE, C.PORT_OUTPUT_IMAGE)
 
     h.metadata = {"num_loop_steps": cfg.get("num_inference_steps", 50)}
@@ -115,6 +120,7 @@ def build_sd15_img2img_graph(
     config: Optional[Dict[str, Any]] = None,
 ) -> Hypergraph:
     """Build a canonical SD1.5 image-to-image hypergraph."""
+    from yggdrasill.integrations.diffusers.sd15.tokenizer import SD15TokenizerNode
     from yggdrasill.integrations.diffusers.sd15.prompt_encoder import SD15PromptEncoderNode
     from yggdrasill.integrations.diffusers.sd15.unet import SD15UNetNode
     from yggdrasill.integrations.diffusers.sd15.scheduler import (
@@ -128,7 +134,8 @@ def build_sd15_img2img_graph(
 
     h = Hypergraph(graph_id="sd15_img2img")
 
-    enc = SD15PromptEncoderNode("prompt_enc", tokenizer=tokenizer, text_encoder=text_encoder)
+    tok_node = SD15TokenizerNode("tokenizer", tokenizer=tokenizer)
+    enc = SD15PromptEncoderNode("prompt_enc", text_encoder=text_encoder)
     img_enc = SD15VAEEncodeNode("img_encode", vae=vae, config={
         "height": cfg.get("height", 512),
         "width": cfg.get("width", 512),
@@ -150,6 +157,7 @@ def build_sd15_img2img_graph(
         "output_type": cfg.get("output_type", "pil"),
     })
 
+    h.add_node("tokenizer", tok_node)
     h.add_node("prompt_enc", enc)
     h.add_node("img_encode", img_enc)
     h.add_node("sched_setup", sched_setup)
@@ -158,6 +166,8 @@ def build_sd15_img2img_graph(
     h.add_node("sched_step", sched_step)
     h.add_node("vae_decode", vae_dec)
 
+    h.add_edge(Edge("tokenizer", C.PORT_INPUT_IDS, "prompt_enc", C.PORT_INPUT_IDS))
+    h.add_edge(Edge("tokenizer", C.PORT_NEGATIVE_INPUT_IDS, "prompt_enc", C.PORT_NEGATIVE_INPUT_IDS))
     h.add_edge(Edge("img_encode", C.PORT_LATENTS, "latent_init", C.PORT_INIT_LATENTS))
     h.add_edge(Edge("sched_setup", C.PORT_SCHEDULER_STATE, "latent_init", C.PORT_SCHEDULER_STATE))
     h.add_edge(Edge("prompt_enc", C.PORT_PROMPT_EMBEDS, "unet", C.PORT_PROMPT_EMBEDS))
@@ -167,8 +177,8 @@ def build_sd15_img2img_graph(
     h.add_edge(Edge("sched_step", "next_latent", "unet", C.PORT_LATENTS))
     h.add_edge(Edge("sched_step", "next_latent", "vae_decode", C.PORT_LATENTS))
 
-    h.expose_input("prompt_enc", C.PORT_PROMPT, C.PORT_PROMPT)
-    h.expose_input("prompt_enc", C.PORT_NEGATIVE_PROMPT, C.PORT_NEGATIVE_PROMPT)
+    h.expose_input("tokenizer", C.PORT_PROMPT, C.PORT_PROMPT)
+    h.expose_input("tokenizer", C.PORT_NEGATIVE_PROMPT, C.PORT_NEGATIVE_PROMPT)
     h.expose_input("img_encode", C.PORT_INIT_IMAGE, C.PORT_INIT_IMAGE)
     h.expose_output("vae_decode", C.PORT_DECODED_IMAGE, C.PORT_OUTPUT_IMAGE)
 
@@ -187,6 +197,7 @@ def build_sd15_inpaint_graph(
     config: Optional[Dict[str, Any]] = None,
 ) -> Hypergraph:
     """Build a canonical SD1.5 inpainting hypergraph."""
+    from yggdrasill.integrations.diffusers.sd15.tokenizer import SD15TokenizerNode
     from yggdrasill.integrations.diffusers.sd15.prompt_encoder import SD15PromptEncoderNode
     from yggdrasill.integrations.diffusers.sd15.unet import SD15UNetNode
     from yggdrasill.integrations.diffusers.sd15.scheduler import (
@@ -201,7 +212,8 @@ def build_sd15_inpaint_graph(
 
     h = Hypergraph(graph_id="sd15_inpaint")
 
-    enc = SD15PromptEncoderNode("prompt_enc", tokenizer=tokenizer, text_encoder=text_encoder)
+    tok_node = SD15TokenizerNode("tokenizer", tokenizer=tokenizer)
+    enc = SD15PromptEncoderNode("prompt_enc", text_encoder=text_encoder)
     mask_prep = SD15MaskPrepNode("mask_prep", vae=vae, config={
         "height": cfg.get("height", 512),
         "width": cfg.get("width", 512),
@@ -226,6 +238,7 @@ def build_sd15_inpaint_graph(
         "output_type": cfg.get("output_type", "pil"),
     })
 
+    h.add_node("tokenizer", tok_node)
     h.add_node("prompt_enc", enc)
     h.add_node("mask_prep", mask_prep)
     h.add_node("sched_setup", sched_setup)
@@ -234,6 +247,8 @@ def build_sd15_inpaint_graph(
     h.add_node("sched_step", sched_step)
     h.add_node("vae_decode", vae_dec)
 
+    h.add_edge(Edge("tokenizer", C.PORT_INPUT_IDS, "prompt_enc", C.PORT_INPUT_IDS))
+    h.add_edge(Edge("tokenizer", C.PORT_NEGATIVE_INPUT_IDS, "prompt_enc", C.PORT_NEGATIVE_INPUT_IDS))
     h.add_edge(Edge("sched_setup", C.PORT_SCHEDULER_STATE, "latent_init", C.PORT_SCHEDULER_STATE))
     h.add_edge(Edge("prompt_enc", C.PORT_PROMPT_EMBEDS, "unet", C.PORT_PROMPT_EMBEDS))
     h.add_edge(Edge("prompt_enc", C.PORT_NEGATIVE_PROMPT_EMBEDS, "unet", C.PORT_NEGATIVE_PROMPT_EMBEDS))
@@ -242,8 +257,8 @@ def build_sd15_inpaint_graph(
     h.add_edge(Edge("sched_step", "next_latent", "unet", C.PORT_LATENTS))
     h.add_edge(Edge("sched_step", "next_latent", "vae_decode", C.PORT_LATENTS))
 
-    h.expose_input("prompt_enc", C.PORT_PROMPT, C.PORT_PROMPT)
-    h.expose_input("prompt_enc", C.PORT_NEGATIVE_PROMPT, C.PORT_NEGATIVE_PROMPT)
+    h.expose_input("tokenizer", C.PORT_PROMPT, C.PORT_PROMPT)
+    h.expose_input("tokenizer", C.PORT_NEGATIVE_PROMPT, C.PORT_NEGATIVE_PROMPT)
     h.expose_input("mask_prep", C.PORT_INIT_IMAGE, C.PORT_INIT_IMAGE)
     h.expose_input("mask_prep", C.PORT_MASK_IMAGE, C.PORT_MASK_IMAGE)
     h.expose_output("vae_decode", C.PORT_DECODED_IMAGE, C.PORT_OUTPUT_IMAGE)

@@ -102,9 +102,7 @@ class TestComponentRegistry:
     def test_sdxl_prompt_encoder_alias_spec(self):
         spec = resolve_component_type("sdxl.prompt_encoder")
         assert spec.block_types == ["sdxl/prompt_encoder"]
-        assert set(spec.load_keys) == {
-            "tokenizer", "tokenizer_2", "text_encoder", "text_encoder_2",
-        }
+        assert set(spec.load_keys) == {"text_encoder", "text_encoder_2"}
 
     def test_sdxl_backbone_alias_spec(self):
         spec = resolve_component_type("sdxl.backbone")
@@ -574,9 +572,7 @@ class TestFullGraphAutoConnect:
         g.add_node("backbone", type="sdxl.unet", auto_connect=False)
         g.add_node("scheduler", type="sdxl.scheduler")
         g.add_node("tokenizer", type="sdxl.tokenizer")
-        g.add_node("tokenizer2", type="sdxl.tokenizer_2")
-        g.add_node("text_encoder", type="sdxl.text_encoder")
-        g.add_node("text_encoder2", type="sdxl.text_encoder_2")
+        g.add_node("prompt", type="sdxl.prompt_encoder")
         g.add_node("vae", type="sdxl.vae")
 
         block_types = {
@@ -589,8 +585,10 @@ class TestFullGraphAutoConnect:
         port_pairs = {
             (e.source_port, e.target_port) for e in g.get_edges()
         }
-        assert ("pooled_prompt_embeds", "pooled_prompt_embeds") in port_pairs
-        assert ("add_text_embeds", "add_text_embeds") in port_pairs
+        assert ("pooled_prompt_embeds", "pooled_prompt_embeds") in port_pairs or (
+            "pooled_prompt_embeds",
+            "add_text_embeds",
+        ) in port_pairs
         assert ("scheduler_state", "scheduler_state") in port_pairs
         assert ("latents", "latents") in port_pairs
 
@@ -674,12 +672,27 @@ class TestFullGraphAutoConnect:
         assert len(down_edges) == 2
 
     def test_infer_exposed_ports_after_build(self):
+        from yggdrasill.diffusion import contracts as C
+        from yggdrasill.engine.edge import Edge
         from yggdrasill.integrations.diffusers.registry import register_diffusion_nodes
+        from yggdrasill.integrations.diffusers.sdxl.tokenizer import SDXLTokenizerNode
+        from tests.diffusion.conftest import FakeTokenizer
+
         register_diffusion_nodes()
 
         g = Hypergraph(name="test")
+        tok = SDXLTokenizerNode(
+            "tok",
+            tokenizer=FakeTokenizer(),
+            tokenizer_2=FakeTokenizer(),
+        )
+        g.add_node("tok", tok)
         g.add_node("enc", type="sdxl/prompt_encoder", auto_connect=False)
         g.add_node("unet", type="sdxl/unet")
+        g.add_edge(Edge("tok", C.PORT_INPUT_IDS, "enc", C.PORT_INPUT_IDS))
+        g.add_edge(Edge("tok", C.PORT_INPUT_IDS_2, "enc", C.PORT_INPUT_IDS_2))
+        g.add_edge(Edge("tok", C.PORT_NEGATIVE_INPUT_IDS, "enc", C.PORT_NEGATIVE_INPUT_IDS))
+        g.add_edge(Edge("tok", C.PORT_NEGATIVE_INPUT_IDS_2, "enc", C.PORT_NEGATIVE_INPUT_IDS_2))
         g.infer_exposed_ports()
 
         input_names = {

@@ -44,7 +44,7 @@ class TestFluxText2ImgGraph:
 
     def test_has_required_nodes(self, flux_kwargs):
         g = build_flux_text2img_graph(**flux_kwargs)
-        expected = {"prompt_enc", "sched_setup", "latent_init",
+        expected = {"tokenizer", "prompt_enc", "sched_setup", "latent_init",
                     "transformer", "sched_step", "vae_decode"}
         assert expected.issubset(g.node_ids)
 

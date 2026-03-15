@@ -20,33 +20,35 @@ class TestSD15PromptEncoder:
 
     def test_ports(self):
         from yggdrasill.integrations.diffusers.sd15.prompt_encoder import SD15PromptEncoderNode
-        node = SD15PromptEncoderNode("enc", tokenizer=FakeTokenizer(), text_encoder=FakeTextEncoder())
+        node = SD15PromptEncoderNode("enc", text_encoder=FakeTextEncoder())
         ports = node.declare_ports()
         in_names = {p.name for p in ports if p.direction == PortDirection.IN}
         out_names = {p.name for p in ports if p.direction == PortDirection.OUT}
-        assert "prompt" in in_names
-        assert "negative_prompt" in in_names
+        assert C.PORT_INPUT_IDS in in_names
         assert "prompt_embeds" in out_names
         assert "negative_prompt_embeds" in out_names
         assert in_names & out_names == set(), "No port name should appear as both IN and OUT"
 
     def test_block_type(self):
         from yggdrasill.integrations.diffusers.sd15.prompt_encoder import SD15PromptEncoderNode
-        node = SD15PromptEncoderNode("enc", tokenizer=FakeTokenizer(), text_encoder=FakeTextEncoder())
+        node = SD15PromptEncoderNode("enc", text_encoder=FakeTextEncoder())
         assert node.block_type == "sd15/prompt_encoder"
 
     @requires_torch
     def test_forward(self):
         from yggdrasill.integrations.diffusers.sd15.prompt_encoder import SD15PromptEncoderNode
-        node = SD15PromptEncoderNode("enc", tokenizer=FakeTokenizer(), text_encoder=FakeTextEncoder())
-        out = node.forward({"prompt": "hello", "negative_prompt": ""})
+        node = SD15PromptEncoderNode("enc", text_encoder=FakeTextEncoder())
+        out = node.forward({
+            C.PORT_INPUT_IDS: FakeTensor((1, 77)),
+            C.PORT_NEGATIVE_INPUT_IDS: FakeTensor((1, 77)),
+        })
         assert "prompt_embeds" in out
         assert "negative_prompt_embeds" in out
 
     def test_to_device(self):
         from yggdrasill.integrations.diffusers.sd15.prompt_encoder import SD15PromptEncoderNode
         enc = FakeTextEncoder()
-        node = SD15PromptEncoderNode("enc", tokenizer=FakeTokenizer(), text_encoder=enc)
+        node = SD15PromptEncoderNode("enc", text_encoder=enc)
         result = node.to("cpu")
         assert result is node
 
