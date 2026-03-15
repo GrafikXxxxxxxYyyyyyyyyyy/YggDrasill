@@ -99,6 +99,21 @@ class TestDiffusionOutput:
 
 
 class TestComponentRegistry:
+    def test_sdxl_prompt_encoder_alias_spec(self):
+        spec = resolve_component_type("sdxl.prompt_encoder")
+        assert spec.block_types == ["sdxl/prompt_encoder"]
+        assert set(spec.load_keys) == {
+            "tokenizer", "tokenizer_2", "text_encoder", "text_encoder_2",
+        }
+
+    def test_sdxl_backbone_alias_spec(self):
+        spec = resolve_component_type("sdxl.backbone")
+        assert spec.block_types == ["sdxl/unet"]
+
+    def test_sdxl_autoencoder_alias_spec(self):
+        spec = resolve_component_type("sdxl.autoencoder")
+        assert spec.block_types == ["sdxl/vae_decode"]
+
     def test_sdxl_unet_spec(self):
         spec = resolve_component_type("sdxl.unet")
         assert spec.block_types == ["sdxl/unet"]
@@ -110,14 +125,16 @@ class TestComponentRegistry:
         assert "sdxl/scheduler_setup" in spec.block_types
         assert "sdxl/scheduler_step" in spec.block_types
 
-    def test_sdxl_tokenizer_is_grouped(self):
+    def test_sdxl_tokenizer_is_converter_node(self):
+        """Tokenizer is a standalone Converter node (canon: converter/tokenizer)."""
         spec = resolve_component_type("sdxl.tokenizer")
-        assert spec.group == "sdxl.prompt_encoder"
+        assert spec.block_types == ["sdxl/tokenizer"]
+        assert spec.group is None
 
-    def test_sdxl_text_encoder_shares_group(self):
-        t_spec = resolve_component_type("sdxl.tokenizer")
+    def test_sdxl_text_encoder_in_prompt_encoder_group(self):
+        """Text encoder is part of prompt_encoder Conjector group."""
         e_spec = resolve_component_type("sdxl.text_encoder")
-        assert t_spec.group == e_spec.group
+        assert e_spec.group == "sdxl.prompt_encoder"
 
     def test_adapter_controlnet(self):
         spec = resolve_component_type("adapter.controlnet")
@@ -367,6 +384,29 @@ class TestReplaceNode:
         with pytest.raises(ValueError, match="at least one"):
             g.replace_node("n")
 
+    def test_replace_uses_aliases_from_metadata(self):
+        g, Producer, _ = self._build_graph_with_two_nodes()
+        g.metadata = {"node_aliases": {"backbone": "prod"}}
+        new_prod = Producer(node_id="prod")
+
+        g.replace_node("backbone", node=new_prod)
+        assert g.get_node("prod") is new_prod
+
+    def test_replace_scheduler_alias_targets_multiple_nodes(self):
+        g = Hypergraph(name="test")
+        g.add_node("sched_setup", MagicMock(block_type="sdxl/scheduler_setup"))
+        g.add_node("sched_step", MagicMock(block_type="sdxl/scheduler_step"))
+        g.metadata = {
+            "node_aliases": {
+                "scheduler": ["sched_setup", "sched_step"],
+            },
+        }
+
+        with patch.object(g, "_replace_pretrained_only") as replace_mock:
+            g.replace_node("scheduler", pretrained="repo")
+
+        assert replace_mock.call_count == 2
+
 
 # ---------------------------------------------------------------------------
 # Test: Kwargs-based run
@@ -553,6 +593,25 @@ class TestFullGraphAutoConnect:
         assert ("add_text_embeds", "add_text_embeds") in port_pairs
         assert ("scheduler_state", "scheduler_state") in port_pairs
         assert ("latents", "latents") in port_pairs
+
+    def test_component_api_supports_large_user_facing_sdxl_types(self):
+        from yggdrasill.integrations.diffusers.registry import register_diffusion_nodes
+
+        register_diffusion_nodes()
+
+        g = Hypergraph(name="test")
+        g.add_node("prompt", type="sdxl.prompt_encoder", auto_connect=False)
+        g.add_node("backbone", type="sdxl.backbone")
+        g.add_node("scheduler", type="sdxl.scheduler")
+        g.add_node("autoencoder", type="sdxl.autoencoder")
+
+        block_types = {
+            getattr(g.get_node(nid), "block_type", None)
+            for nid in g.node_ids
+        }
+        assert "sdxl/prompt_encoder" in block_types
+        assert "sdxl/unet" in block_types
+        assert "sdxl/vae_decode" in block_types
 
     def test_prompt_encoder_to_unet_auto_wiring(self):
         from yggdrasill.integrations.diffusers.registry import register_diffusion_nodes

@@ -24,7 +24,7 @@ def build_sdxl_text2img_graph(
 
     Graph structure::
 
-        prompt ──► SDXLPromptEncoder ──► SDXLAddedCond ──► SDXLUNet ◄── LatentInit
+        prompt ──► Converter (tokenizer) ──► Conjector (prompt_enc) ──► SDXLAddedCond ──► SDXLUNet ◄── LatentInit
                                                             │              ▲
                                                             ▼              │
                                                       SchedulerStep ──────┘
@@ -32,6 +32,7 @@ def build_sdxl_text2img_graph(
                                                             ▼
                                                         VAEDecode ──► output
     """
+    from yggdrasill.integrations.diffusers.sdxl.tokenizer import SDXLTokenizerNode
     from yggdrasill.integrations.diffusers.sdxl.prompt_encoder import SDXLPromptEncoderNode
     from yggdrasill.integrations.diffusers.sdxl.added_conditioning import SDXLAddedConditioningNode
     from yggdrasill.integrations.diffusers.sdxl.unet import SDXLUNetNode
@@ -43,9 +44,13 @@ def build_sdxl_text2img_graph(
 
     h = Hypergraph(graph_id="sdxl_text2img")
 
+    tok_node = SDXLTokenizerNode(
+        "tokenizer",
+        tokenizer=tokenizer, tokenizer_2=tokenizer_2,
+    )
     prompt_enc = SDXLPromptEncoderNode(
         "prompt_enc",
-        tokenizer=tokenizer, tokenizer_2=tokenizer_2,
+        tokenizer=None, tokenizer_2=None,
         text_encoder=text_encoder, text_encoder_2=text_encoder_2,
         config={"clip_skip": cfg.get("clip_skip")},
     )
@@ -78,12 +83,16 @@ def build_sdxl_text2img_graph(
     })
 
     for nid, node in [
-        ("prompt_enc", prompt_enc), ("added_cond", added_cond),
+        ("tokenizer", tok_node), ("prompt_enc", prompt_enc), ("added_cond", added_cond),
         ("sched_setup", sched_setup), ("latent_init", lat_init),
         ("unet", unet_node), ("sched_step", sched_step), ("vae_decode", vae_dec),
     ]:
         h.add_node(nid, node)
 
+    h.add_edge(Edge("tokenizer", C.PORT_INPUT_IDS, "prompt_enc", C.PORT_INPUT_IDS))
+    h.add_edge(Edge("tokenizer", C.PORT_INPUT_IDS_2, "prompt_enc", C.PORT_INPUT_IDS_2))
+    h.add_edge(Edge("tokenizer", C.PORT_NEGATIVE_INPUT_IDS, "prompt_enc", C.PORT_NEGATIVE_INPUT_IDS))
+    h.add_edge(Edge("tokenizer", C.PORT_NEGATIVE_INPUT_IDS_2, "prompt_enc", C.PORT_NEGATIVE_INPUT_IDS_2))
     h.add_edge(Edge("sched_setup", C.PORT_SCHEDULER_STATE, "latent_init", C.PORT_SCHEDULER_STATE))
     h.add_edge(Edge("prompt_enc", C.PORT_PROMPT_EMBEDS, "unet", C.PORT_PROMPT_EMBEDS))
     h.add_edge(Edge("prompt_enc", C.PORT_NEGATIVE_PROMPT_EMBEDS, "unet", C.PORT_NEGATIVE_PROMPT_EMBEDS))
@@ -98,12 +107,23 @@ def build_sdxl_text2img_graph(
     h.add_edge(Edge("sched_step", "next_latent", "unet", C.PORT_LATENTS))
     h.add_edge(Edge("sched_step", "next_latent", "vae_decode", C.PORT_LATENTS))
 
-    h.expose_input("prompt_enc", C.PORT_PROMPT, C.PORT_PROMPT)
-    h.expose_input("prompt_enc", C.PORT_NEGATIVE_PROMPT, C.PORT_NEGATIVE_PROMPT)
-    h.expose_input("prompt_enc", C.PORT_PROMPT_2, C.PORT_PROMPT_2)
+    h.expose_input("tokenizer", C.PORT_PROMPT, C.PORT_PROMPT)
+    h.expose_input("tokenizer", C.PORT_NEGATIVE_PROMPT, C.PORT_NEGATIVE_PROMPT)
+    h.expose_input("tokenizer", C.PORT_PROMPT_2, C.PORT_PROMPT_2)
     h.expose_output("vae_decode", C.PORT_DECODED_IMAGE, C.PORT_OUTPUT_IMAGE)
 
-    h.metadata = {"num_loop_steps": cfg.get("num_inference_steps", 50)}
+    h.metadata = {
+        "num_loop_steps": cfg.get("num_inference_steps", 50),
+        "node_aliases": {
+            "tokenizer": "tokenizer",
+            "prompt_encoder": "prompt_enc",
+            "conditioning": "added_cond",
+            "backbone": "unet",
+            "scheduler": ["sched_setup", "sched_step"],
+            "latent_initializer": "latent_init",
+            "autoencoder": "vae_decode",
+        },
+    }
 
     return h
 
@@ -120,6 +140,7 @@ def build_sdxl_img2img_graph(
     config: Optional[Dict[str, Any]] = None,
 ) -> Hypergraph:
     """Build a canonical SDXL image-to-image hypergraph."""
+    from yggdrasill.integrations.diffusers.sdxl.tokenizer import SDXLTokenizerNode
     from yggdrasill.integrations.diffusers.sdxl.prompt_encoder import SDXLPromptEncoderNode
     from yggdrasill.integrations.diffusers.sdxl.added_conditioning import SDXLAddedConditioningNode
     from yggdrasill.integrations.diffusers.sdxl.unet import SDXLUNetNode
@@ -130,8 +151,9 @@ def build_sdxl_img2img_graph(
     cfg = config or {}
     h = Hypergraph(graph_id="sdxl_img2img")
 
+    tok_node = SDXLTokenizerNode("tokenizer", tokenizer=tokenizer, tokenizer_2=tokenizer_2)
     prompt_enc = SDXLPromptEncoderNode(
-        "prompt_enc", tokenizer=tokenizer, tokenizer_2=tokenizer_2,
+        "prompt_enc", tokenizer=None, tokenizer_2=None,
         text_encoder=text_encoder, text_encoder_2=text_encoder_2,
     )
     added_cond = SDXLAddedConditioningNode("added_cond", config={
@@ -161,13 +183,17 @@ def build_sdxl_img2img_graph(
     })
 
     for nid, node in [
-        ("prompt_enc", prompt_enc), ("added_cond", added_cond),
+        ("tokenizer", tok_node), ("prompt_enc", prompt_enc), ("added_cond", added_cond),
         ("img_encode", img_enc), ("sched_setup", sched_setup),
         ("latent_init", lat_init), ("unet", unet_node),
         ("sched_step", sched_step), ("vae_decode", vae_dec),
     ]:
         h.add_node(nid, node)
 
+    h.add_edge(Edge("tokenizer", C.PORT_INPUT_IDS, "prompt_enc", C.PORT_INPUT_IDS))
+    h.add_edge(Edge("tokenizer", C.PORT_INPUT_IDS_2, "prompt_enc", C.PORT_INPUT_IDS_2))
+    h.add_edge(Edge("tokenizer", C.PORT_NEGATIVE_INPUT_IDS, "prompt_enc", C.PORT_NEGATIVE_INPUT_IDS))
+    h.add_edge(Edge("tokenizer", C.PORT_NEGATIVE_INPUT_IDS_2, "prompt_enc", C.PORT_NEGATIVE_INPUT_IDS_2))
     h.add_edge(Edge("img_encode", C.PORT_LATENTS, "latent_init", C.PORT_INIT_LATENTS))
     h.add_edge(Edge("sched_setup", C.PORT_SCHEDULER_STATE, "latent_init", C.PORT_SCHEDULER_STATE))
     h.add_edge(Edge("prompt_enc", C.PORT_PROMPT_EMBEDS, "unet", C.PORT_PROMPT_EMBEDS))
@@ -180,12 +206,24 @@ def build_sdxl_img2img_graph(
     h.add_edge(Edge("sched_step", "next_latent", "unet", C.PORT_LATENTS))
     h.add_edge(Edge("sched_step", "next_latent", "vae_decode", C.PORT_LATENTS))
 
-    h.expose_input("prompt_enc", C.PORT_PROMPT, C.PORT_PROMPT)
-    h.expose_input("prompt_enc", C.PORT_NEGATIVE_PROMPT, C.PORT_NEGATIVE_PROMPT)
+    h.expose_input("tokenizer", C.PORT_PROMPT, C.PORT_PROMPT)
+    h.expose_input("tokenizer", C.PORT_NEGATIVE_PROMPT, C.PORT_NEGATIVE_PROMPT)
     h.expose_input("img_encode", C.PORT_INIT_IMAGE, C.PORT_INIT_IMAGE)
     h.expose_output("vae_decode", C.PORT_DECODED_IMAGE, C.PORT_OUTPUT_IMAGE)
 
-    h.metadata = {"num_loop_steps": cfg.get("num_inference_steps", 50)}
+    h.metadata = {
+        "num_loop_steps": cfg.get("num_inference_steps", 50),
+        "node_aliases": {
+            "tokenizer": "tokenizer",
+            "prompt_encoder": "prompt_enc",
+            "conditioning": "added_cond",
+            "image_encoder": "img_encode",
+            "backbone": "unet",
+            "scheduler": ["sched_setup", "sched_step"],
+            "latent_initializer": "latent_init",
+            "autoencoder": "vae_decode",
+        },
+    }
     return h
 
 
@@ -201,6 +239,7 @@ def build_sdxl_inpaint_graph(
     config: Optional[Dict[str, Any]] = None,
 ) -> Hypergraph:
     """Build a canonical SDXL inpainting hypergraph."""
+    from yggdrasill.integrations.diffusers.sdxl.tokenizer import SDXLTokenizerNode
     from yggdrasill.integrations.diffusers.sdxl.prompt_encoder import SDXLPromptEncoderNode
     from yggdrasill.integrations.diffusers.sdxl.added_conditioning import SDXLAddedConditioningNode
     from yggdrasill.integrations.diffusers.sdxl.unet import SDXLUNetNode
@@ -212,8 +251,9 @@ def build_sdxl_inpaint_graph(
     cfg = config or {}
     h = Hypergraph(graph_id="sdxl_inpaint")
 
+    tok_node = SDXLTokenizerNode("tokenizer", tokenizer=tokenizer, tokenizer_2=tokenizer_2)
     prompt_enc = SDXLPromptEncoderNode(
-        "prompt_enc", tokenizer=tokenizer, tokenizer_2=tokenizer_2,
+        "prompt_enc", tokenizer=None, tokenizer_2=None,
         text_encoder=text_encoder, text_encoder_2=text_encoder_2,
     )
     added_cond = SDXLAddedConditioningNode("added_cond", config={
@@ -242,13 +282,17 @@ def build_sdxl_inpaint_graph(
     })
 
     for nid, node in [
-        ("prompt_enc", prompt_enc), ("added_cond", added_cond),
+        ("tokenizer", tok_node), ("prompt_enc", prompt_enc), ("added_cond", added_cond),
         ("mask_prep", mask_prep), ("sched_setup", sched_setup),
         ("latent_init", lat_init), ("unet", unet_node),
         ("sched_step", sched_step), ("vae_decode", vae_dec),
     ]:
         h.add_node(nid, node)
 
+    h.add_edge(Edge("tokenizer", C.PORT_INPUT_IDS, "prompt_enc", C.PORT_INPUT_IDS))
+    h.add_edge(Edge("tokenizer", C.PORT_INPUT_IDS_2, "prompt_enc", C.PORT_INPUT_IDS_2))
+    h.add_edge(Edge("tokenizer", C.PORT_NEGATIVE_INPUT_IDS, "prompt_enc", C.PORT_NEGATIVE_INPUT_IDS))
+    h.add_edge(Edge("tokenizer", C.PORT_NEGATIVE_INPUT_IDS_2, "prompt_enc", C.PORT_NEGATIVE_INPUT_IDS_2))
     h.add_edge(Edge("sched_setup", C.PORT_SCHEDULER_STATE, "latent_init", C.PORT_SCHEDULER_STATE))
     h.add_edge(Edge("prompt_enc", C.PORT_PROMPT_EMBEDS, "unet", C.PORT_PROMPT_EMBEDS))
     h.add_edge(Edge("prompt_enc", C.PORT_NEGATIVE_PROMPT_EMBEDS, "unet", C.PORT_NEGATIVE_PROMPT_EMBEDS))
@@ -260,13 +304,25 @@ def build_sdxl_inpaint_graph(
     h.add_edge(Edge("sched_step", "next_latent", "unet", C.PORT_LATENTS))
     h.add_edge(Edge("sched_step", "next_latent", "vae_decode", C.PORT_LATENTS))
 
-    h.expose_input("prompt_enc", C.PORT_PROMPT, C.PORT_PROMPT)
-    h.expose_input("prompt_enc", C.PORT_NEGATIVE_PROMPT, C.PORT_NEGATIVE_PROMPT)
+    h.expose_input("tokenizer", C.PORT_PROMPT, C.PORT_PROMPT)
+    h.expose_input("tokenizer", C.PORT_NEGATIVE_PROMPT, C.PORT_NEGATIVE_PROMPT)
     h.expose_input("mask_prep", C.PORT_INIT_IMAGE, C.PORT_INIT_IMAGE)
     h.expose_input("mask_prep", C.PORT_MASK_IMAGE, C.PORT_MASK_IMAGE)
     h.expose_output("vae_decode", C.PORT_DECODED_IMAGE, C.PORT_OUTPUT_IMAGE)
 
-    h.metadata = {"num_loop_steps": cfg.get("num_inference_steps", 50)}
+    h.metadata = {
+        "num_loop_steps": cfg.get("num_inference_steps", 50),
+        "node_aliases": {
+            "tokenizer": "tokenizer",
+            "prompt_encoder": "prompt_enc",
+            "conditioning": "added_cond",
+            "mask_processor": "mask_prep",
+            "backbone": "unet",
+            "scheduler": ["sched_setup", "sched_step"],
+            "latent_initializer": "latent_init",
+            "autoencoder": "vae_decode",
+        },
+    }
     return h
 
 

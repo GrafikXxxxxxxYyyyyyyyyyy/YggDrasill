@@ -439,8 +439,30 @@ class Hypergraph:
         * **Full swap with object** (*node*): replace with a pre-built
           node object, re-wiring compatible edges.
         """
-        if node_id not in self._nodes:
+        target_node_ids = self._resolve_replace_targets(node_id)
+        if not target_node_ids:
             raise ValueError(f"Node '{node_id}' not in graph")
+
+        if len(target_node_ids) > 1 and node is not None:
+            raise ValueError(
+                "Replacing multiple underlying nodes with a single node object "
+                "is not supported"
+            )
+
+        if len(target_node_ids) > 1:
+            for target_node_id in target_node_ids:
+                self.replace_node(
+                    target_node_id,
+                    pretrained=pretrained,
+                    type=type,
+                    node=None,
+                    auto_connect=auto_connect,
+                    config=config,
+                    **kwargs,
+                )
+            return
+
+        node_id = target_node_ids[0]
 
         if pretrained is not None and type is None and node is None:
             self._replace_pretrained_only(node_id, pretrained, **kwargs)
@@ -543,6 +565,21 @@ class Hypergraph:
         for comp_name, attr_name in attr_map.items():
             if hasattr(existing, attr_name) and comp_name in components:
                 setattr(existing, attr_name, components[comp_name])
+
+    def _resolve_replace_targets(self, node_ref: str) -> List[str]:
+        """Resolve a user-facing node reference into concrete node ids."""
+        if node_ref in self._nodes:
+            return [node_ref]
+
+        aliases = self.metadata.get("node_aliases", {})
+        target = aliases.get(node_ref)
+        if target is None:
+            return []
+        if isinstance(target, str):
+            return [target]
+        if isinstance(target, list):
+            return [nid for nid in target if nid in self._nodes]
+        return []
 
     # --- edges -----------------------------------------------------------
 

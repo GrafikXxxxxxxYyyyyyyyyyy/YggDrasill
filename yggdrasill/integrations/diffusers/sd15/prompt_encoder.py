@@ -36,6 +36,8 @@ class SD15PromptEncoderNode(AbstractConjector):
         return [
             Port(C.PORT_PROMPT, PortDirection.IN, PortType.TEXT, optional=True),
             Port(C.PORT_NEGATIVE_PROMPT, PortDirection.IN, PortType.TEXT, optional=True),
+            Port(C.PORT_INPUT_IDS, PortDirection.IN, PortType.TENSOR, optional=True),
+            Port(C.PORT_NEGATIVE_INPUT_IDS, PortDirection.IN, PortType.TENSOR, optional=True),
             Port(C.PORT_PROMPT_EMBEDS, PortDirection.OUT, PortType.TENSOR),
             Port(C.PORT_NEGATIVE_PROMPT_EMBEDS, PortDirection.OUT, PortType.TENSOR),
         ]
@@ -59,28 +61,50 @@ class SD15PromptEncoderNode(AbstractConjector):
 
         return embeds
 
+    def _encode_from_ids(self, input_ids: Any, clip_skip: Optional[int] = None) -> Any:
+        """Encode from token_ids (from Converter); no tokenization."""
+        input_ids = input_ids.to(self._text_encoder.device)
+        if clip_skip is not None and clip_skip > 0:
+            output = self._text_encoder(input_ids, output_hidden_states=True)
+            embeds = output.hidden_states[-(clip_skip + 1)]
+            embeds = self._text_encoder.text_model.final_layer_norm(embeds)
+        else:
+            embeds = self._text_encoder(input_ids)[0]
+        return embeds
+
     def forward(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         import torch
 
-        prompt = inputs.get(C.PORT_PROMPT, "")
-        negative_prompt = inputs.get(C.PORT_NEGATIVE_PROMPT, "")
         clip_skip = self._config.get("clip_skip")
+        input_ids = inputs.get(C.PORT_INPUT_IDS)
+        negative_input_ids = inputs.get(C.PORT_NEGATIVE_INPUT_IDS)
 
-        if isinstance(prompt, list):
-            prompt_embeds = torch.cat(
-                [self._encode_prompt(p, clip_skip) for p in prompt], dim=0
+        if input_ids is not None:
+            # Canonical path: token_ids from Converter node
+            prompt_embeds = self._encode_from_ids(input_ids, clip_skip)
+            neg_embeds = (
+                self._encode_from_ids(negative_input_ids, clip_skip)
+                if negative_input_ids is not None
+                else torch.zeros_like(prompt_embeds)
             )
         else:
-            prompt_embeds = self._encode_prompt(prompt or "", clip_skip)
-
-        if not negative_prompt:
-            negative_prompt = ""
-        if isinstance(negative_prompt, list):
-            neg_embeds = torch.cat(
-                [self._encode_prompt(p, clip_skip) for p in negative_prompt], dim=0
-            )
-        else:
-            neg_embeds = self._encode_prompt(negative_prompt, clip_skip)
+            # Backward compat: tokenize from prompt (or from upstream tokenizer not wired)
+            prompt = inputs.get(C.PORT_PROMPT, "")
+            negative_prompt = inputs.get(C.PORT_NEGATIVE_PROMPT, "")
+            if isinstance(prompt, list):
+                prompt_embeds = torch.cat(
+                    [self._encode_prompt(p, clip_skip) for p in prompt], dim=0
+                )
+            else:
+                prompt_embeds = self._encode_prompt(prompt or "", clip_skip)
+            if not negative_prompt:
+                negative_prompt = ""
+            if isinstance(negative_prompt, list):
+                neg_embeds = torch.cat(
+                    [self._encode_prompt(p, clip_skip) for p in negative_prompt], dim=0
+                )
+            else:
+                neg_embeds = self._encode_prompt(negative_prompt, clip_skip)
 
         return {
             C.PORT_PROMPT_EMBEDS: prompt_embeds,

@@ -56,10 +56,20 @@ class ComponentSpec:
 # ── SD 1.5 components ──────────────────────────────────────────────────
 
 _SD15_COMPONENTS: Dict[str, ComponentSpec] = {
+    "sd15.backbone": ComponentSpec(
+        block_types=["sd15/unet"],
+        load_keys=["unet"],
+        constructor_map={"sd15/unet": {"unet": "unet"}},
+    ),
     "sd15.unet": ComponentSpec(
         block_types=["sd15/unet"],
         load_keys=["unet"],
         constructor_map={"sd15/unet": {"unet": "unet"}},
+    ),
+    "sd15.autoencoder": ComponentSpec(
+        block_types=["sd15/vae_decode"],
+        load_keys=["vae"],
+        constructor_map={"sd15/vae_decode": {"vae": "vae"}},
     ),
     "sd15.vae": ComponentSpec(
         block_types=["sd15/vae_decode"],
@@ -75,9 +85,19 @@ _SD15_COMPONENTS: Dict[str, ComponentSpec] = {
         },
     ),
     "sd15.tokenizer": ComponentSpec(
-        block_types=["sd15/prompt_encoder"],
+        block_types=["sd15/tokenizer"],
         load_keys=["tokenizer"],
-        constructor_map={"sd15/prompt_encoder": {"tokenizer": "tokenizer"}},
+        constructor_map={"sd15/tokenizer": {"tokenizer": "tokenizer"}},
+    ),
+    "sd15.prompt_encoder": ComponentSpec(
+        block_types=["sd15/prompt_encoder"],
+        load_keys=["tokenizer", "text_encoder"],
+        constructor_map={
+            "sd15/prompt_encoder": {
+                "tokenizer": "tokenizer",
+                "text_encoder": "text_encoder",
+            },
+        },
         group="sd15.prompt_encoder",
     ),
     "sd15.text_encoder": ComponentSpec(
@@ -96,10 +116,20 @@ _SD15_COMPONENTS: Dict[str, ComponentSpec] = {
 # ── SDXL components ────────────────────────────────────────────────────
 
 _SDXL_COMPONENTS: Dict[str, ComponentSpec] = {
+    "sdxl.backbone": ComponentSpec(
+        block_types=["sdxl/unet"],
+        load_keys=["unet"],
+        constructor_map={"sdxl/unet": {"unet": "unet"}},
+    ),
     "sdxl.unet": ComponentSpec(
         block_types=["sdxl/unet"],
         load_keys=["unet"],
         constructor_map={"sdxl/unet": {"unet": "unet"}},
+    ),
+    "sdxl.autoencoder": ComponentSpec(
+        block_types=["sdxl/vae_decode"],
+        load_keys=["vae"],
+        constructor_map={"sdxl/vae_decode": {"vae": "vae"}},
     ),
     "sdxl.vae": ComponentSpec(
         block_types=["sdxl/vae_decode"],
@@ -115,9 +145,23 @@ _SDXL_COMPONENTS: Dict[str, ComponentSpec] = {
         },
     ),
     "sdxl.tokenizer": ComponentSpec(
+        block_types=["sdxl/tokenizer"],
+        load_keys=["tokenizer", "tokenizer_2"],
+        constructor_map={
+            "sdxl/tokenizer": {"tokenizer": "tokenizer", "tokenizer_2": "tokenizer_2"},
+        },
+    ),
+    "sdxl.prompt_encoder": ComponentSpec(
         block_types=["sdxl/prompt_encoder"],
-        load_keys=["tokenizer"],
-        constructor_map={"sdxl/prompt_encoder": {"tokenizer": "tokenizer"}},
+        load_keys=["tokenizer", "tokenizer_2", "text_encoder", "text_encoder_2"],
+        constructor_map={
+            "sdxl/prompt_encoder": {
+                "tokenizer": "tokenizer",
+                "tokenizer_2": "tokenizer_2",
+                "text_encoder": "text_encoder",
+                "text_encoder_2": "text_encoder_2",
+            },
+        },
         group="sdxl.prompt_encoder",
     ),
     "sdxl.tokenizer_2": ComponentSpec(
@@ -153,10 +197,20 @@ _SDXL_COMPONENTS: Dict[str, ComponentSpec] = {
 # ── FLUX components ────────────────────────────────────────────────────
 
 _FLUX_COMPONENTS: Dict[str, ComponentSpec] = {
+    "flux.backbone": ComponentSpec(
+        block_types=["flux/transformer"],
+        load_keys=["transformer"],
+        constructor_map={"flux/transformer": {"transformer": "transformer"}},
+    ),
     "flux.transformer": ComponentSpec(
         block_types=["flux/transformer"],
         load_keys=["transformer"],
         constructor_map={"flux/transformer": {"transformer": "transformer"}},
+    ),
+    "flux.autoencoder": ComponentSpec(
+        block_types=["flux/vae_decode"],
+        load_keys=["vae"],
+        constructor_map={"flux/vae_decode": {"vae": "vae"}},
     ),
     "flux.vae": ComponentSpec(
         block_types=["flux/vae_decode"],
@@ -172,9 +226,23 @@ _FLUX_COMPONENTS: Dict[str, ComponentSpec] = {
         },
     ),
     "flux.tokenizer": ComponentSpec(
+        block_types=["flux/tokenizer"],
+        load_keys=["tokenizer", "tokenizer_2"],
+        constructor_map={
+            "flux/tokenizer": {"tokenizer": "tokenizer", "tokenizer_2": "tokenizer_2"},
+        },
+    ),
+    "flux.prompt_encoder": ComponentSpec(
         block_types=["flux/prompt_encoder"],
-        load_keys=["tokenizer"],
-        constructor_map={"flux/prompt_encoder": {"tokenizer": "tokenizer"}},
+        load_keys=["tokenizer", "tokenizer_2", "text_encoder", "text_encoder_2"],
+        constructor_map={
+            "flux/prompt_encoder": {
+                "tokenizer": "tokenizer",
+                "tokenizer_2": "tokenizer_2",
+                "text_encoder": "text_encoder",
+                "text_encoder_2": "text_encoder_2",
+            },
+        },
         group="flux.prompt_encoder",
     ),
     "flux.tokenizer_2": ComponentSpec(

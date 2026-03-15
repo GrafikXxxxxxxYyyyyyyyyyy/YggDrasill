@@ -42,6 +42,10 @@ class SDXLPromptEncoderNode(AbstractConjector):
             Port(C.PORT_PROMPT_2, PortDirection.IN, PortType.TEXT, optional=True),
             Port(C.PORT_NEGATIVE_PROMPT, PortDirection.IN, PortType.TEXT, optional=True),
             Port(C.PORT_NEGATIVE_PROMPT_2, PortDirection.IN, PortType.TEXT, optional=True),
+            Port(C.PORT_INPUT_IDS, PortDirection.IN, PortType.TENSOR, optional=True),
+            Port(C.PORT_INPUT_IDS_2, PortDirection.IN, PortType.TENSOR, optional=True),
+            Port(C.PORT_NEGATIVE_INPUT_IDS, PortDirection.IN, PortType.TENSOR, optional=True),
+            Port(C.PORT_NEGATIVE_INPUT_IDS_2, PortDirection.IN, PortType.TENSOR, optional=True),
             Port(C.PORT_PROMPT_EMBEDS, PortDirection.OUT, PortType.TENSOR),
             Port(C.PORT_NEGATIVE_PROMPT_EMBEDS, PortDirection.OUT, PortType.TENSOR),
             Port(C.PORT_POOLED_PROMPT_EMBEDS, PortDirection.OUT, PortType.TENSOR),
@@ -60,13 +64,18 @@ class SDXLPromptEncoderNode(AbstractConjector):
             return_tensors="pt",
         )
         input_ids = text_inputs.input_ids.to(encoder.device)
-        output = encoder(input_ids, output_hidden_states=True)
+        return self._encode_from_ids_single(input_ids, encoder, clip_skip)
 
+    def _encode_from_ids_single(
+        self, input_ids: Any, encoder: Any, clip_skip: Optional[int] = None,
+    ) -> Tuple[Any, Any]:
+        """Encode from token_ids (from Converter). Returns (hidden_states, pooled)."""
+        input_ids = input_ids.to(encoder.device)
+        output = encoder(input_ids, output_hidden_states=True)
         if clip_skip is not None and clip_skip > 0:
             hidden = output.hidden_states[-(clip_skip + 1)]
         else:
             hidden = output.hidden_states[-2]
-
         pooled = output[0]
         return hidden, pooled
 
@@ -86,18 +95,46 @@ class SDXLPromptEncoderNode(AbstractConjector):
     def forward(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         import torch
 
-        prompt = inputs.get(C.PORT_PROMPT, "")
-        prompt_2 = inputs.get(C.PORT_PROMPT_2)
-        neg_prompt = inputs.get(C.PORT_NEGATIVE_PROMPT, "")
-        neg_prompt_2 = inputs.get(C.PORT_NEGATIVE_PROMPT_2)
+        clip_skip = self._config.get("clip_skip")
+        input_ids = inputs.get(C.PORT_INPUT_IDS)
+        input_ids_2 = inputs.get(C.PORT_INPUT_IDS_2)
+        neg_ids = inputs.get(C.PORT_NEGATIVE_INPUT_IDS)
+        neg_ids_2 = inputs.get(C.PORT_NEGATIVE_INPUT_IDS_2)
 
-        prompt_embeds, pooled = self._encode_prompt_pair(prompt, prompt_2)
-
-        if neg_prompt or neg_prompt_2:
-            neg_embeds, neg_pooled = self._encode_prompt_pair(neg_prompt or "", neg_prompt_2)
+        if input_ids is not None and input_ids_2 is not None:
+            # Canonical path: token_ids from Converter node
+            hidden_1, _ = self._encode_from_ids_single(
+                input_ids, self._text_encoder, clip_skip
+            )
+            hidden_2, pooled = self._encode_from_ids_single(
+                input_ids_2, self._text_encoder_2, clip_skip
+            )
+            prompt_embeds = torch.cat([hidden_1, hidden_2], dim=-1)
+            if neg_ids is not None and neg_ids_2 is not None:
+                n1, _ = self._encode_from_ids_single(
+                    neg_ids, self._text_encoder, clip_skip
+                )
+                n2, neg_pooled = self._encode_from_ids_single(
+                    neg_ids_2, self._text_encoder_2, clip_skip
+                )
+                neg_embeds = torch.cat([n1, n2], dim=-1)
+            else:
+                neg_embeds = torch.zeros_like(prompt_embeds)
+                neg_pooled = torch.zeros_like(pooled)
         else:
-            neg_embeds = torch.zeros_like(prompt_embeds)
-            neg_pooled = torch.zeros_like(pooled)
+            # Backward compat: tokenize from prompt
+            prompt = inputs.get(C.PORT_PROMPT, "")
+            prompt_2 = inputs.get(C.PORT_PROMPT_2)
+            neg_prompt = inputs.get(C.PORT_NEGATIVE_PROMPT, "")
+            neg_prompt_2 = inputs.get(C.PORT_NEGATIVE_PROMPT_2)
+            prompt_embeds, pooled = self._encode_prompt_pair(prompt, prompt_2)
+            if neg_prompt or neg_prompt_2:
+                neg_embeds, neg_pooled = self._encode_prompt_pair(
+                    neg_prompt or "", neg_prompt_2
+                )
+            else:
+                neg_embeds = torch.zeros_like(prompt_embeds)
+                neg_pooled = torch.zeros_like(pooled)
 
         return {
             C.PORT_PROMPT_EMBEDS: prompt_embeds,

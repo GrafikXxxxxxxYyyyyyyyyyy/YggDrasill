@@ -43,19 +43,30 @@ class FluxPromptEncoderNode(AbstractConjector):
         return [
             Port(C.PORT_PROMPT, PortDirection.IN, PortType.TEXT, optional=True),
             Port(C.PORT_PROMPT_2, PortDirection.IN, PortType.TEXT, optional=True),
+            Port(C.PORT_INPUT_IDS, PortDirection.IN, PortType.TENSOR, optional=True),
+            Port(C.PORT_INPUT_IDS_2, PortDirection.IN, PortType.TENSOR, optional=True),
             Port(C.PORT_PROMPT_EMBEDS, PortDirection.OUT, PortType.TENSOR),
             Port(C.PORT_POOLED_PROMPT_EMBEDS, PortDirection.OUT, PortType.TENSOR),
             Port(C.PORT_TXT_IDS, PortDirection.OUT, PortType.TENSOR),
         ]
 
     def forward(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
-        prompt = inputs.get(C.PORT_PROMPT, "")
-        prompt_2 = inputs.get(C.PORT_PROMPT_2) or prompt
+        import torch
+
         max_seq_len = self._config.get("max_sequence_length", 512)
+        input_ids = inputs.get(C.PORT_INPUT_IDS)
+        input_ids_2 = inputs.get(C.PORT_INPUT_IDS_2)
 
-        pooled_prompt_embeds = self._encode_clip(prompt)
-
-        prompt_embeds, text_ids = self._encode_t5(prompt_2, max_seq_len)
+        if input_ids is not None and input_ids_2 is not None:
+            # Canonical path: token_ids from Converter node
+            pooled_prompt_embeds = self._encode_clip_from_ids(input_ids)
+            prompt_embeds, text_ids = self._encode_t5_from_ids(input_ids_2, max_seq_len)
+        else:
+            # Backward compat: tokenize from prompt
+            prompt = inputs.get(C.PORT_PROMPT, "")
+            prompt_2 = inputs.get(C.PORT_PROMPT_2) or prompt
+            pooled_prompt_embeds = self._encode_clip(prompt)
+            prompt_embeds, text_ids = self._encode_t5(prompt_2, max_seq_len)
 
         return {
             C.PORT_PROMPT_EMBEDS: prompt_embeds,
@@ -73,13 +84,16 @@ class FluxPromptEncoderNode(AbstractConjector):
             return_tensors="pt",
         )
         input_ids = text_inputs.input_ids.to(self._text_encoder.device)
+        return self._encode_clip_from_ids(input_ids)
+
+    def _encode_clip_from_ids(self, input_ids: Any) -> Any:
+        """Encode from token_ids (from Converter)."""
+        input_ids = input_ids.to(self._text_encoder.device)
         output = self._text_encoder(input_ids, output_hidden_states=False)
         return output.pooler_output
 
     def _encode_t5(self, text: str, max_sequence_length: int) -> Any:
         """Encode with T5 to get sequence embeddings and text_ids."""
-        import torch
-
         text_inputs = self._tokenizer_2(
             text,
             padding="max_length",
@@ -88,12 +102,17 @@ class FluxPromptEncoderNode(AbstractConjector):
             return_tensors="pt",
         )
         input_ids = text_inputs.input_ids.to(self._text_encoder_2.device)
+        return self._encode_t5_from_ids(input_ids, max_sequence_length)
+
+    def _encode_t5_from_ids(self, input_ids: Any, max_sequence_length: int) -> Any:
+        """Encode from token_ids (from Converter). Returns (prompt_embeds, text_ids)."""
+        import torch
+
+        input_ids = input_ids.to(self._text_encoder_2.device)
         output = self._text_encoder_2(input_ids)
         prompt_embeds = output[0]
-
         seq_len = prompt_embeds.shape[1]
         text_ids = torch.zeros(seq_len, 3, device=prompt_embeds.device)
-
         return prompt_embeds, text_ids
 
     def to(self, device: Any) -> "FluxPromptEncoderNode":

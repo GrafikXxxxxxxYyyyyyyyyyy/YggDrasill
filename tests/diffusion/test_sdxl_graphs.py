@@ -42,7 +42,7 @@ class TestSDXLText2ImgGraph:
 
     def test_has_required_nodes(self, sdxl_kwargs):
         g = build_sdxl_text2img_graph(**sdxl_kwargs)
-        expected = {"prompt_enc", "added_cond", "sched_setup", "latent_init",
+        expected = {"tokenizer", "prompt_enc", "added_cond", "sched_setup", "latent_init",
                     "unet", "sched_step", "vae_decode"}
         assert expected.issubset(g.node_ids)
 

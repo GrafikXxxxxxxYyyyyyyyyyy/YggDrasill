@@ -10,6 +10,7 @@ def register_diffusion_nodes(registry: Optional[BlockRegistry] = None) -> None:
     """Register all SD1.5, SDXL, and adapter node types."""
     reg = registry or BlockRegistry.global_registry()
 
+    from yggdrasill.integrations.diffusers.sd15.tokenizer import SD15TokenizerNode
     from yggdrasill.integrations.diffusers.sd15.prompt_encoder import SD15PromptEncoderNode
     from yggdrasill.integrations.diffusers.sd15.unet import SD15UNetNode
     from yggdrasill.integrations.diffusers.sd15.scheduler import (
@@ -20,6 +21,7 @@ def register_diffusion_nodes(registry: Optional[BlockRegistry] = None) -> None:
     from yggdrasill.integrations.diffusers.sd15.mask_prep import SD15MaskPrepNode
     from yggdrasill.integrations.diffusers.sd15.safety import SD15SafetyNode
 
+    from yggdrasill.integrations.diffusers.sdxl.tokenizer import SDXLTokenizerNode
     from yggdrasill.integrations.diffusers.sdxl.prompt_encoder import SDXLPromptEncoderNode
     from yggdrasill.integrations.diffusers.sdxl.added_conditioning import SDXLAddedConditioningNode
     from yggdrasill.integrations.diffusers.sdxl.unet import SDXLUNetNode
@@ -34,6 +36,7 @@ def register_diffusion_nodes(registry: Optional[BlockRegistry] = None) -> None:
     from yggdrasill.integrations.diffusers.adapters.ip_adapter import IPAdapterNode
     from yggdrasill.integrations.diffusers.adapters.textual_inversion import TextualInversionNode
 
+    from yggdrasill.integrations.diffusers.flux.tokenizer import FluxTokenizerNode
     from yggdrasill.integrations.diffusers.flux.prompt_encoder import FluxPromptEncoderNode
     from yggdrasill.integrations.diffusers.flux.transformer import FluxTransformerNode
     from yggdrasill.integrations.diffusers.flux.scheduler import (
@@ -44,6 +47,7 @@ def register_diffusion_nodes(registry: Optional[BlockRegistry] = None) -> None:
     from yggdrasill.integrations.diffusers.flux.controlnet import FluxControlNetNode
 
     nodes = {
+        "sd15/tokenizer": SD15TokenizerNode,
         "sd15/prompt_encoder": SD15PromptEncoderNode,
         "sd15/unet": SD15UNetNode,
         "sd15/scheduler_setup": SD15SchedulerSetupNode,
@@ -53,6 +57,7 @@ def register_diffusion_nodes(registry: Optional[BlockRegistry] = None) -> None:
         "sd15/vae_decode": SD15VAEDecodeNode,
         "sd15/mask_prep": SD15MaskPrepNode,
         "sd15/safety": SD15SafetyNode,
+        "sdxl/tokenizer": SDXLTokenizerNode,
         "sdxl/prompt_encoder": SDXLPromptEncoderNode,
         "sdxl/added_conditioning": SDXLAddedConditioningNode,
         "sdxl/unet": SDXLUNetNode,
@@ -65,6 +70,7 @@ def register_diffusion_nodes(registry: Optional[BlockRegistry] = None) -> None:
         "adapter/controlnet": ControlNetNode,
         "adapter/ip_adapter": IPAdapterNode,
         "adapter/textual_inversion": TextualInversionNode,
+        "flux/tokenizer": FluxTokenizerNode,
         "flux/prompt_encoder": FluxPromptEncoderNode,
         "flux/transformer": FluxTransformerNode,
         "flux/scheduler_setup": FluxSchedulerSetupNode,
