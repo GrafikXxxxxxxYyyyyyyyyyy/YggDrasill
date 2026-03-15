@@ -1,16 +1,30 @@
 """Auto-connect: automatically create edges when adding a task-node.
 
 Based on PHASE_4 §9 and Canon 02 §12.2.
+
+Two strategies are provided:
+
+1. **Role-based** (:func:`apply_auto_connect`) — uses the canonical role
+   edge rules (``ROLE_EDGE_RULES``) with generic port names like
+   ``"condition"`` / ``"latent"``.  Best for custom non-diffusion graphs.
+
+2. **Port-name-based** (:func:`apply_port_name_auto_connect`) — matches
+   output ports to input ports by *exact name* (with a small alias
+   table for known mismatches).  Best for diffusion graphs whose ports
+   follow the canonical contract names.
 """
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, List, Set, Tuple
 
 from yggdrasill.engine.edge import Edge
 from yggdrasill.foundation.node import AbstractGraphNode
+from yggdrasill.foundation.port import PortDirection
 from yggdrasill.task_nodes.role_rules import suggest_edges_for_new_node
 from yggdrasill.task_nodes.roles import role_from_block_type
 
+
+# ── Role-based auto-connect (original) ─────────────────────────────────
 
 def apply_auto_connect(
     hypergraph: Any,
@@ -67,14 +81,114 @@ def apply_auto_connect(
     return added
 
 
+# ── Port-name-based auto-connect (diffusion-aware) ─────────────────────
+
+PORT_ALIASES: Dict[str, List[str]] = {
+    "next_latent": ["latents"],
+    "next_timestep": ["timestep"],
+}
+
+
+def _get_existing_edges(hypergraph: Any) -> Set[Tuple[str, str, str, str]]:
+    """Return a set of (src_node, src_port, tgt_node, tgt_port) tuples."""
+    return {
+        (e.source_node, e.source_port, e.target_node, e.target_port)
+        for e in hypergraph.get_edges()
+    }
+
+
+def apply_port_name_auto_connect(
+    hypergraph: Any,
+    new_node_id: str,
+    new_block: Any,
+) -> int:
+    """Wire *new_node_id* to existing nodes by matching port names.
+
+    For every **output** port on the new node, looks for existing nodes
+    that have an **input** port with the same name (or a known alias).
+    For every **input** port on the new node, looks for existing nodes
+    that have an **output** port with the same name (or alias).
+
+    Returns the number of edges added.
+    """
+    if not isinstance(new_block, AbstractGraphNode):
+        return 0
+
+    existing_edges = _get_existing_edges(hypergraph)
+    added = 0
+
+    new_out_ports = [p for p in new_block.get_output_ports() if p.direction == PortDirection.OUT]
+    new_in_ports = [p for p in new_block.get_input_ports() if p.direction == PortDirection.IN]
+
+    for nid in list(hypergraph.node_ids):
+        if nid == new_node_id:
+            continue
+        other = hypergraph.get_node(nid)
+        if not isinstance(other, AbstractGraphNode):
+            continue
+
+        other_in_ports = {p.name: p for p in other.get_input_ports() if p.direction == PortDirection.IN}
+        other_out_ports = {p.name: p for p in other.get_output_ports() if p.direction == PortDirection.OUT}
+
+        for out_port in new_out_ports:
+            target_names = [out_port.name] + PORT_ALIASES.get(out_port.name, [])
+            for tgt_name in target_names:
+                if tgt_name in other_in_ports:
+                    in_port = other_in_ports[tgt_name]
+                    if not out_port.compatible_with(in_port):
+                        continue
+                    edge_key = (new_node_id, out_port.name, nid, tgt_name)
+                    if edge_key in existing_edges:
+                        continue
+                    edge = Edge(new_node_id, out_port.name, nid, tgt_name)
+                    try:
+                        hypergraph.add_edge(edge)
+                        existing_edges.add(edge_key)
+                        added += 1
+                    except (ValueError, KeyError):
+                        pass
+
+        for in_port in new_in_ports:
+            target_names = [in_port.name]
+            reverse_aliases = [
+                alias for alias, targets in PORT_ALIASES.items()
+                if in_port.name in targets
+            ]
+            target_names.extend(reverse_aliases)
+            for src_name in target_names:
+                if src_name in other_out_ports:
+                    out_port_obj = other_out_ports[src_name]
+                    if not out_port_obj.compatible_with(in_port):
+                        continue
+                    edge_key = (nid, src_name, new_node_id, in_port.name)
+                    if edge_key in existing_edges:
+                        continue
+                    edge = Edge(nid, src_name, new_node_id, in_port.name)
+                    try:
+                        hypergraph.add_edge(edge)
+                        existing_edges.add(edge_key)
+                        added += 1
+                    except (ValueError, KeyError):
+                        pass
+
+    return added
+
+
+# ── Public helpers ──────────────────────────────────────────────────────
+
 def use_task_node_auto_connect(hypergraph: Any) -> None:
-    """Enable auto-connect on *hypergraph*.
+    """Enable role-based auto-connect on *hypergraph*.
 
     After calling this, ``hypergraph.add_node_from_config(..., auto_connect=True)``
     will automatically create edges based on role rules.
-
-    Implementation note: sets ``_auto_connect_fn`` on the hypergraph so that
-    ``add_node_from_config`` can invoke it when ``auto_connect=True`` is passed
-    via **kwargs.
     """
     hypergraph._auto_connect_fn = apply_auto_connect
+
+
+def use_port_name_auto_connect(hypergraph: Any) -> None:
+    """Enable port-name-based auto-connect on *hypergraph*.
+
+    Best suited for diffusion graphs whose ports use canonical contract
+    names from :mod:`yggdrasill.diffusion.contracts`.
+    """
+    hypergraph._auto_connect_fn = apply_port_name_auto_connect

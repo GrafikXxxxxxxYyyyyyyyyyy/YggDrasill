@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from yggdrasill.diffusion import contracts as C
-from yggdrasill.foundation.port import Port, PortDirection, PortType
+from yggdrasill.foundation.port import Port, PortAggregation, PortDirection, PortType
 from yggdrasill.task_nodes.abstract import AbstractBackbone
 
 
@@ -45,8 +45,8 @@ class FluxTransformerNode(AbstractBackbone):
             Port(C.PORT_IMG_IDS, PortDirection.IN, PortType.TENSOR),
             Port(C.PORT_TXT_IDS, PortDirection.IN, PortType.TENSOR),
             Port(C.PORT_GUIDANCE, PortDirection.IN, PortType.TENSOR, optional=True),
-            Port(C.PORT_CONTROLNET_BLOCK_SAMPLES, PortDirection.IN, PortType.ANY, optional=True),
-            Port(C.PORT_CONTROLNET_SINGLE_BLOCK_SAMPLES, PortDirection.IN, PortType.ANY, optional=True),
+            Port(C.PORT_CONTROLNET_BLOCK_SAMPLES, PortDirection.IN, PortType.ANY, optional=True, aggregation=PortAggregation.CONCAT),
+            Port(C.PORT_CONTROLNET_SINGLE_BLOCK_SAMPLES, PortDirection.IN, PortType.ANY, optional=True, aggregation=PortAggregation.CONCAT),
             Port(C.PORT_NOISE_PRED, PortDirection.OUT, PortType.TENSOR),
         ]
 
@@ -82,12 +82,14 @@ class FluxTransformerNode(AbstractBackbone):
         if joint_attention_kwargs is not None:
             kwargs["joint_attention_kwargs"] = joint_attention_kwargs
 
+        from yggdrasill.integrations.diffusers.sd15.unet import _merge_residuals
+
         cn_block = inputs.get(C.PORT_CONTROLNET_BLOCK_SAMPLES)
         cn_single = inputs.get(C.PORT_CONTROLNET_SINGLE_BLOCK_SAMPLES)
         if cn_block is not None:
-            kwargs["controlnet_block_samples"] = cn_block
+            kwargs["controlnet_block_samples"] = _merge_residuals(cn_block)
         if cn_single is not None:
-            kwargs["controlnet_single_block_samples"] = cn_single
+            kwargs["controlnet_single_block_samples"] = _merge_residuals(cn_single)
 
         output = self._transformer(**kwargs)
         noise_pred = output[0] if isinstance(output, (tuple, list)) else output

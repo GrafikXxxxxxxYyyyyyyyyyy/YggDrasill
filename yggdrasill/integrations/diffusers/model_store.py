@@ -173,9 +173,9 @@ class ModelStore:
 
         components: Dict[str, Any] = {}
         for attr in ("vae", "text_encoder", "text_encoder_2",
-                      "tokenizer", "tokenizer_2", "unet",
+                      "tokenizer", "tokenizer_2", "unet", "transformer",
                       "scheduler", "safety_checker", "feature_extractor",
-                      "image_encoder"):
+                      "image_encoder", "controlnet"):
             val = getattr(pipe, attr, None)
             if val is not None:
                 components[attr] = val

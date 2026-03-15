@@ -4,8 +4,33 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from yggdrasill.diffusion import contracts as C
-from yggdrasill.foundation.port import Port, PortDirection, PortType
+from yggdrasill.foundation.port import Port, PortAggregation, PortDirection, PortType
 from yggdrasill.task_nodes.abstract import AbstractBackbone
+
+
+def _merge_residuals(value: Any) -> Any:
+    """Merge residuals from multiple adapters.
+
+    When ``CONCAT`` aggregation is used, the executor delivers a list of
+    residual tuples (one per adapter).  This helper element-wise sums
+    them into a single residual tuple suitable for the UNet.  If the
+    value is not a list (single adapter), it is returned as-is.
+    """
+    if not isinstance(value, list):
+        return value
+    if len(value) == 1:
+        return value[0]
+    import torch
+    merged = value[0]
+    if isinstance(merged, (list, tuple)):
+        merged = list(merged)
+        for extra in value[1:]:
+            for i, t in enumerate(extra):
+                merged[i] = merged[i] + t
+        return tuple(merged)
+    for extra in value[1:]:
+        merged = merged + extra
+    return merged
 
 
 class SD15UNetNode(AbstractBackbone):
@@ -37,8 +62,8 @@ class SD15UNetNode(AbstractBackbone):
             Port(C.PORT_TIMESTEP, PortDirection.IN, PortType.TENSOR),
             Port(C.PORT_PROMPT_EMBEDS, PortDirection.IN, PortType.TENSOR),
             Port(C.PORT_NEGATIVE_PROMPT_EMBEDS, PortDirection.IN, PortType.TENSOR, optional=True),
-            Port(C.PORT_DOWN_BLOCK_RESIDUALS, PortDirection.IN, PortType.ANY, optional=True),
-            Port(C.PORT_MID_BLOCK_RESIDUAL, PortDirection.IN, PortType.ANY, optional=True),
+            Port(C.PORT_DOWN_BLOCK_RESIDUALS, PortDirection.IN, PortType.ANY, optional=True, aggregation=PortAggregation.CONCAT),
+            Port(C.PORT_MID_BLOCK_RESIDUAL, PortDirection.IN, PortType.ANY, optional=True, aggregation=PortAggregation.CONCAT),
             Port(C.PORT_NOISE_PRED, PortDirection.OUT, PortType.TENSOR),
         ]
 
@@ -67,8 +92,10 @@ class SD15UNetNode(AbstractBackbone):
         down_residuals = inputs.get(C.PORT_DOWN_BLOCK_RESIDUALS)
         mid_residual = inputs.get(C.PORT_MID_BLOCK_RESIDUAL)
         if down_residuals is not None:
+            down_residuals = _merge_residuals(down_residuals)
             kwargs["down_block_additional_residuals"] = down_residuals
         if mid_residual is not None:
+            mid_residual = _merge_residuals(mid_residual)
             kwargs["mid_block_additional_residual"] = mid_residual
 
         noise_pred = self._unet(

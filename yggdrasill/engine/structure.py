@@ -44,9 +44,14 @@ class Hypergraph:
     wraps the same protocol with Hypergraph instances as "nodes".
     """
 
-    def __init__(self, graph_id: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        graph_id: Optional[str] = None,
+        *,
+        name: Optional[str] = None,
+    ) -> None:
         self._instance_id = next(_instance_counter)
-        self._graph_id = graph_id or "graph"
+        self._graph_id = name or graph_id or "graph"
         self._graph_kind: Optional[str] = None
         self._metadata: Dict[str, Any] = {}
 
@@ -96,15 +101,293 @@ class Hypergraph:
     def get_node(self, node_id: str) -> Optional[Any]:
         return self._nodes.get(node_id)
 
-    def add_node(self, node_id: str, node: Any) -> None:
-        """Add a ready-made node (task-node object) to the graph."""
+    def add_node(
+        self,
+        node_id: str,
+        node: Any = None,
+        *,
+        type: Optional[str] = None,  # noqa: A002 — shadows builtin intentionally
+        pretrained: Optional[str] = None,
+        auto_connect: bool = True,
+        config: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
+    ) -> None:
+        """Add a node to the graph.
+
+        Three calling conventions are supported:
+
+        1. **Raw node object** — ``graph.add_node("id", node_object)``
+        2. **Block-level type** — ``graph.add_node("id", type="sdxl/unet", pretrained="repo")``
+        3. **Component-level type** — ``graph.add_node("id", type="sdxl.unet", pretrained="repo")``
+
+        When *auto_connect* is ``True`` (the default for typed calls),
+        port-name-based auto-wiring is applied after the node is added.
+        """
         if not node_id or not node_id.strip():
             raise ValueError("node_id must be non-empty")
         node_id = node_id.strip()
+
+        if node is not None:
+            self._add_raw_node(node_id, node)
+            return
+
+        if type is None:
+            raise ValueError(
+                "add_node requires either a node object as the second "
+                "positional argument, or type= keyword argument"
+            )
+
+        from yggdrasill.diffusion.components import (
+            is_block_type, is_component_type,
+        )
+        if is_block_type(type):
+            self._add_block_type_node(
+                node_id, type,
+                pretrained=pretrained,
+                auto_connect=auto_connect,
+                config=config,
+                **kwargs,
+            )
+        elif is_component_type(type):
+            self._add_component_type_node(
+                node_id, type,
+                pretrained=pretrained,
+                auto_connect=auto_connect,
+                config=config,
+                **kwargs,
+            )
+        else:
+            raise ValueError(
+                f"Unrecognised type format '{type}'. "
+                "Use 'family/block' for block-level or 'family.component' "
+                "for component-level types."
+            )
+
+    def _add_raw_node(self, node_id: str, node: Any) -> None:
+        """Internal: add a pre-constructed node object."""
         self._nodes[node_id] = node
         self._in_edges.setdefault(node_id, [])
         self._out_edges.setdefault(node_id, [])
         self._execution_version += 1
+
+    def _add_block_type_node(
+        self,
+        node_id: str,
+        block_type: str,
+        *,
+        pretrained: Optional[str] = None,
+        auto_connect: bool = True,
+        config: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
+    ) -> None:
+        """Build a node from a block-level type and add it."""
+        from yggdrasill.foundation.registry import BlockRegistry
+
+        reg = BlockRegistry.global_registry()
+        build_cfg: Dict[str, Any] = {"block_type": block_type, "node_id": node_id}
+        if config:
+            build_cfg.update(config)
+        build_cfg.update(kwargs)
+
+        if pretrained is not None:
+            loaded = self._load_pretrained_components(
+                block_type, pretrained, **kwargs,
+            )
+            build_cfg.update(loaded)
+
+        node = reg.build(build_cfg)
+        self._add_raw_node(node_id, node)
+        if auto_connect:
+            self._auto_connect_port_names(node_id, node)
+
+    def _add_component_type_node(
+        self,
+        node_id: str,
+        component_type: str,
+        *,
+        pretrained: Optional[str] = None,
+        auto_connect: bool = True,
+        config: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
+    ) -> None:
+        """Resolve a component-level type and create the corresponding node(s)."""
+        from yggdrasill.diffusion.components import resolve_component_type
+        from yggdrasill.foundation.registry import BlockRegistry
+
+        spec = resolve_component_type(component_type)
+        reg = BlockRegistry.global_registry()
+
+        loaded: Dict[str, Any] = {}
+        if pretrained and spec.load_keys:
+            loaded = self._load_pretrained_components_by_keys(
+                spec.load_keys, pretrained, **kwargs,
+            )
+
+        if spec.group:
+            self._handle_grouped_component(
+                node_id, spec, loaded,
+                auto_connect=auto_connect,
+                config=config,
+                registry=reg,
+                **kwargs,
+            )
+            self._ensure_implicit_component_nodes(
+                component_type,
+                config=config,
+            )
+            return
+
+        if len(spec.block_types) == 1:
+            bt = spec.block_types[0]
+            ctor_map = spec.constructor_map.get(bt, {})
+            build_cfg: Dict[str, Any] = {"block_type": bt, "node_id": node_id}
+            for ctor_kwarg, comp_key in ctor_map.items():
+                if comp_key in loaded:
+                    build_cfg[ctor_kwarg] = loaded[comp_key]
+            if config:
+                build_cfg.update(config)
+
+            node = reg.build(build_cfg)
+            self._add_raw_node(node_id, node)
+            if auto_connect:
+                self._auto_connect_port_names(node_id, node)
+        else:
+            for i, bt in enumerate(spec.block_types):
+                suffix = bt.rsplit("/", 1)[-1]
+                sub_id = f"{node_id}_{suffix}"
+                ctor_map = spec.constructor_map.get(bt, {})
+                build_cfg = {"block_type": bt, "node_id": sub_id}
+                for ctor_kwarg, comp_key in ctor_map.items():
+                    if comp_key in loaded:
+                        build_cfg[ctor_kwarg] = loaded[comp_key]
+                if config:
+                    build_cfg.update(config)
+
+                node = reg.build(build_cfg)
+                self._add_raw_node(sub_id, node)
+                if auto_connect:
+                    self._auto_connect_port_names(sub_id, node)
+
+        self._ensure_implicit_component_nodes(
+            component_type,
+            config=config,
+        )
+
+    def _ensure_implicit_component_nodes(
+        self,
+        component_type: str,
+        *,
+        config: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Auto-insert helper nodes required by ergonomic component APIs.
+
+        These nodes are implementation details of the graph runtime and
+        should not need to be listed explicitly by users when assembling
+        a graph with high-level component types.
+        """
+        family = component_type.split(".", 1)[0]
+        implicit_specs: Dict[str, List[tuple[str, str]]] = {
+            "sd15": [
+                ("sd15/latent_init", "__auto_sd15_latent_init"),
+            ],
+            "sdxl": [
+                ("sdxl/latent_init", "__auto_sdxl_latent_init"),
+                ("sdxl/added_conditioning", "__auto_sdxl_added_cond"),
+            ],
+            "flux": [
+                ("flux/latent_init", "__auto_flux_latent_init"),
+            ],
+        }
+        for block_type, auto_node_id in implicit_specs.get(family, []):
+            if self._find_node_id_by_block_type(block_type) is not None:
+                continue
+            self._add_block_type_node(
+                auto_node_id,
+                block_type,
+                auto_connect=True,
+                config=config,
+            )
+
+    def _find_node_id_by_block_type(self, block_type: str) -> Optional[str]:
+        """Return the first node id with the given block type, if any."""
+        for nid, node in self._nodes.items():
+            if getattr(node, "block_type", None) == block_type:
+                return nid
+        return None
+
+    def _handle_grouped_component(
+        self,
+        node_id: str,
+        spec: Any,
+        loaded: Dict[str, Any],
+        *,
+        auto_connect: bool = True,
+        config: Optional[Dict[str, Any]] = None,
+        registry: Any = None,
+        **kwargs: Any,
+    ) -> None:
+        """Handle component types that share a group (e.g. tokenizer + text_encoder)."""
+        if not hasattr(self, "_component_groups"):
+            self._component_groups: Dict[str, str] = {}
+
+        group = spec.group
+        assert group is not None
+
+        existing_nid = self._component_groups.get(group)
+        bt = spec.block_types[0]
+
+        if existing_nid and existing_nid in self._nodes:
+            existing_node = self._nodes[existing_nid]
+            ctor_map = spec.constructor_map.get(bt, {})
+            for ctor_kwarg, comp_key in ctor_map.items():
+                if comp_key in loaded:
+                    setattr(existing_node, f"_{ctor_kwarg}", loaded[comp_key])
+            self._component_groups[f"{group}:{node_id}"] = existing_nid
+        else:
+            ctor_map = spec.constructor_map.get(bt, {})
+            build_cfg: Dict[str, Any] = {"block_type": bt, "node_id": node_id}
+            for ctor_kwarg, comp_key in ctor_map.items():
+                if comp_key in loaded:
+                    build_cfg[ctor_kwarg] = loaded[comp_key]
+            if config:
+                build_cfg.update(config)
+
+            node = registry.build(build_cfg)
+            self._add_raw_node(node_id, node)
+            self._component_groups[group] = node_id
+            if auto_connect:
+                self._auto_connect_port_names(node_id, node)
+
+    def _load_pretrained_components(
+        self,
+        block_type: str,
+        pretrained: str,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """Load all components from a pretrained repo for a block type."""
+        from yggdrasill.integrations.diffusers.model_store import ModelStore
+
+        ms = ModelStore.default()
+        components = ms.load_pipeline_components(pretrained)
+        return components
+
+    def _load_pretrained_components_by_keys(
+        self,
+        load_keys: List[str],
+        pretrained: str,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """Load specific components from a pretrained repo."""
+        from yggdrasill.integrations.diffusers.model_store import ModelStore
+
+        ms = ModelStore.default()
+        components = ms.load_pipeline_components(pretrained)
+        return {k: components[k] for k in load_keys if k in components}
+
+    def _auto_connect_port_names(self, node_id: str, node: Any) -> None:
+        """Run port-name-based auto-connect for a newly added node."""
+        from yggdrasill.task_nodes.auto_connect import apply_port_name_auto_connect
+        apply_port_name_auto_connect(self, node_id, node)
 
     def remove_node(self, node_id: str) -> None:
         if node_id not in self._nodes:
@@ -132,6 +415,134 @@ class Hypergraph:
         ]
         self._node_trainable.pop(node_id, None)
         self._execution_version += 1
+
+    def replace_node(
+        self,
+        node_id: str,
+        *,
+        pretrained: Optional[str] = None,
+        type: Optional[str] = None,  # noqa: A002
+        node: Optional[Any] = None,
+        auto_connect: bool = True,
+        config: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
+    ) -> None:
+        """Replace an existing node in the graph.
+
+        Three modes:
+
+        * **Weights-only** (only *pretrained*): reload model weights on
+          the existing node without changing the graph topology.
+        * **Full swap with type** (*type* and/or *pretrained*): remove
+          the old node, create a new one, and re-wire edges whose port
+          names still match.
+        * **Full swap with object** (*node*): replace with a pre-built
+          node object, re-wiring compatible edges.
+        """
+        if node_id not in self._nodes:
+            raise ValueError(f"Node '{node_id}' not in graph")
+
+        if pretrained is not None and type is None and node is None:
+            self._replace_pretrained_only(node_id, pretrained, **kwargs)
+            return
+
+        old_in_edges = list(self.get_edges_in(node_id))
+        old_out_edges = list(self.get_edges_out(node_id))
+        old_exposed_in = [
+            ei for ei in self._exposed_inputs if ei["node_id"] == node_id
+        ]
+        old_exposed_out = [
+            eo for eo in self._exposed_outputs if eo["node_id"] == node_id
+        ]
+
+        self.remove_node(node_id)
+
+        if node is not None:
+            self._add_raw_node(node_id, node)
+        elif type is not None:
+            self.add_node(
+                node_id,
+                type=type,
+                pretrained=pretrained,
+                auto_connect=False,
+                config=config,
+                **kwargs,
+            )
+        else:
+            raise ValueError(
+                "replace_node requires at least one of: pretrained, type, or node"
+            )
+
+        new_node = self._nodes.get(node_id)
+        if new_node is None:
+            return
+
+        new_in_names: Set[str] = set()
+        new_out_names: Set[str] = set()
+        if isinstance(new_node, AbstractGraphNode):
+            new_in_names = {p.name for p in new_node.get_input_ports()}
+            new_out_names = {p.name for p in new_node.get_output_ports()}
+
+        for edge in old_in_edges:
+            if edge.target_port in new_in_names:
+                try:
+                    self.add_edge(edge)
+                except (ValueError, KeyError):
+                    pass
+
+        for edge in old_out_edges:
+            if edge.source_port in new_out_names:
+                try:
+                    self.add_edge(edge)
+                except (ValueError, KeyError):
+                    pass
+
+        for ei in old_exposed_in:
+            if ei["port_name"] in new_in_names:
+                self.expose_input(node_id, ei["port_name"], ei.get("name"))
+        for eo in old_exposed_out:
+            if eo["port_name"] in new_out_names:
+                self.expose_output(node_id, eo["port_name"], eo.get("name"))
+
+        if auto_connect:
+            self._auto_connect_port_names(node_id, new_node)
+
+    def _replace_pretrained_only(
+        self,
+        node_id: str,
+        pretrained: str,
+        **kwargs: Any,
+    ) -> None:
+        """Reload model weights on an existing node without changing topology."""
+        existing = self._nodes[node_id]
+        bt = getattr(existing, "block_type", None)
+        if bt is None:
+            raise ValueError(
+                f"Node '{node_id}' has no block_type; cannot determine "
+                "which components to reload."
+            )
+
+        from yggdrasill.integrations.diffusers.model_store import ModelStore
+
+        ms = ModelStore.default()
+        components = ms.load_pipeline_components(pretrained)
+
+        attr_map = {
+            "unet": "_unet",
+            "vae": "_vae",
+            "transformer": "_transformer",
+            "controlnet": "_controlnet",
+            "scheduler": "_scheduler",
+            "tokenizer": "_tokenizer",
+            "tokenizer_2": "_tokenizer_2",
+            "text_encoder": "_text_encoder",
+            "text_encoder_2": "_text_encoder_2",
+            "image_encoder": "_image_encoder",
+            "feature_extractor": "_feature_extractor",
+        }
+        for comp_name, attr_name in attr_map.items():
+            if hasattr(existing, attr_name) and comp_name in components:
+                setattr(existing, attr_name, components[comp_name])
 
     # --- edges -----------------------------------------------------------
 
@@ -451,7 +862,7 @@ class Hypergraph:
 
     def run(
         self,
-        inputs: Dict[str, Any],
+        inputs: Optional[Dict[str, Any]] = None,
         *,
         training: bool = False,
         num_loop_steps: Optional[int] = None,
@@ -460,19 +871,107 @@ class Hypergraph:
         dry_run: bool = False,
         validate_before: bool = True,
         **kwargs: Any,
-    ) -> Dict[str, Any]:
-        """Execute the hypergraph; delegates to engine.run(self, ...)."""
+    ) -> Any:
+        """Execute the hypergraph and return results.
+
+        Accepts either a dict of inputs or keyword arguments that are
+        automatically routed to the appropriate graph inputs and executor
+        parameters.
+
+        For diffusion graphs the return value is a
+        :class:`~yggdrasill.diffusion.output.DiffusionOutput` with an
+        ``.images`` attribute; for other graphs a plain ``dict`` is
+        returned.
+
+        Keyword argument routing
+        ------------------------
+        * ``num_inference_steps`` -> ``num_loop_steps`` (executor)
+        * ``seed`` -> ``seed`` (executor)
+        * Names matching an exposed input port -> ``inputs`` dict
+        * Remaining kwargs -> ``pin_data`` config overrides on nodes that
+          recognise the key in their config.
+        """
         from yggdrasill.engine.executor import run as _run
-        return _run(
-            self, inputs,
-            training=training,
+
+        resolved_inputs, executor_kwargs = self._resolve_run_kwargs(
+            inputs, kwargs,
             num_loop_steps=num_loop_steps,
+        )
+
+        raw = _run(
+            self,
+            resolved_inputs,
+            training=training,
+            num_loop_steps=executor_kwargs.get("num_loop_steps", num_loop_steps),
             device=device,
             callbacks=callbacks,
             dry_run=dry_run,
             validate_before=validate_before,
-            **kwargs,
+            seed=executor_kwargs.get("seed"),
+            pin_data=executor_kwargs.get("pin_data"),
         )
+
+        if isinstance(raw, dict):
+            return self._maybe_wrap_output(raw)
+        return raw
+
+    def _resolve_run_kwargs(
+        self,
+        inputs: Optional[Dict[str, Any]],
+        kwargs: Dict[str, Any],
+        *,
+        num_loop_steps: Optional[int] = None,
+    ) -> tuple:
+        """Split kwargs into (inputs_dict, executor_kwargs)."""
+        resolved: Dict[str, Any] = dict(inputs or {})
+        executor_kw: Dict[str, Any] = {}
+
+        if "num_inference_steps" in kwargs:
+            executor_kw["num_loop_steps"] = kwargs.pop("num_inference_steps")
+        if "seed" in kwargs:
+            executor_kw["seed"] = kwargs.pop("seed")
+
+        input_spec = self.get_input_spec()
+        exposed_names = set()
+        for spec_entry in input_spec:
+            key = self._spec_key(spec_entry)
+            exposed_names.add(key)
+            port_name = spec_entry["port_name"]
+            exposed_names.add(port_name)
+
+        pin_data: Dict[str, Dict[str, Any]] = {}
+        for key, val in list(kwargs.items()):
+            if key in exposed_names:
+                resolved[key] = val
+            else:
+                for nid, node in self._nodes.items():
+                    node_cfg = getattr(node, "_config", None) or {}
+                    if key in node_cfg:
+                        pin_data.setdefault(nid, {})[key] = val
+                        break
+
+        if pin_data:
+            executor_kw["pin_data"] = pin_data
+
+        return resolved, executor_kw
+
+    def _maybe_wrap_output(self, raw: Dict[str, Any]) -> Any:
+        """Wrap raw output in DiffusionOutput if graph has diffusion outputs."""
+        output_spec = self.get_output_spec()
+        output_port_names = {
+            spec.get("name", spec["port_name"]) for spec in output_spec
+        }
+
+        from yggdrasill.diffusion.contracts import PORT_DECODED_IMAGE, PORT_OUTPUT_IMAGE
+
+        diffusion_keys = {PORT_DECODED_IMAGE, PORT_OUTPUT_IMAGE}
+        if output_port_names & diffusion_keys:
+            from yggdrasill.diffusion.output import DiffusionOutput
+
+            image_key = PORT_DECODED_IMAGE if PORT_DECODED_IMAGE in raw else PORT_OUTPUT_IMAGE
+            return DiffusionOutput.from_executor_output(raw, image_key=image_key)
+
+        return raw
 
     def infer_exposed_ports(self) -> None:
         """Auto-detect exposed inputs/outputs from uncovered ports."""

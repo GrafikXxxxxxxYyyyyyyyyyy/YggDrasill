@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from yggdrasill.diffusion import contracts as C
-from yggdrasill.foundation.port import Port, PortDirection, PortType
+from yggdrasill.foundation.port import Port, PortAggregation, PortDirection, PortType
 from yggdrasill.task_nodes.abstract import AbstractBackbone
 
 
@@ -39,9 +39,9 @@ class SDXLUNetNode(AbstractBackbone):
             Port(C.PORT_ADD_TEXT_EMBEDS, PortDirection.IN, PortType.TENSOR),
             Port(C.PORT_ADD_TIME_IDS, PortDirection.IN, PortType.TENSOR),
             Port(C.PORT_NEGATIVE_ADD_TIME_IDS, PortDirection.IN, PortType.TENSOR, optional=True),
-            Port(C.PORT_IMAGE_EMBEDS, PortDirection.IN, PortType.TENSOR, optional=True),
-            Port(C.PORT_DOWN_BLOCK_RESIDUALS, PortDirection.IN, PortType.ANY, optional=True),
-            Port(C.PORT_MID_BLOCK_RESIDUAL, PortDirection.IN, PortType.ANY, optional=True),
+            Port(C.PORT_IMAGE_EMBEDS, PortDirection.IN, PortType.TENSOR, optional=True, aggregation=PortAggregation.CONCAT),
+            Port(C.PORT_DOWN_BLOCK_RESIDUALS, PortDirection.IN, PortType.ANY, optional=True, aggregation=PortAggregation.CONCAT),
+            Port(C.PORT_MID_BLOCK_RESIDUAL, PortDirection.IN, PortType.ANY, optional=True, aggregation=PortAggregation.CONCAT),
             Port(C.PORT_NOISE_PRED, PortDirection.OUT, PortType.TENSOR),
         ]
 
@@ -80,6 +80,9 @@ class SDXLUNetNode(AbstractBackbone):
 
         image_embeds = inputs.get(C.PORT_IMAGE_EMBEDS)
         if image_embeds is not None:
+            if isinstance(image_embeds, list):
+                import torch
+                image_embeds = torch.cat(image_embeds, dim=0)
             added_cond_kwargs["image_embeds"] = image_embeds
 
         unet_kwargs: Dict[str, Any] = {
@@ -87,12 +90,14 @@ class SDXLUNetNode(AbstractBackbone):
             "added_cond_kwargs": added_cond_kwargs,
         }
 
+        from yggdrasill.integrations.diffusers.sd15.unet import _merge_residuals
+
         down_residuals = inputs.get(C.PORT_DOWN_BLOCK_RESIDUALS)
         mid_residual = inputs.get(C.PORT_MID_BLOCK_RESIDUAL)
         if down_residuals is not None:
-            unet_kwargs["down_block_additional_residuals"] = down_residuals
+            unet_kwargs["down_block_additional_residuals"] = _merge_residuals(down_residuals)
         if mid_residual is not None:
-            unet_kwargs["mid_block_additional_residual"] = mid_residual
+            unet_kwargs["mid_block_additional_residual"] = _merge_residuals(mid_residual)
 
         timestep_cond = None
         if hasattr(self._unet, "config") and getattr(self._unet.config, "time_cond_proj_dim", None):

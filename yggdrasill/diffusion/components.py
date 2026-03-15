@@ -1,0 +1,291 @@
+"""Component-level type registry for diffusion graphs.
+
+Maps high-level component types (e.g. ``"sdxl.unet"``) to the concrete
+block types, ModelStore loading keys, and constructor kwargs needed to
+materialise one or more YggDrasill graph nodes.
+
+Two levels are supported:
+
+* **Block-level types** (contain ``/``, e.g. ``"sdxl/unet"``): map 1:1
+  to a registered ``block_type`` and are built directly via the
+  :class:`BlockRegistry`.
+* **Component-level types** (contain ``.``, e.g. ``"sdxl.unet"``): map
+  to one or more block-level nodes and know which model component to
+  load from a pretrained HF repo.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Sequence
+
+
+@dataclass(frozen=True)
+class ComponentSpec:
+    """Describes how a component type maps to block-level nodes.
+
+    Attributes
+    ----------
+    block_types : list[str]
+        Block types to create (can be more than one, e.g. scheduler
+        creates both setup + step nodes).
+    load_keys : list[str]
+        ModelStore / pipeline component names to extract from the
+        pretrained repo for each block node.
+    constructor_map : dict[str, dict[str, str]]
+        ``{block_type: {constructor_kwarg: component_name}}``.
+        Tells the factory which loaded component goes into which
+        constructor kwarg for each block type.
+    group : str | None
+        If set, multiple component types with the same group contribute
+        to a **single shared node**.  The first ``add_node`` in the group
+        creates the node; subsequent calls update the existing node with
+        additional model components.
+    node_id_suffix : str | None
+        When a component creates multiple block nodes, this suffix is
+        appended to differentiate them (e.g. ``"_setup"`` / ``"_step"``
+        for schedulers).
+    """
+
+    block_types: List[str]
+    load_keys: List[str] = field(default_factory=list)
+    constructor_map: Dict[str, Dict[str, str]] = field(default_factory=dict)
+    group: Optional[str] = None
+    node_id_suffix: Optional[str] = None
+
+
+# ── SD 1.5 components ──────────────────────────────────────────────────
+
+_SD15_COMPONENTS: Dict[str, ComponentSpec] = {
+    "sd15.unet": ComponentSpec(
+        block_types=["sd15/unet"],
+        load_keys=["unet"],
+        constructor_map={"sd15/unet": {"unet": "unet"}},
+    ),
+    "sd15.vae": ComponentSpec(
+        block_types=["sd15/vae_decode"],
+        load_keys=["vae"],
+        constructor_map={"sd15/vae_decode": {"vae": "vae"}},
+    ),
+    "sd15.scheduler": ComponentSpec(
+        block_types=["sd15/scheduler_setup", "sd15/scheduler_step"],
+        load_keys=["scheduler"],
+        constructor_map={
+            "sd15/scheduler_setup": {"scheduler": "scheduler"},
+            "sd15/scheduler_step": {"scheduler": "scheduler"},
+        },
+    ),
+    "sd15.tokenizer": ComponentSpec(
+        block_types=["sd15/prompt_encoder"],
+        load_keys=["tokenizer"],
+        constructor_map={"sd15/prompt_encoder": {"tokenizer": "tokenizer"}},
+        group="sd15.prompt_encoder",
+    ),
+    "sd15.text_encoder": ComponentSpec(
+        block_types=["sd15/prompt_encoder"],
+        load_keys=["text_encoder"],
+        constructor_map={"sd15/prompt_encoder": {"text_encoder": "text_encoder"}},
+        group="sd15.prompt_encoder",
+    ),
+    "sd15.latent_init": ComponentSpec(
+        block_types=["sd15/latent_init"],
+        load_keys=[],
+        constructor_map={},
+    ),
+}
+
+# ── SDXL components ────────────────────────────────────────────────────
+
+_SDXL_COMPONENTS: Dict[str, ComponentSpec] = {
+    "sdxl.unet": ComponentSpec(
+        block_types=["sdxl/unet"],
+        load_keys=["unet"],
+        constructor_map={"sdxl/unet": {"unet": "unet"}},
+    ),
+    "sdxl.vae": ComponentSpec(
+        block_types=["sdxl/vae_decode"],
+        load_keys=["vae"],
+        constructor_map={"sdxl/vae_decode": {"vae": "vae"}},
+    ),
+    "sdxl.scheduler": ComponentSpec(
+        block_types=["sdxl/scheduler_setup", "sdxl/scheduler_step"],
+        load_keys=["scheduler"],
+        constructor_map={
+            "sdxl/scheduler_setup": {"scheduler": "scheduler"},
+            "sdxl/scheduler_step": {"scheduler": "scheduler"},
+        },
+    ),
+    "sdxl.tokenizer": ComponentSpec(
+        block_types=["sdxl/prompt_encoder"],
+        load_keys=["tokenizer"],
+        constructor_map={"sdxl/prompt_encoder": {"tokenizer": "tokenizer"}},
+        group="sdxl.prompt_encoder",
+    ),
+    "sdxl.tokenizer_2": ComponentSpec(
+        block_types=["sdxl/prompt_encoder"],
+        load_keys=["tokenizer_2"],
+        constructor_map={"sdxl/prompt_encoder": {"tokenizer_2": "tokenizer_2"}},
+        group="sdxl.prompt_encoder",
+    ),
+    "sdxl.text_encoder": ComponentSpec(
+        block_types=["sdxl/prompt_encoder"],
+        load_keys=["text_encoder"],
+        constructor_map={"sdxl/prompt_encoder": {"text_encoder": "text_encoder"}},
+        group="sdxl.prompt_encoder",
+    ),
+    "sdxl.text_encoder_2": ComponentSpec(
+        block_types=["sdxl/prompt_encoder"],
+        load_keys=["text_encoder_2"],
+        constructor_map={"sdxl/prompt_encoder": {"text_encoder_2": "text_encoder_2"}},
+        group="sdxl.prompt_encoder",
+    ),
+    "sdxl.added_conditioning": ComponentSpec(
+        block_types=["sdxl/added_conditioning"],
+        load_keys=[],
+        constructor_map={},
+    ),
+    "sdxl.latent_init": ComponentSpec(
+        block_types=["sdxl/latent_init"],
+        load_keys=[],
+        constructor_map={},
+    ),
+}
+
+# ── FLUX components ────────────────────────────────────────────────────
+
+_FLUX_COMPONENTS: Dict[str, ComponentSpec] = {
+    "flux.transformer": ComponentSpec(
+        block_types=["flux/transformer"],
+        load_keys=["transformer"],
+        constructor_map={"flux/transformer": {"transformer": "transformer"}},
+    ),
+    "flux.vae": ComponentSpec(
+        block_types=["flux/vae_decode"],
+        load_keys=["vae"],
+        constructor_map={"flux/vae_decode": {"vae": "vae"}},
+    ),
+    "flux.scheduler": ComponentSpec(
+        block_types=["flux/scheduler_setup", "flux/scheduler_step"],
+        load_keys=["scheduler"],
+        constructor_map={
+            "flux/scheduler_setup": {"scheduler": "scheduler"},
+            "flux/scheduler_step": {"scheduler": "scheduler"},
+        },
+    ),
+    "flux.tokenizer": ComponentSpec(
+        block_types=["flux/prompt_encoder"],
+        load_keys=["tokenizer"],
+        constructor_map={"flux/prompt_encoder": {"tokenizer": "tokenizer"}},
+        group="flux.prompt_encoder",
+    ),
+    "flux.tokenizer_2": ComponentSpec(
+        block_types=["flux/prompt_encoder"],
+        load_keys=["tokenizer_2"],
+        constructor_map={"flux/prompt_encoder": {"tokenizer_2": "tokenizer_2"}},
+        group="flux.prompt_encoder",
+    ),
+    "flux.text_encoder": ComponentSpec(
+        block_types=["flux/prompt_encoder"],
+        load_keys=["text_encoder"],
+        constructor_map={"flux/prompt_encoder": {"text_encoder": "text_encoder"}},
+        group="flux.prompt_encoder",
+    ),
+    "flux.text_encoder_2": ComponentSpec(
+        block_types=["flux/prompt_encoder"],
+        load_keys=["text_encoder_2"],
+        constructor_map={"flux/prompt_encoder": {"text_encoder_2": "text_encoder_2"}},
+        group="flux.prompt_encoder",
+    ),
+    "flux.latent_init": ComponentSpec(
+        block_types=["flux/latent_init"],
+        load_keys=[],
+        constructor_map={},
+    ),
+}
+
+# ── Adapter components ─────────────────────────────────────────────────
+
+_ADAPTER_COMPONENTS: Dict[str, ComponentSpec] = {
+    "adapter.controlnet": ComponentSpec(
+        block_types=["adapter/controlnet"],
+        load_keys=["controlnet"],
+        constructor_map={"adapter/controlnet": {"controlnet": "controlnet"}},
+    ),
+    "adapter.ip_adapter": ComponentSpec(
+        block_types=["adapter/ip_adapter"],
+        load_keys=["image_encoder", "feature_extractor"],
+        constructor_map={
+            "adapter/ip_adapter": {
+                "image_encoder": "image_encoder",
+                "feature_extractor": "feature_extractor",
+            },
+        },
+    ),
+    "flux.controlnet": ComponentSpec(
+        block_types=["flux/controlnet"],
+        load_keys=["controlnet"],
+        constructor_map={"flux/controlnet": {"controlnet": "controlnet"}},
+    ),
+}
+
+# ── Unified registry ───────────────────────────────────────────────────
+
+COMPONENT_REGISTRY: Dict[str, ComponentSpec] = {
+    **_SD15_COMPONENTS,
+    **_SDXL_COMPONENTS,
+    **_FLUX_COMPONENTS,
+    **_ADAPTER_COMPONENTS,
+}
+
+
+def resolve_component_type(component_type: str) -> ComponentSpec:
+    """Look up a component type and return its spec.
+
+    Raises ``KeyError`` if the type is unknown.
+    """
+    spec = COMPONENT_REGISTRY.get(component_type)
+    if spec is None:
+        raise KeyError(
+            f"Unknown component type '{component_type}'. "
+            f"Available: {sorted(COMPONENT_REGISTRY.keys())}"
+        )
+    return spec
+
+
+def is_component_type(type_str: str) -> bool:
+    """Return ``True`` when *type_str* uses the component-level namespace."""
+    return "." in type_str and "/" not in type_str
+
+
+def is_block_type(type_str: str) -> bool:
+    """Return ``True`` when *type_str* uses the block-level namespace."""
+    return "/" in type_str
+
+
+def load_components_from_pretrained(
+    load_keys: Sequence[str],
+    pretrained: str,
+    *,
+    store: Optional[Any] = None,
+    torch_dtype: Optional[Any] = None,
+    variant: str = "",
+) -> Dict[str, Any]:
+    """Load model components from a pretrained HF repo.
+
+    Returns a dict ``{load_key: loaded_object}``.
+    """
+    if not load_keys:
+        return {}
+
+    from yggdrasill.integrations.diffusers.model_store import ModelStore
+
+    ms = store or ModelStore.default()
+    components = ms.load_pipeline_components(
+        pretrained, variant=variant, torch_dtype=torch_dtype,
+    )
+
+    result: Dict[str, Any] = {}
+    for key in load_keys:
+        val = components.get(key)
+        if val is not None:
+            result[key] = val
+    return result
