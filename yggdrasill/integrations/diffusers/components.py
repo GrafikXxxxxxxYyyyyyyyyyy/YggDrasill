@@ -316,8 +316,13 @@ def load_components_from_pretrained(
     store: Optional[Any] = None,
     torch_dtype: Optional[Any] = None,
     variant: str = "",
+    use_safetensors: Optional[bool] = None,
 ) -> Dict[str, Any]:
-    """Load specific components. Each loads separately; cached in ModelStore."""
+    """Load specific components. Each loads separately; cached in ModelStore.
+
+    use_safetensors: If False, load .bin (PyTorch) weights instead of .safetensors.
+        Some repos (e.g. Lykon/DreamShaper) have only .bin in unet/.
+    """
     if not load_keys:
         return {}
 
@@ -327,4 +332,5 @@ def load_components_from_pretrained(
     return ms.load_components_by_keys(
         family, list(load_keys), pretrained,
         variant=variant, torch_dtype=torch_dtype,
+        use_safetensors=use_safetensors,
     )

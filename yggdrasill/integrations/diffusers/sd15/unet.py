@@ -55,6 +55,13 @@ class SD15UNetNode(AbstractBackbone):
         latents = inputs[C.PORT_LATENTS]
         timestep = inputs[C.PORT_TIMESTEP]
         prompt_embeds = inputs[C.PORT_PROMPT_EMBEDS]
+
+        # Ensure dtype match with UNet (avoids "Half and Float" in time_embedding)
+        dtype = next(self._unet.parameters()).dtype
+        device = next(self._unet.parameters()).device
+        latents = latents.to(device=device, dtype=dtype)
+        if isinstance(timestep, torch.Tensor):
+            timestep = timestep.to(device)
         neg_embeds = inputs.get(C.PORT_NEGATIVE_PROMPT_EMBEDS)
         sched_state = inputs.get(C.PORT_SCHEDULER_STATE)
 
@@ -63,10 +70,13 @@ class SD15UNetNode(AbstractBackbone):
 
         if do_cfg:
             latent_input = torch.cat([latents] * 2)
-            encoder_states = torch.cat([neg_embeds, prompt_embeds])
+            encoder_states = torch.cat([
+                neg_embeds.to(device=device, dtype=dtype),
+                prompt_embeds.to(device=device, dtype=dtype),
+            ])
         else:
             latent_input = latents
-            encoder_states = prompt_embeds
+            encoder_states = prompt_embeds.to(device=device, dtype=dtype)
 
         if sched_state and isinstance(sched_state, dict):
             sched = sched_state.get("scheduler")
@@ -85,11 +95,20 @@ class SD15UNetNode(AbstractBackbone):
             mid_residual = merge_residuals(mid_residual)
             kwargs["mid_block_additional_residual"] = mid_residual
 
-        noise_pred = self._unet(
-            latent_input,
-            timestep,
-            **kwargs,
-        ).sample
+        # Use autocast for half-precision models so internal time_embedding stays in correct dtype
+        if dtype in (torch.float16, torch.bfloat16) and device.type == "cuda":
+            with torch.autocast("cuda", dtype=dtype):
+                noise_pred = self._unet(
+                    latent_input,
+                    timestep,
+                    **kwargs,
+                ).sample
+        else:
+            noise_pred = self._unet(
+                latent_input,
+                timestep,
+                **kwargs,
+            ).sample
 
         if do_cfg:
             pred_uncond, pred_cond = noise_pred.chunk(2)

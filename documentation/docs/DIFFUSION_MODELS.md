@@ -451,6 +451,34 @@ Diffusers предоставляет несколько **guiders** (класс�
 
 - RAG по корпусу для расширения/улучшения промпта; загрузка и сохранение изображений; вычисление метрик (PSNR, SSIM) после генерации. Подключаются по необходимости; не входят в обязательную цепочку encode → цикл → decode.
 
+### 3.9 Три способа создания диффузионной задачи
+
+Фреймворк предлагает **три уровня API** для сборки диффузионного графа:
+
+**1. Низкоуровневый способ** — ручная сборка Hypergraph. Максимальная гибкость и адаптивность.
+
+- `add_node("id", type="sd15/unet", config={...})` или `add_node("id", node_object)`
+- Явное `add_edge(Edge(source, port, target, port))` для каждого ребра
+- `expose_input`, `expose_output` для внешних портов
+- Загрузка компонентов через `ModelStore.load_components_by_keys()`
+
+Пример: `examples/diffusion_sd15.ipynb` (ячейка «Самый честный способ»).
+
+**2. DiffusionGraphBuilder** — компоненты с автосвязыванием по именам портов.
+
+- `add_component("unet", "sd15.unet", pretrained="runwayml/stable-diffusion-v1-5")` — загрузка и добавление узла
+- Рёбра создаются автоматически через `apply_port_name_auto_connect`
+- `expose_default_io()` — экспорт стандартных входов/выходов (prompt, output_image)
+- `replace_component("unet", "sd15.unet", pretrained=...)` — замена компонента в существующем графе
+
+Пример: `examples/diffusion_sd15.ipynb` (ячейка «Создание через DiffusionGraphBuilder»).
+
+**3. Высокоуровневый способ** — одна строка кода.
+
+- `graph = Hypergraph.from_template("sd15_text2image", device="cuda")`
+
+Шаблоны: `sd15_text2img`, `sd15_img2img`, `sd15_inpaint`, `sdxl_*`, `flux_*`, `flux_controlnet_text2img`. Возвращается полностью собранный и готовый к run граф.
+
 ---
 
 ## 4. Типичные графы (топологии)

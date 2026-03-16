@@ -260,11 +260,17 @@ def _prepare_nodes(
             node.train(training)
         if device is not None and hasattr(node, "to") and callable(node.to):
             node.to(device)
-        if seed is not None and hasattr(node, "seed"):
-            try:
-                node.seed = seed
-            except (AttributeError, TypeError):
-                pass
+        if seed is not None:
+            if hasattr(node, "seed"):
+                try:
+                    node.seed = seed
+                except (AttributeError, TypeError):
+                    pass
+            # diffusion latent_init nodes read seed from _config
+            bt = getattr(node, "block_type", "") or ""
+            if "latent_init" in bt and hasattr(node, "_config"):
+                node._config = getattr(node, "_config") or {}
+                node._config["seed"] = seed
 
 
 def _gather_node_inputs(
