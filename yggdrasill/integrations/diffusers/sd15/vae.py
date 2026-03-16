@@ -19,8 +19,9 @@ class SD15VAEEncodeNode(AbstractConverter):
         config: Optional[Dict[str, Any]] = None,
         vae: Any = None,
     ) -> None:
-        super().__init__(node_id=node_id, block_id=block_id, config=config)
-        self._vae = vae
+        cfg = dict(config or {})
+        self._vae = vae or cfg.pop("vae", None)
+        super().__init__(node_id=node_id, block_id=block_id, config=cfg)
 
     @property
     def block_type(self) -> str:
@@ -33,6 +34,9 @@ class SD15VAEEncodeNode(AbstractConverter):
         ]
 
     def forward(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        from yggdrasill.integrations.diffusers.lazy_component import resolve_if_lazy
+        self._vae = resolve_if_lazy(self._vae)
+
         import torch
         from yggdrasill.integrations.diffusers.common.image_utils import preprocess_image
 
@@ -58,6 +62,8 @@ class SD15VAEEncodeNode(AbstractConverter):
         return {C.PORT_LATENTS: latents}
 
     def to(self, device: Any) -> "SD15VAEEncodeNode":
+        from yggdrasill.integrations.diffusers.lazy_component import resolve_if_lazy
+        self._vae = resolve_if_lazy(self._vae)
         if self._vae is not None:
             self._vae.to(device)
         return self
@@ -74,8 +80,9 @@ class SD15VAEDecodeNode(AbstractConverter):
         config: Optional[Dict[str, Any]] = None,
         vae: Any = None,
     ) -> None:
-        super().__init__(node_id=node_id, block_id=block_id, config=config)
-        self._vae = vae
+        cfg = dict(config or {})
+        self._vae = vae or cfg.pop("vae", None)
+        super().__init__(node_id=node_id, block_id=block_id, config=cfg)
 
     @property
     def block_type(self) -> str:
@@ -88,6 +95,9 @@ class SD15VAEDecodeNode(AbstractConverter):
         ]
 
     def forward(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        from yggdrasill.integrations.diffusers.lazy_component import resolve_if_lazy
+        self._vae = resolve_if_lazy(self._vae)
+
         import torch
         from yggdrasill.integrations.diffusers.common.image_utils import postprocess_image
 
@@ -109,6 +119,8 @@ class SD15VAEDecodeNode(AbstractConverter):
         return {C.PORT_DECODED_IMAGE: result}
 
     def to(self, device: Any) -> "SD15VAEDecodeNode":
+        from yggdrasill.integrations.diffusers.lazy_component import resolve_if_lazy
+        self._vae = resolve_if_lazy(self._vae)
         if self._vae is not None:
             self._vae.to(device)
         return self

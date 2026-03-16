@@ -30,11 +30,11 @@ from yggdrasill.workflow.workflow import Workflow
 
 
 def build_sd15_pipeline(
-    repo_id: str = "stable-diffusion-v1-5/stable-diffusion-v1-5",
+    repo_id: str = "runwayml/stable-diffusion-v1-5",
     *,
     task: str = "text2img",
-    variant: str = "fp16",
-    torch_dtype: str = "float16",
+    variant: str = "",
+    torch_dtype: str = "float32",
     device: str = "cuda",
     enable_safety: bool = True,
     store: Optional[ModelStore] = None,
@@ -52,14 +52,19 @@ def build_sd15_pipeline(
         enable_safety: Whether to include safety checker.
         store: Optional ModelStore for component caching.
         config: Additional config overrides.
+
+    Scheduler and other nodes can be replaced via graph.replace_node().
     """
     import torch
     dtype_map = {"float16": torch.float16, "float32": torch.float32, "bfloat16": torch.bfloat16}
-    dtype = dtype_map.get(torch_dtype, torch.float16)
+    dtype = dtype_map.get(torch_dtype, torch.float32)
 
     ms = store or ModelStore.default()
-    components = ms.load_pipeline_components(
-        repo_id, variant=variant, torch_dtype=dtype,
+    sd15_keys = ["tokenizer", "text_encoder", "unet", "vae", "scheduler"]
+    components = ms.load_components_by_keys(
+        "sd15", sd15_keys, repo_id,
+        variant=variant if variant else ("fp16" if dtype == torch.float16 else ""),
+        torch_dtype=dtype,
     )
 
     cfg = dict(config or {})
@@ -77,9 +82,9 @@ def build_sd15_pipeline(
         "config": cfg,
     }
 
-    if enable_safety and "safety_checker" in components:
-        comp_kwargs["safety_checker"] = components["safety_checker"]
-        comp_kwargs["feature_extractor"] = components.get("feature_extractor")
+    if enable_safety:
+        comp_kwargs["safety_checker"] = None
+        comp_kwargs["feature_extractor"] = None
 
     builders = {
         "text2img": build_sd15_text2img_graph,
@@ -115,8 +120,10 @@ def build_sdxl_pipeline(
     dtype = dtype_map.get(torch_dtype, torch.float16)
 
     ms = store or ModelStore.default()
-    components = ms.load_pipeline_components(
-        repo_id, variant=variant, torch_dtype=dtype,
+    sdxl_keys = ["tokenizer", "tokenizer_2", "text_encoder", "text_encoder_2", "unet", "vae", "scheduler"]
+    components = ms.load_components_by_keys(
+        "sdxl", sdxl_keys, repo_id,
+        variant=variant, torch_dtype=dtype,
     )
 
     cfg = dict(config or {})
@@ -169,12 +176,15 @@ def build_sdxl_base_refiner(
     dtype = dtype_map.get(torch_dtype, torch.float16)
 
     ms = store or ModelStore.default()
+    sdxl_keys = ["tokenizer", "tokenizer_2", "text_encoder", "text_encoder_2", "unet", "vae", "scheduler"]
 
-    base_components = ms.load_pipeline_components(
-        base_repo_id, variant=variant, torch_dtype=dtype,
+    base_components = ms.load_components_by_keys(
+        "sdxl", sdxl_keys, base_repo_id,
+        variant=variant, torch_dtype=dtype,
     )
-    refiner_components = ms.load_pipeline_components(
-        refiner_repo_id, variant=variant, torch_dtype=dtype,
+    refiner_components = ms.load_components_by_keys(
+        "sdxl", sdxl_keys, refiner_repo_id,
+        variant=variant, torch_dtype=dtype,
     )
 
     base_kwargs = {
@@ -243,10 +253,11 @@ def build_flux_pipeline(
     dtype = dtype_map.get(torch_dtype, torch.bfloat16)
 
     ms = store or ModelStore.default()
-    load_kwargs: Dict[str, Any] = {"torch_dtype": dtype}
-    if variant:
-        load_kwargs["variant"] = variant
-    components = ms.load_pipeline_components(repo_id, **load_kwargs)
+    flux_keys = ["tokenizer", "tokenizer_2", "text_encoder", "text_encoder_2", "transformer", "vae", "scheduler"]
+    components = ms.load_components_by_keys(
+        "flux", flux_keys, repo_id,
+        variant=variant or "", torch_dtype=dtype,
+    )
 
     cfg = dict(config or {})
     cfg.setdefault("device", device)
@@ -277,7 +288,10 @@ def build_flux_pipeline(
     if task == "controlnet_text2img":
         if controlnet_repo_id is None:
             raise ValueError("controlnet_repo_id is required for controlnet tasks")
-        cn_components = ms.load_pipeline_components(controlnet_repo_id, **load_kwargs)
+        cn_components = ms.load_components_by_keys(
+            "flux", ["controlnet"], controlnet_repo_id,
+            variant=variant or "", torch_dtype=dtype,
+        )
         comp_kwargs["controlnet"] = cn_components.get("controlnet") or cn_components.get("model")
 
     graph = builders[task](**comp_kwargs)

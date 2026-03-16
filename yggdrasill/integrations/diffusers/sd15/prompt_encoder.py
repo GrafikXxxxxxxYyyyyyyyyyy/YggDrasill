@@ -22,8 +22,9 @@ class SD15PromptEncoderNode(AbstractConjector):
         config: Optional[Dict[str, Any]] = None,
         text_encoder: Any = None,
     ) -> None:
-        super().__init__(node_id=node_id, block_id=block_id, config=config)
-        self._text_encoder = text_encoder
+        cfg = dict(config or {})
+        self._text_encoder = text_encoder or cfg.pop("text_encoder", None)
+        super().__init__(node_id=node_id, block_id=block_id, config=cfg)
 
     @property
     def block_type(self) -> str:
@@ -38,6 +39,8 @@ class SD15PromptEncoderNode(AbstractConjector):
         ]
 
     def _encode_from_ids(self, input_ids: Any, clip_skip: Optional[int] = None) -> Any:
+        from yggdrasill.integrations.diffusers.lazy_component import resolve_if_lazy
+        self._text_encoder = resolve_if_lazy(self._text_encoder)
         input_ids = input_ids.to(self._text_encoder.device)
         if clip_skip is not None and clip_skip > 0:
             output = self._text_encoder(input_ids, output_hidden_states=True)
@@ -70,6 +73,8 @@ class SD15PromptEncoderNode(AbstractConjector):
         return {}
 
     def to(self, device: Any) -> "SD15PromptEncoderNode":
+        from yggdrasill.integrations.diffusers.lazy_component import resolve_if_lazy
+        self._text_encoder = resolve_if_lazy(self._text_encoder)
         if self._text_encoder is not None and hasattr(self._text_encoder, "to"):
             self._text_encoder.to(device)
         return self

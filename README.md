@@ -101,8 +101,12 @@ python examples/diffusion/sdxl_text2img.py
 - **Foundation**: `AbstractBaseBlock` (data/computation) + `AbstractGraphNode` (graph position/ports) — dual inheritance, no wrappers
 - **Engine**: Universal `Validator` → `Planner` → `Executor` pipeline operating on any structural protocol
 - **Task Nodes**: Seven abstract roles (Backbone, Injector, Conjector, InnerModule, OuterModule, Helper, Converter) with canonical port contracts
-- **Serialization**: Config (JSON/YAML) + Checkpoint (pickle) with block_id deduplication
+- **Serialization**: Config (JSON/YAML) + Checkpoint (pickle) with block_id deduplication. See [SECURITY.md](SECURITY.md) for checkpoint safety.
 - **Workflow**: Hypergraph-of-hypergraphs executed by the same engine
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

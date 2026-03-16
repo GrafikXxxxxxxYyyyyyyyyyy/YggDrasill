@@ -265,6 +265,14 @@ class TestResolveConfigRefEdgeCases:
         with pytest.raises(ValueError, match="Unsupported"):
             Hypergraph.from_config(cfg, registry=registry)
 
+    def test_path_traversal_ref_rejected(self):
+        """Config ref with '..' is rejected for security."""
+        from yggdrasill.engine.structure import _resolve_config_ref
+        with pytest.raises(ValueError, match="path traversal"):
+            _resolve_config_ref({"ref": "../../../etc/passwd"})
+        with pytest.raises(ValueError, match="path traversal"):
+            _resolve_config_ref({"ref": "sub/../other/config.json"})
+
 
 class TestStateDictAliasDedup:
     def test_shared_block_id_deduplicates(self, registry):

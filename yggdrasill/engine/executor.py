@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Generator, List, Optional
 
+from yggdrasill.diffusion import contracts as C
 from yggdrasill.engine.buffers import EdgeBuffers
 from yggdrasill.engine.planner import build_plan
 from yggdrasill.engine.validator import validate
@@ -92,22 +94,24 @@ def run(
                 continue
             if nid in interrupt_set:
                 return _make_suspended(buf, output_spec)
-            _execute_node(structure, nid, buf, input_spec, dry_run, cbs, pin)
+            _execute_node(structure, nid, buf, input_spec, dry_run, cbs, pin, training)
             if destination_node_id and nid == destination_node_id:
                 break
 
         elif step_type == "cycle":
             rep, comp = step_data
-            node_order = sorted(comp)
-            _fire_callbacks(cbs, "loop_start", {"nodes": node_order, "steps": K})
-            for _it in range(K):
+            node_order = _cycle_node_order(structure, comp)
+            K_use = _resolve_cycle_steps(structure, buf, K)
+            _fire_callbacks(cbs, "loop_start", {"nodes": node_order, "steps": K_use})
+            for step_idx in range(K_use):
                 for nid in node_order:
                     if nid in skip:
                         continue
                     if nid in interrupt_set:
                         return _make_suspended(buf, output_spec)
-                    _execute_node(structure, nid, buf, input_spec, dry_run, cbs, pin)
-            _fire_callbacks(cbs, "loop_end", {"nodes": node_order, "steps": K})
+                    _execute_node(structure, nid, buf, input_spec, dry_run, cbs, pin, training)
+                _fire_callbacks(cbs, "cycle_step", {"step": step_idx, "total": K_use})
+            _fire_callbacks(cbs, "loop_end", {"nodes": node_order, "steps": K_use})
 
         elif step_type == "agent_loop":
             nid = step_data
@@ -117,6 +121,7 @@ def run(
                 return _make_suspended(buf, output_spec)
             _execute_agent_loop(
                 structure, nid, buf, input_spec, dry_run, cbs, agent_max, pin,
+                training,
             )
             if destination_node_id and nid == destination_node_id:
                 break
@@ -170,22 +175,24 @@ def run_stream(
 
     for step_type, step_data in plan:
         if step_type == "node":
-            _execute_node(structure, step_data, buf, input_spec, dry_run, cbs, pin)
+            _execute_node(structure, step_data, buf, input_spec, dry_run, cbs, pin, training)
             yield _collect_outputs(output_spec, buf)
 
         elif step_type == "cycle":
             rep, comp = step_data
-            node_order = sorted(comp)
-            _fire_callbacks(cbs, "loop_start", {"nodes": node_order, "steps": K})
-            for _it in range(K):
+            node_order = _cycle_node_order(structure, comp)
+            K_use = _resolve_cycle_steps(structure, buf, K)
+            _fire_callbacks(cbs, "loop_start", {"nodes": node_order, "steps": K_use})
+            for _it in range(K_use):
                 for nid in node_order:
-                    _execute_node(structure, nid, buf, input_spec, dry_run, cbs, pin)
+                    _execute_node(structure, nid, buf, input_spec, dry_run, cbs, pin, training)
                 yield _collect_outputs(output_spec, buf)
-            _fire_callbacks(cbs, "loop_end", {"nodes": node_order, "steps": K})
+            _fire_callbacks(cbs, "loop_end", {"nodes": node_order, "steps": K_use})
 
         elif step_type == "agent_loop":
             _execute_agent_loop(
                 structure, step_data, buf, input_spec, dry_run, cbs, agent_max, pin,
+                training,
             )
             yield _collect_outputs(output_spec, buf)
 
@@ -193,6 +200,51 @@ def run_stream(
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+
+def _resolve_cycle_steps(structure: Any, buf: EdgeBuffers, default: int) -> int:
+    """Use scheduler_state.num_loop_steps when available (e.g. PNDM has 51 steps for 50 inference)."""
+    for edge in structure.get_edges():
+        if edge.source_port != C.PORT_SCHEDULER_STATE:
+            continue
+        if buf.has(edge.source_node, C.PORT_SCHEDULER_STATE):
+            state = buf.read(edge.source_node, C.PORT_SCHEDULER_STATE)
+            if isinstance(state, dict):
+                k = state.get("num_loop_steps")
+                if isinstance(k, int) and k > 0:
+                    return k
+    return default
+
+
+def _cycle_node_order(structure: Any, comp: Any) -> List[str]:
+    """Order cycle nodes so dependencies run first.
+
+    Ignores feedback edges (source_port starts with ``next_``) so that within
+    a denoising loop, backbone (UNet) runs before solver (scheduler_step).
+    """
+    comp = set(comp)
+    if len(comp) <= 1:
+        return sorted(comp)
+    edges = structure.get_edges()
+    pred: Dict[str, Set[str]] = {n: set() for n in comp}
+    for e in edges:
+        if e.source_node not in comp or e.target_node not in comp or e.source_node == e.target_node:
+            continue
+        if e.source_port.startswith("next_"):
+            continue
+        pred[e.target_node].add(e.source_node)
+    order: List[str] = []
+    remaining = set(comp)
+    while remaining:
+        ready = [n for n in remaining if pred[n] <= set(order)]
+        if not ready:
+            break
+        order.append(min(ready))
+        remaining.discard(order[-1])
+    if not remaining:
+        return order
+    order.extend(sorted(remaining))
+    return order
 
 
 def _prepare_nodes(
@@ -240,9 +292,15 @@ def _gather_node_inputs(
         else:
             agg_policy = _get_aggregation(node, target_port)
             buf.clear_multi(node_id, target_port)
-            for edge in in_edges:
-                if edge.target_port != target_port:
-                    continue
+            # Sort edges so feedback (next_*) sources come last for SINGLE aggregation.
+            # Denoising loop: latent_init provides initial; sched_step provides next_latent.
+            # values[-1] must be next_* when both exist.
+            port_edges = [e for e in in_edges if e.target_port == target_port]
+            port_edges = sorted(
+                port_edges,
+                key=lambda e: (1 if e.source_port.startswith("next_") else 0, e.source_node),
+            )
+            for edge in port_edges:
                 if buf.has(edge.source_node, edge.source_port):
                     buf.append(
                         node_id, target_port,
@@ -271,6 +329,7 @@ def _execute_node(
     dry_run: bool,
     callbacks: List[Callable[..., None]],
     pin_data: Dict[str, Dict[str, Any]],
+    training: bool = False,
 ) -> None:
     node = structure.get_node(node_id)
     if node is None:
@@ -295,7 +354,12 @@ def _execute_node(
             for entry in node.get_output_spec():
                 node_outputs[entry.get("name") or entry["port_name"]] = None
     else:
-        node_outputs = node.run(node_inputs)
+        if training:
+            node_outputs = node.run(node_inputs)
+        else:
+            import torch
+            with torch.inference_mode():
+                node_outputs = node.run(node_inputs)
 
     for port_name, value in node_outputs.items():
         buf.write(node_id, port_name, value)
@@ -312,6 +376,7 @@ def _execute_agent_loop(
     callbacks: List[Callable[..., None]],
     max_steps: int,
     pin_data: Dict[str, Dict[str, Any]],
+    training: bool = False,
 ) -> None:
     """Run an agent node in a tool_calls sub-loop."""
     meta = getattr(structure, "metadata", {}) or {}
@@ -461,5 +526,9 @@ def _fire_callbacks(
     for cb in callbacks:
         try:
             cb(phase, info)
-        except Exception:
-            pass
+        except Exception as exc:
+            warnings.warn(
+                f"Callback raised {type(exc).__name__}: {exc} (phase={phase!r})",
+                UserWarning,
+                stacklevel=2,
+            )

@@ -22,8 +22,9 @@ class SD15SchedulerSetupNode(AbstractOuterModule):
         config: Optional[Dict[str, Any]] = None,
         scheduler: Any = None,
     ) -> None:
-        super().__init__(node_id=node_id, block_id=block_id, config=config)
-        self._scheduler = scheduler
+        cfg = dict(config or {})
+        self._scheduler = scheduler or cfg.pop("scheduler", None)
+        super().__init__(node_id=node_id, block_id=block_id, config=cfg)
 
     @property
     def block_type(self) -> str:
@@ -37,6 +38,9 @@ class SD15SchedulerSetupNode(AbstractOuterModule):
         ]
 
     def forward(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        from yggdrasill.integrations.diffusers.lazy_component import resolve_if_lazy
+        self._scheduler = resolve_if_lazy(self._scheduler)
+
         num_steps = self._config.get("num_inference_steps", 50)
         custom_timesteps = self._config.get("timesteps")
         custom_sigmas = self._config.get("sigmas")
@@ -50,12 +54,14 @@ class SD15SchedulerSetupNode(AbstractOuterModule):
 
         self._scheduler.set_timesteps(num_steps, device=device, **kwargs)
 
+        timesteps = self._scheduler.timesteps
         return {
-            C.PORT_TIMESTEPS: self._scheduler.timesteps,
+            C.PORT_TIMESTEPS: timesteps,
             C.PORT_SCHEDULER_STATE: {
                 "scheduler": self._scheduler,
                 "init_noise_sigma": getattr(self._scheduler, "init_noise_sigma", 1.0),
                 "order": getattr(self._scheduler, "order", 1),
+                "num_loop_steps": len(timesteps) if timesteps is not None else num_steps,
             },
         }
 
@@ -74,8 +80,9 @@ class SD15SchedulerStepNode(AbstractInnerModule):
         config: Optional[Dict[str, Any]] = None,
         scheduler: Any = None,
     ) -> None:
-        super().__init__(node_id=node_id, block_id=block_id, config=config)
-        self._scheduler = scheduler
+        cfg = dict(config or {})
+        self._scheduler = scheduler or cfg.pop("scheduler", None)
+        super().__init__(node_id=node_id, block_id=block_id, config=cfg)
 
     @property
     def block_type(self) -> str:
@@ -91,9 +98,19 @@ class SD15SchedulerStepNode(AbstractInnerModule):
         ]
 
     def forward(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        from yggdrasill.integrations.diffusers.lazy_component import resolve_if_lazy
+        self._scheduler = resolve_if_lazy(self._scheduler)
+
         latents = inputs[C.PORT_LATENTS]
-        timestep = inputs[C.PORT_TIMESTEP]
+        timestep = self._clamp_timestep(inputs[C.PORT_TIMESTEP])
         noise_pred = inputs[C.PORT_NOISE_PRED]
+
+        # PNDM expects int for indexing; diffusers passes scalar from timesteps tensor
+        t = timestep
+        if hasattr(t, "item"):
+            t = int(t.item())
+        elif t is not None:
+            t = int(t)
 
         eta = self._config.get("eta", 0.0)
         generator = self._config.get("generator")
@@ -104,13 +121,52 @@ class SD15SchedulerStepNode(AbstractInnerModule):
         if generator is not None:
             step_kwargs["generator"] = generator
 
-        result = self._scheduler.step(noise_pred, timestep, latents, **step_kwargs)
-        next_latents = result.prev_sample
+        result = self._scheduler.step(
+            noise_pred, t, latents,
+            return_dict=False,
+            **step_kwargs,
+        )
+        next_latents = result[0] if isinstance(result, (tuple, list)) else result.prev_sample
+        next_timestep = self._clamp_timestep(self._get_next_timestep(timestep))
 
         return {
             "next_latent": next_latents,
-            "next_timestep": timestep,
+            "next_timestep": next_timestep,
         }
+
+    def _get_next_timestep(self, timestep: Any) -> Any:
+        """Return the next timestep in the scheduler sequence, or current if last.
+
+        PNDM with skip_prk_steps produces duplicates (e.g. [981, 961, 961, 941, ...]).
+        Use scheduler.counter (incremented by step()) as the index - matches diffusers
+        ``for i, t in enumerate(timesteps)`` semantics.
+        """
+        if not hasattr(self._scheduler, "timesteps") or self._scheduler.timesteps is None:
+            return timestep
+        ts = self._scheduler.timesteps
+        if len(ts) == 0:
+            return timestep
+        # After step(), counter is 1-based (number of steps completed)
+        idx = getattr(self._scheduler, "counter", 0)
+        if idx < len(ts):
+            return ts[idx]
+        return timestep
+
+    def _clamp_timestep(self, t: Any) -> Any:
+        """Clamp timestep to valid range [0, 999] for schedulers with 1000 steps."""
+        import torch
+        if t is None:
+            return None
+        if hasattr(t, "clamp"):  # Tensor-like (incl. FakeTensor)
+            t = t.clamp(0, 999)
+            ndim = t.ndim if hasattr(t, "ndim") else (t.dim() if hasattr(t, "dim") else 0)
+            if ndim > 0 and hasattr(t, "flatten"):
+                t = t.flatten()[0]
+            return t
+        try:
+            return max(0, min(999, int(t)))
+        except (TypeError, ValueError):
+            return t
 
     def scale_model_input(self, latents: Any, timestep: Any) -> Any:
         """Public helper for nodes that need to scale before UNet."""

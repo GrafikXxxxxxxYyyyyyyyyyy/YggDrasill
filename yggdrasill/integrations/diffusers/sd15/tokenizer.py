@@ -22,8 +22,9 @@ class SD15TokenizerNode(AbstractConverter):
         config: Optional[Dict[str, Any]] = None,
         tokenizer: Any = None,
     ) -> None:
-        super().__init__(node_id=node_id, block_id=block_id, config=config)
-        self._tokenizer = tokenizer
+        cfg = dict(config or {})
+        self._tokenizer = tokenizer or cfg.pop("tokenizer", None)
+        super().__init__(node_id=node_id, block_id=block_id, config=cfg)
 
     @property
     def block_type(self) -> str:
@@ -38,6 +39,8 @@ class SD15TokenizerNode(AbstractConverter):
         ]
 
     def _tokenize(self, text: str) -> Any:
+        from yggdrasill.integrations.diffusers.lazy_component import resolve_if_lazy
+        self._tokenizer = resolve_if_lazy(self._tokenizer)
         if not self._tokenizer:
             raise RuntimeError("SD15TokenizerNode requires tokenizer; none provided")
         out = self._tokenizer(

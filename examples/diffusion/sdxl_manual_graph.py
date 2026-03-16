@@ -16,10 +16,10 @@ def main() -> None:
     register_diffusion_nodes()
 
     store = ModelStore.default()
-    components = store.load_pipeline_components(
-        "stabilityai/stable-diffusion-xl-base-1.0",
-        variant="fp16",
-        torch_dtype=torch.float16,
+    sdxl_keys = ["tokenizer", "tokenizer_2", "text_encoder", "text_encoder_2", "unet", "vae", "scheduler"]
+    components = store.load_components_by_keys(
+        "sdxl", sdxl_keys, "stabilityai/stable-diffusion-xl-base-1.0",
+        variant="fp16", torch_dtype=torch.float16,
     )
 
     graph = build_sdxl_text2img_graph(

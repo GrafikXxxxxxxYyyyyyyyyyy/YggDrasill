@@ -315,27 +315,19 @@ def load_components_from_pretrained(
     load_keys: Sequence[str],
     pretrained: str,
     *,
+    family: str,
     store: Optional[Any] = None,
     torch_dtype: Optional[Any] = None,
     variant: str = "",
 ) -> Dict[str, Any]:
-    """Load model components from a pretrained HF repo.
-
-    Returns a dict ``{load_key: loaded_object}``.
-    """
+    """Load specific components. Each loads separately; cached in ModelStore."""
     if not load_keys:
         return {}
 
     from yggdrasill.integrations.diffusers.model_store import ModelStore
 
     ms = store or ModelStore.default()
-    components = ms.load_pipeline_components(
-        pretrained, variant=variant, torch_dtype=torch_dtype,
+    return ms.load_components_by_keys(
+        family, list(load_keys), pretrained,
+        variant=variant, torch_dtype=torch_dtype,
     )
-
-    result: Dict[str, Any] = {}
-    for key in load_keys:
-        val = components.get(key)
-        if val is not None:
-            result[key] = val
-    return result

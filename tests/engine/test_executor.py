@@ -176,14 +176,19 @@ class TestExecutorEdgeCases:
         assert "before" not in log
 
     def test_callback_exception_swallowed(self):
+        """Callback exceptions are warned but execution continues."""
+        import warnings
         clear_plan_cache()
         h = make_chain("A", "B")
 
         def bad_callback(phase, info):
             raise RuntimeError("oops")
 
-        out = run(h, {"x": 42}, callbacks=[bad_callback])
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            out = run(h, {"x": 42}, callbacks=[bad_callback])
         assert out["y"] == 42
+        assert any("Callback raised" in str(m.message) for m in w)
 
     def test_extra_input_keys_ignored(self):
         clear_plan_cache()

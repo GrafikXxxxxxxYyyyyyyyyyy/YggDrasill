@@ -49,8 +49,9 @@ class SD15UNetNode(AbstractBackbone):
         config: Optional[Dict[str, Any]] = None,
         unet: Any = None,
     ) -> None:
-        super().__init__(node_id=node_id, block_id=block_id, config=config)
-        self._unet = unet
+        cfg = dict(config or {})
+        self._unet = unet or cfg.pop("unet", None)
+        super().__init__(node_id=node_id, block_id=block_id, config=cfg)
 
     @property
     def block_type(self) -> str:
@@ -62,12 +63,16 @@ class SD15UNetNode(AbstractBackbone):
             Port(C.PORT_TIMESTEP, PortDirection.IN, PortType.TENSOR),
             Port(C.PORT_PROMPT_EMBEDS, PortDirection.IN, PortType.TENSOR),
             Port(C.PORT_NEGATIVE_PROMPT_EMBEDS, PortDirection.IN, PortType.TENSOR, optional=True),
+            Port(C.PORT_SCHEDULER_STATE, PortDirection.IN, PortType.ANY, optional=True),
             Port(C.PORT_DOWN_BLOCK_RESIDUALS, PortDirection.IN, PortType.ANY, optional=True, aggregation=PortAggregation.CONCAT),
             Port(C.PORT_MID_BLOCK_RESIDUAL, PortDirection.IN, PortType.ANY, optional=True, aggregation=PortAggregation.CONCAT),
             Port(C.PORT_NOISE_PRED, PortDirection.OUT, PortType.TENSOR),
         ]
 
     def forward(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        from yggdrasill.integrations.diffusers.lazy_component import resolve_if_lazy
+        self._unet = resolve_if_lazy(self._unet)
+
         import torch
         from yggdrasill.integrations.diffusers.common.guidance import apply_cfg
 
@@ -75,6 +80,7 @@ class SD15UNetNode(AbstractBackbone):
         timestep = inputs[C.PORT_TIMESTEP]
         prompt_embeds = inputs[C.PORT_PROMPT_EMBEDS]
         neg_embeds = inputs.get(C.PORT_NEGATIVE_PROMPT_EMBEDS)
+        sched_state = inputs.get(C.PORT_SCHEDULER_STATE)
 
         guidance_scale = self._config.get("guidance_scale", 7.5)
         do_cfg = guidance_scale > 1.0 and neg_embeds is not None
@@ -85,6 +91,11 @@ class SD15UNetNode(AbstractBackbone):
         else:
             latent_input = latents
             encoder_states = prompt_embeds
+
+        if sched_state and isinstance(sched_state, dict):
+            sched = sched_state.get("scheduler")
+            if sched is not None and hasattr(sched, "scale_model_input"):
+                latent_input = sched.scale_model_input(latent_input, timestep)
 
         kwargs: Dict[str, Any] = {
             "encoder_hidden_states": encoder_states,
@@ -115,6 +126,8 @@ class SD15UNetNode(AbstractBackbone):
         return {C.PORT_NOISE_PRED: noise_pred}
 
     def to(self, device: Any) -> "SD15UNetNode":
+        from yggdrasill.integrations.diffusers.lazy_component import resolve_if_lazy
+        self._unet = resolve_if_lazy(self._unet)
         if self._unet is not None and hasattr(self._unet, "to"):
             self._unet.to(device)
         return self

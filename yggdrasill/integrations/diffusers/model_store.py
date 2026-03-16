@@ -5,8 +5,11 @@ management for all Diffusers-backed models used by YggDrasill nodes.
 """
 from __future__ import annotations
 
+import logging
 import threading
 from typing import Any, Dict, Optional, Tuple, Type
+
+logger = logging.getLogger(__name__)
 
 from yggdrasill.diffusion.types import ModelDType
 
@@ -120,8 +123,10 @@ class ModelStore:
         if not force_reload:
             cached = self.get(key)
             if cached is not None:
+                logger.info("Component cache hit: %s %s/%s", cls.__name__, source, subfolder or ".")
                 return cached
 
+        logger.info("Loading %s from %s (subfolder=%s)", cls.__name__, source, subfolder or ".")
         kwargs: Dict[str, Any] = {}
         if subfolder:
             kwargs["subfolder"] = subfolder
@@ -142,47 +147,80 @@ class ModelStore:
 
         component = cls.from_pretrained(source, **kwargs)
         self.put(key, component)
+        logger.info("Loaded %s from %s", cls.__name__, source)
         return component
 
-    def load_pipeline_components(
+    def load_component_by_key(
         self,
+        family: str,
+        load_key: str,
+        repo_id: str,
+        *,
+        variant: str = "",
+        revision: Optional[str] = None,
+        torch_dtype: Optional[Any] = None,
+        force_reload: bool = False,
+    ) -> Optional[Any]:
+        """Load a single component by (family, load_key). Cached per (repo_id, subfolder, cls_name).
+
+        Each model loads separately via its own from_pretrained — no full pipeline.
+        Scheduler (sd15) uses repo config for parity with diffusers pipeline.
+        """
+        from yggdrasill.integrations.diffusers.component_loaders import (
+            get_loader,
+            load_scheduler_from_repo,
+        )
+
+        loader = get_loader(family, load_key)
+        if loader is None:
+            return None
+        cls, subfolder = loader
+        if cls is None and load_key == "scheduler":
+            key = self.cache_key(repo_id, subfolder, "Scheduler")
+            if not force_reload:
+                cached = self.get(key)
+                if cached is not None:
+                    logger.info("Component cache hit: Scheduler %s/%s", repo_id, subfolder or ".")
+                    return cached
+            logger.info("Loading scheduler from %s (subfolder=%s)", repo_id, subfolder or ".")
+            component = load_scheduler_from_repo(repo_id, subfolder)
+            self.put(key, component)
+            return component
+        return self.load_component(
+            cls,
+            repo_id,
+            subfolder=subfolder,
+            variant=variant,
+            revision=revision,
+            torch_dtype=torch_dtype,
+            force_reload=force_reload,
+        )
+
+    def load_components_by_keys(
+        self,
+        family: str,
+        load_keys: list,
         repo_id: str,
         *,
         variant: str = "",
         revision: Optional[str] = None,
         torch_dtype: Optional[Any] = None,
     ) -> Dict[str, Any]:
-        """Load all components from a single pipeline repo.
-
-        Returns a dict of component name -> loaded object, suitable for
-        passing to individual node constructors.
-        """
-        _import_diffusers()
-        from diffusers import DiffusionPipeline
-
-        dtype = torch_dtype or self.get_torch_dtype()
-        kwargs: Dict[str, Any] = {}
-        if variant:
-            kwargs["variant"] = variant
-        if revision:
-            kwargs["revision"] = revision
-        if dtype is not None:
-            kwargs["torch_dtype"] = dtype
-
-        pipe = DiffusionPipeline.from_pretrained(repo_id, **kwargs)
-
-        components: Dict[str, Any] = {}
-        for attr in ("vae", "text_encoder", "text_encoder_2",
-                      "tokenizer", "tokenizer_2", "unet", "transformer",
-                      "scheduler", "safety_checker", "feature_extractor",
-                      "image_encoder", "controlnet"):
-            val = getattr(pipe, attr, None)
-            if val is not None:
-                components[attr] = val
-                key = self.cache_key(repo_id, "", type(val).__name__)
-                self.put(key, val)
-
-        return components
+        """Load only the requested components. Each loads separately; results are cached."""
+        logger.info("Loading components %s (family=%s, repo=%s)", load_keys, family, repo_id)
+        result: Dict[str, Any] = {}
+        for key in load_keys:
+            comp = self.load_component_by_key(
+                family,
+                key,
+                repo_id,
+                variant=variant,
+                revision=revision,
+                torch_dtype=torch_dtype,
+            )
+            if comp is not None:
+                result[key] = comp
+        return result
 
     def move_to_device(self, component: Any, device: Optional[str] = None) -> Any:
         """Move a component to the target device if it supports .to()."""

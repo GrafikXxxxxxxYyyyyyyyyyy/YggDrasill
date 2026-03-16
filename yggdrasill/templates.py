@@ -76,6 +76,7 @@ def _build_flux_controlnet_text2img(**kwargs: Any) -> Any:
 
 _TEMPLATE_BUILDERS: Dict[str, Callable[..., Any]] = {
     "sd15_text2img": _build_sd15_text2img,
+    "sd15_text2image": _build_sd15_text2img,  # alias
     "sd15_img2img": _build_sd15_img2img,
     "sd15_inpaint": _build_sd15_inpaint,
     "sdxl_text2img": _build_sdxl_text2img,
@@ -89,6 +90,7 @@ _TEMPLATE_BUILDERS: Dict[str, Callable[..., Any]] = {
 }
 
 GRAPH_TEMPLATES: Final[Tuple[str, ...]] = (
+    "sd15_text2image",
     "sd15_text2img",
     "sd15_img2img",
     "sd15_inpaint",

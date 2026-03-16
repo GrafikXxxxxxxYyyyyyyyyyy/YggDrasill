@@ -89,12 +89,51 @@ PORT_ALIASES: Dict[str, List[str]] = {
 }
 
 
+def _allows_self_connect(block: Any) -> bool:
+    """Nodes with next_timestep out and timestep in can self-connect for the denoising loop."""
+    if not isinstance(block, AbstractGraphNode):
+        return False
+    out_names = {p.name for p in block.get_output_ports() if p.direction == PortDirection.OUT}
+    in_names = {p.name for p in block.get_input_ports() if p.direction == PortDirection.IN}
+    return "next_timestep" in out_names and "timestep" in in_names
+
+
 def _get_existing_edges(hypergraph: Any) -> Set[Tuple[str, str, str, str]]:
     """Return a set of (src_node, src_port, tgt_node, tgt_port) tuples."""
     return {
         (e.source_node, e.source_port, e.target_node, e.target_port)
         for e in hypergraph.get_edges()
     }
+
+
+def _is_latent_init(block: Any) -> bool:
+    """True if block produces initial noisy latents (for the denoising loop only)."""
+    bt = getattr(block, "block_type", "") or ""
+    return "latent_init" in bt
+
+
+def _is_vae_decode(block: Any) -> bool:
+    """True if block decodes final latents to image."""
+    bt = getattr(block, "block_type", "") or ""
+    return "vae_decode" in bt
+
+
+def _should_skip_edge(
+    src_block: Any,
+    src_port: str,
+    tgt_block: Any,
+    tgt_port: str,
+) -> bool:
+    """Skip edges that are semantically wrong despite matching port names.
+
+    latent_init outputs noisy latents for the denoising loop; vae_decode must
+    receive only the final denoised latents from the scheduler step.
+    """
+    if src_port not in ("latents", "next_latent"):
+        return False
+    if _is_latent_init(src_block) and _is_vae_decode(tgt_block):
+        return True
+    return False
 
 
 def apply_port_name_auto_connect(
@@ -121,9 +160,9 @@ def apply_port_name_auto_connect(
     new_in_ports = [p for p in new_block.get_input_ports() if p.direction == PortDirection.IN]
 
     for nid in list(hypergraph.node_ids):
-        if nid == new_node_id:
-            continue
         other = hypergraph.get_node(nid)
+        if nid == new_node_id and not _allows_self_connect(new_block):
+            continue
         if not isinstance(other, AbstractGraphNode):
             continue
 
@@ -136,6 +175,8 @@ def apply_port_name_auto_connect(
                 if tgt_name in other_in_ports:
                     in_port = other_in_ports[tgt_name]
                     if not out_port.compatible_with(in_port):
+                        continue
+                    if _should_skip_edge(new_block, out_port.name, other, tgt_name):
                         continue
                     edge_key = (new_node_id, out_port.name, nid, tgt_name)
                     if edge_key in existing_edges:
@@ -159,6 +200,8 @@ def apply_port_name_auto_connect(
                 if src_name in other_out_ports:
                     out_port_obj = other_out_ports[src_name]
                     if not out_port_obj.compatible_with(in_port):
+                        continue
+                    if _should_skip_edge(other, src_name, new_block, in_port.name):
                         continue
                     edge_key = (nid, src_name, new_node_id, in_port.name)
                     if edge_key in existing_edges:

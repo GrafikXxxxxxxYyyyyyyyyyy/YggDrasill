@@ -62,7 +62,7 @@ def build_sd15_text2img_graph(
         "width": cfg.get("width", 512),
         "batch_size": cfg.get("batch_size", 1),
         "device": cfg.get("device", "cpu"),
-        "dtype": cfg.get("dtype", "float16"),
+        "dtype": cfg.get("dtype", "float32"),
         "seed": cfg.get("seed"),
     })
     unet_node = SD15UNetNode("unet", unet=unet, config={
@@ -84,11 +84,18 @@ def build_sd15_text2img_graph(
     h.add_edge(Edge("tokenizer", C.PORT_INPUT_IDS, "prompt_enc", C.PORT_INPUT_IDS))
     h.add_edge(Edge("tokenizer", C.PORT_NEGATIVE_INPUT_IDS, "prompt_enc", C.PORT_NEGATIVE_INPUT_IDS))
     h.add_edge(Edge("sched_setup", C.PORT_SCHEDULER_STATE, "latent_init", C.PORT_SCHEDULER_STATE))
+    h.add_edge(Edge("sched_setup", C.PORT_SCHEDULER_STATE, "unet", C.PORT_SCHEDULER_STATE))
     h.add_edge(Edge("prompt_enc", C.PORT_PROMPT_EMBEDS, "unet", C.PORT_PROMPT_EMBEDS))
     h.add_edge(Edge("prompt_enc", C.PORT_NEGATIVE_PROMPT_EMBEDS, "unet", C.PORT_NEGATIVE_PROMPT_EMBEDS))
     h.add_edge(Edge("latent_init", C.PORT_LATENTS, "unet", C.PORT_LATENTS))
+    h.add_edge(Edge("latent_init", C.PORT_LATENTS, "sched_step", C.PORT_LATENTS))
+    h.add_edge(Edge("latent_init", C.PORT_TIMESTEP, "unet", C.PORT_TIMESTEP))
+    h.add_edge(Edge("latent_init", C.PORT_TIMESTEP, "sched_step", C.PORT_TIMESTEP))
     h.add_edge(Edge("unet", C.PORT_NOISE_PRED, "sched_step", C.PORT_NOISE_PRED))
     h.add_edge(Edge("sched_step", "next_latent", "unet", C.PORT_LATENTS))
+    h.add_edge(Edge("sched_step", "next_latent", "sched_step", C.PORT_LATENTS))
+    h.add_edge(Edge("sched_step", "next_timestep", "unet", C.PORT_TIMESTEP))
+    h.add_edge(Edge("sched_step", "next_timestep", "sched_step", C.PORT_TIMESTEP))
     h.add_edge(Edge("sched_step", "next_latent", "vae_decode", C.PORT_LATENTS))
 
     h.expose_input("tokenizer", C.PORT_PROMPT, C.PORT_PROMPT)
@@ -147,7 +154,7 @@ def build_sd15_img2img_graph(
     })
     lat_init = SD15LatentInitNode("latent_init", config={
         "device": cfg.get("device", "cpu"),
-        "dtype": cfg.get("dtype", "float16"),
+        "dtype": cfg.get("dtype", "float32"),
     })
     unet_node = SD15UNetNode("unet", unet=unet, config={
         "guidance_scale": cfg.get("guidance_scale", 7.5),
@@ -170,11 +177,18 @@ def build_sd15_img2img_graph(
     h.add_edge(Edge("tokenizer", C.PORT_NEGATIVE_INPUT_IDS, "prompt_enc", C.PORT_NEGATIVE_INPUT_IDS))
     h.add_edge(Edge("img_encode", C.PORT_LATENTS, "latent_init", C.PORT_INIT_LATENTS))
     h.add_edge(Edge("sched_setup", C.PORT_SCHEDULER_STATE, "latent_init", C.PORT_SCHEDULER_STATE))
+    h.add_edge(Edge("sched_setup", C.PORT_SCHEDULER_STATE, "unet", C.PORT_SCHEDULER_STATE))
     h.add_edge(Edge("prompt_enc", C.PORT_PROMPT_EMBEDS, "unet", C.PORT_PROMPT_EMBEDS))
     h.add_edge(Edge("prompt_enc", C.PORT_NEGATIVE_PROMPT_EMBEDS, "unet", C.PORT_NEGATIVE_PROMPT_EMBEDS))
     h.add_edge(Edge("latent_init", C.PORT_LATENTS, "unet", C.PORT_LATENTS))
+    h.add_edge(Edge("latent_init", C.PORT_LATENTS, "sched_step", C.PORT_LATENTS))
+    h.add_edge(Edge("latent_init", C.PORT_TIMESTEP, "unet", C.PORT_TIMESTEP))
+    h.add_edge(Edge("latent_init", C.PORT_TIMESTEP, "sched_step", C.PORT_TIMESTEP))
     h.add_edge(Edge("unet", C.PORT_NOISE_PRED, "sched_step", C.PORT_NOISE_PRED))
     h.add_edge(Edge("sched_step", "next_latent", "unet", C.PORT_LATENTS))
+    h.add_edge(Edge("sched_step", "next_latent", "sched_step", C.PORT_LATENTS))
+    h.add_edge(Edge("sched_step", "next_timestep", "unet", C.PORT_TIMESTEP))
+    h.add_edge(Edge("sched_step", "next_timestep", "sched_step", C.PORT_TIMESTEP))
     h.add_edge(Edge("sched_step", "next_latent", "vae_decode", C.PORT_LATENTS))
 
     h.expose_input("tokenizer", C.PORT_PROMPT, C.PORT_PROMPT)
@@ -227,7 +241,7 @@ def build_sd15_inpaint_graph(
         "height": cfg.get("height", 512),
         "width": cfg.get("width", 512),
         "device": cfg.get("device", "cpu"),
-        "dtype": cfg.get("dtype", "float16"),
+        "dtype": cfg.get("dtype", "float32"),
         "seed": cfg.get("seed"),
     })
     unet_node = SD15UNetNode("unet", unet=unet, config={
@@ -250,11 +264,18 @@ def build_sd15_inpaint_graph(
     h.add_edge(Edge("tokenizer", C.PORT_INPUT_IDS, "prompt_enc", C.PORT_INPUT_IDS))
     h.add_edge(Edge("tokenizer", C.PORT_NEGATIVE_INPUT_IDS, "prompt_enc", C.PORT_NEGATIVE_INPUT_IDS))
     h.add_edge(Edge("sched_setup", C.PORT_SCHEDULER_STATE, "latent_init", C.PORT_SCHEDULER_STATE))
+    h.add_edge(Edge("sched_setup", C.PORT_SCHEDULER_STATE, "unet", C.PORT_SCHEDULER_STATE))
     h.add_edge(Edge("prompt_enc", C.PORT_PROMPT_EMBEDS, "unet", C.PORT_PROMPT_EMBEDS))
     h.add_edge(Edge("prompt_enc", C.PORT_NEGATIVE_PROMPT_EMBEDS, "unet", C.PORT_NEGATIVE_PROMPT_EMBEDS))
     h.add_edge(Edge("latent_init", C.PORT_LATENTS, "unet", C.PORT_LATENTS))
+    h.add_edge(Edge("latent_init", C.PORT_LATENTS, "sched_step", C.PORT_LATENTS))
+    h.add_edge(Edge("latent_init", C.PORT_TIMESTEP, "unet", C.PORT_TIMESTEP))
+    h.add_edge(Edge("latent_init", C.PORT_TIMESTEP, "sched_step", C.PORT_TIMESTEP))
     h.add_edge(Edge("unet", C.PORT_NOISE_PRED, "sched_step", C.PORT_NOISE_PRED))
     h.add_edge(Edge("sched_step", "next_latent", "unet", C.PORT_LATENTS))
+    h.add_edge(Edge("sched_step", "next_latent", "sched_step", C.PORT_LATENTS))
+    h.add_edge(Edge("sched_step", "next_timestep", "unet", C.PORT_TIMESTEP))
+    h.add_edge(Edge("sched_step", "next_timestep", "sched_step", C.PORT_TIMESTEP))
     h.add_edge(Edge("sched_step", "next_latent", "vae_decode", C.PORT_LATENTS))
 
     h.expose_input("tokenizer", C.PORT_PROMPT, C.PORT_PROMPT)

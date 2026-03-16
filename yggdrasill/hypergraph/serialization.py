@@ -6,6 +6,12 @@ Each level is saved as:
 
 block_id deduplication: when saving a hypergraph, blocks with the same
 block_id share a single checkpoint entry.
+
+.. warning::
+   Checkpoint files use Python pickle. **Never load checkpoints from
+   untrusted sources** — pickle can execute arbitrary code. For
+   production use with untrusted data, consider safetensors or other
+   safe formats.
 """
 from __future__ import annotations
 

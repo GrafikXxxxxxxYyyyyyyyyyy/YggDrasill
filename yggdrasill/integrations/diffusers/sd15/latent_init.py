@@ -33,6 +33,7 @@ class SD15LatentInitNode(AbstractOuterModule):
             Port(C.PORT_SCHEDULER_STATE, PortDirection.IN, PortType.ANY, optional=True),
             Port(C.PORT_INIT_LATENTS, PortDirection.IN, PortType.TENSOR, optional=True),
             Port(C.PORT_LATENTS, PortDirection.OUT, PortType.TENSOR),
+            Port(C.PORT_TIMESTEP, PortDirection.OUT, PortType.TENSOR),
         ]
 
     def forward(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
@@ -44,7 +45,8 @@ class SD15LatentInitNode(AbstractOuterModule):
 
         if existing_latents is not None:
             latents = existing_latents * init_noise_sigma
-            return {C.PORT_LATENTS: latents}
+            timestep = self._clamp_timestep(self._get_first_timestep(sched_state))
+            return {C.PORT_LATENTS: latents, C.PORT_TIMESTEP: timestep}
 
         height = self._config.get("height", 512)
         width = self._config.get("width", 512)
@@ -64,13 +66,35 @@ class SD15LatentInitNode(AbstractOuterModule):
         dtype = dtype_map.get(dtype_str, torch.float32)
 
         shape = (batch_size, num_channels, height // 8, width // 8)
+        target_device = device if isinstance(device, (str, torch.device)) else str(device)
 
         generator = None
         seed = self._config.get("seed")
         if seed is not None:
-            generator = torch.Generator(device="cpu").manual_seed(seed)
+            generator = torch.Generator(device=target_device).manual_seed(int(seed))
 
-        latents = torch.randn(shape, generator=generator, device="cpu", dtype=dtype)
-        latents = latents.to(device) * init_noise_sigma
+        latents = torch.randn(shape, generator=generator, device=target_device, dtype=dtype) * init_noise_sigma
+        timestep = self._clamp_timestep(self._get_first_timestep(sched_state))
 
-        return {C.PORT_LATENTS: latents}
+        return {C.PORT_LATENTS: latents, C.PORT_TIMESTEP: timestep}
+
+    def _get_first_timestep(self, sched_state: Any):
+        """Extract first timestep from scheduler state for the denoising loop."""
+        import torch
+        if isinstance(sched_state, dict):
+            scheduler = sched_state.get("scheduler")
+            if scheduler is not None and hasattr(scheduler, "timesteps"):
+                timesteps = scheduler.timesteps
+                if timesteps is not None and len(timesteps) > 0:
+                    return timesteps[0]
+        device = self._config.get("device", "cpu")
+        return torch.tensor(999, device=device, dtype=torch.long)
+
+    def _clamp_timestep(self, t: Any) -> Any:
+        """Clamp timestep to valid range [0, 999] for schedulers with 1000 steps."""
+        import torch
+        if t is None:
+            return torch.tensor(999, device=self._config.get("device", "cpu"), dtype=torch.long)
+        if isinstance(t, torch.Tensor):
+            return t.clamp(0, 999)
+        return max(0, min(999, int(t)))

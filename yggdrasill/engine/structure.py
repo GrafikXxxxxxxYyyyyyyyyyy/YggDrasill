@@ -3,7 +3,7 @@ from __future__ import annotations
 import itertools
 import json
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Set
+from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
 
 from yggdrasill.engine.edge import Edge
 from yggdrasill.foundation.node import AbstractGraphNode
@@ -12,10 +12,54 @@ from yggdrasill.foundation.port import PortDirection
 _instance_counter = itertools.count()
 
 
-def _resolve_config_ref(config: Dict[str, Any]) -> Dict[str, Any]:
-    """If *config* is ``{"ref": "path/to/file"}`` load from that file."""
+def _make_progress_callback() -> Any:
+    """Return a callback that shows tqdm progress for denoising cycles."""
+    pbar_ref: List[Any] = []
+
+    def _cb(phase: str, info: Dict[str, Any]) -> None:
+        if phase == "loop_start":
+            try:
+                from tqdm import tqdm
+                total = info.get("steps", 1)
+                pbar_ref.append(tqdm(total=total, desc="Generating", unit="step"))
+            except ImportError:
+                pass
+        elif phase == "cycle_step" and pbar_ref:
+            pbar_ref[0].update(1)
+        elif phase == "loop_end" and pbar_ref:
+            pbar_ref[0].close()
+            pbar_ref.clear()
+
+    return _cb
+
+
+def _resolve_config_ref(
+    config: Dict[str, Any],
+    *,
+    base_dir: Optional[Path] = None,
+) -> Dict[str, Any]:
+    """If *config* is ``{"ref": "path/to/file"}`` load from that file.
+
+    Path traversal (``..``) is rejected for security. When *base_dir* is set,
+    ref must resolve inside it; otherwise any path (relative or absolute) is
+    allowed.
+    """
     if set(config.keys()) == {"ref"}:
         ref_path = Path(config["ref"])
+        if ".." in ref_path.parts:
+            raise ValueError(
+                f"Config ref must not contain '..' path traversal: {ref_path}"
+            )
+        if base_dir is not None:
+            resolved = (base_dir / ref_path).resolve()
+            base_resolved = base_dir.resolve()
+            if not str(resolved).startswith(str(base_resolved)):
+                raise ValueError(
+                    f"Config ref resolves outside base dir: {ref_path}"
+                )
+            ref_path = resolved
+        elif not ref_path.is_absolute():
+            ref_path = ref_path.resolve()
         if ref_path.suffix in (".yaml", ".yml"):
             try:
                 import yaml  # type: ignore[import-untyped]
@@ -219,8 +263,9 @@ class Hypergraph:
 
         loaded: Dict[str, Any] = {}
         if pretrained and spec.load_keys:
+            family = component_type.split(".", 1)[0]
             loaded = self._load_pretrained_components_by_keys(
-                spec.load_keys, pretrained, **kwargs,
+                spec.load_keys, pretrained, family=family, **kwargs,
             )
 
         if spec.group:
@@ -239,6 +284,12 @@ class Hypergraph:
             )
             return
 
+        _block_defaults: Dict[str, Dict[str, Any]] = {
+            "sd15/scheduler_setup": {"num_inference_steps": 50},
+            "sd15/unet": {"guidance_scale": 7.5},
+            "sd15/vae_decode": {"output_type": "pil"},
+            "sd15/latent_init": {"dtype": "float32"},
+        }
         if len(spec.block_types) == 1:
             bt = spec.block_types[0]
             ctor_map = spec.constructor_map.get(bt, {})
@@ -246,6 +297,8 @@ class Hypergraph:
             for ctor_kwarg, comp_key in ctor_map.items():
                 if comp_key in loaded:
                     build_cfg[ctor_kwarg] = loaded[comp_key]
+            defaults = _block_defaults.get(bt, {})
+            build_cfg.update(defaults)
             if config:
                 build_cfg.update(config)
 
@@ -262,6 +315,8 @@ class Hypergraph:
                 for ctor_kwarg, comp_key in ctor_map.items():
                     if comp_key in loaded:
                         build_cfg[ctor_kwarg] = loaded[comp_key]
+                defaults = _block_defaults.get(bt, {})
+                build_cfg.update(defaults)
                 if config:
                     build_cfg.update(config)
 
@@ -317,15 +372,28 @@ class Hypergraph:
                 ("flux/latent_init", "__auto_flux_latent_init"),
             ],
         }
+        _base_latent_init_config: Dict[str, Any] = {
+            "height": 512,
+            "width": 512,
+            "batch_size": 1,
+            "dtype": "float32",
+            "num_latent_channels": 4,
+            "seed": None,
+        }
         for block_type, auto_node_id in implicit_specs.get(family, []):
             if self._find_node_id_by_block_type(block_type) is not None:
                 continue
+            implicit_config = dict(_base_latent_init_config) if "latent_init" in block_type else {}
+            if config:
+                implicit_config.update(config)
             self._add_block_type_node(
                 auto_node_id,
                 block_type,
                 auto_connect=True,
-                config=config,
+                config=implicit_config or config,
             )
+            if "latent_init" in block_type and not self.metadata.get("num_loop_steps"):
+                self.metadata["num_loop_steps"] = 50
 
     def _find_node_id_by_block_type(self, block_type: str) -> Optional[str]:
         """Return the first node id with the given block type, if any."""
@@ -383,25 +451,86 @@ class Hypergraph:
         pretrained: str,
         **kwargs: Any,
     ) -> Dict[str, Any]:
-        """Load all components from a pretrained repo for a block type."""
+        """Load only the components needed for this block type. Each loads separately; cached."""
+        from yggdrasill.integrations.diffusers.component_loaders import get_block_type_load_keys
         from yggdrasill.integrations.diffusers.model_store import ModelStore
 
+        load_keys = get_block_type_load_keys(block_type)
+        if not load_keys:
+            return {}
+        family = block_type.split("/", 1)[0]
         ms = ModelStore.default()
-        components = ms.load_pipeline_components(pretrained)
-        return components
+        return ms.load_components_by_keys(
+            family, load_keys, pretrained,
+            variant=kwargs.get("variant", ""),
+            revision=kwargs.get("revision"),
+            torch_dtype=kwargs.get("torch_dtype"),
+        )
+
+    _FAMILY_FULL_KEYS: Dict[str, List[str]] = {
+        "sd15": ["tokenizer", "text_encoder", "unet", "vae", "scheduler"],
+        "sdxl": ["tokenizer", "tokenizer_2", "text_encoder", "text_encoder_2", "unet", "vae", "scheduler"],
+        "flux": ["tokenizer", "tokenizer_2", "text_encoder", "text_encoder_2", "transformer", "vae", "scheduler"],
+    }
 
     def _load_pretrained_components_by_keys(
         self,
         load_keys: List[str],
         pretrained: str,
+        *,
+        family: str,
+        lazy: bool = True,
         **kwargs: Any,
     ) -> Dict[str, Any]:
-        """Load specific components from a pretrained repo."""
+        """Load or defer components. Batches load for diffusion families to match from_template speed."""
+        if not load_keys:
+            return {}
+        cache = getattr(self, "_component_load_cache", None)
+        if cache is None:
+            self._component_load_cache: Dict[Tuple[str, str], Dict[str, Any]] = {}
+            cache = self._component_load_cache
+        cache_key = (family, pretrained)
+        if cache_key not in cache and family in self._FAMILY_FULL_KEYS:
+            full_keys = self._FAMILY_FULL_KEYS[family]
+            from yggdrasill.integrations.diffusers.model_store import ModelStore
+            ms = ModelStore.default()
+            import torch
+            torch_dtype = kwargs.get("torch_dtype")
+            if torch_dtype is None and family in self._FAMILY_FULL_KEYS:
+                torch_dtype = torch.float32 if family == "sd15" else torch.float16
+            cache[cache_key] = ms.load_components_by_keys(
+                family, full_keys, pretrained,
+                variant=kwargs.get("variant", ""),
+                revision=kwargs.get("revision"),
+                torch_dtype=torch_dtype,
+            )
+        if cache_key in cache:
+            loaded = {k: cache[cache_key].get(k) for k in load_keys if cache[cache_key].get(k) is not None}
+            if loaded:
+                return loaded
+        import torch
+        _dtype = kwargs.get("torch_dtype")
+        if _dtype is None and family in self._FAMILY_FULL_KEYS:
+            _dtype = torch.float32 if family == "sd15" else torch.float16
+        if lazy:
+            from yggdrasill.integrations.diffusers.lazy_component import LazyComponent
+            return {
+                k: LazyComponent(
+                    family, k, pretrained,
+                    variant=kwargs.get("variant", ""),
+                    revision=kwargs.get("revision"),
+                    torch_dtype=_dtype,
+                )
+                for k in load_keys
+            }
         from yggdrasill.integrations.diffusers.model_store import ModelStore
-
         ms = ModelStore.default()
-        components = ms.load_pipeline_components(pretrained)
-        return {k: components[k] for k in load_keys if k in components}
+        return ms.load_components_by_keys(
+            family, load_keys, pretrained,
+            variant=kwargs.get("variant", ""),
+            revision=kwargs.get("revision"),
+            torch_dtype=_dtype,
+        )
 
     def _auto_connect_port_names(self, node_id: str, node: Any) -> None:
         """Run port-name-based auto-connect for a newly added node."""
@@ -565,9 +694,6 @@ class Hypergraph:
 
         from yggdrasill.integrations.diffusers.model_store import ModelStore
 
-        ms = ModelStore.default()
-        components = ms.load_pipeline_components(pretrained)
-
         attr_map = {
             "unet": "_unet",
             "vae": "_vae",
@@ -581,6 +707,17 @@ class Hypergraph:
             "image_encoder": "_image_encoder",
             "feature_extractor": "_feature_extractor",
         }
+        needed_keys = [k for k, attr in attr_map.items() if hasattr(existing, attr)]
+        if not needed_keys:
+            return
+        family = bt.split("/", 1)[0]
+        ms = ModelStore.default()
+        components = ms.load_components_by_keys(
+            family, needed_keys, pretrained,
+            variant=kwargs.get("variant", ""),
+            revision=kwargs.get("revision"),
+            torch_dtype=kwargs.get("torch_dtype"),
+        )
         for comp_name, attr_name in attr_map.items():
             if hasattr(existing, attr_name) and comp_name in components:
                 setattr(existing, attr_name, components[comp_name])
@@ -861,15 +998,31 @@ class Hypergraph:
         return g
 
     @classmethod
-    def from_template(cls, template_name: str, **kwargs: Any) -> "Hypergraph":
+    def from_template(
+        cls,
+        template_name: str,
+        *,
+        repo_id: Optional[str] = None,
+        device: str = "cuda",
+        **kwargs: Any,
+    ) -> "Hypergraph":
         """Build a hypergraph from a named high-level template.
 
         Example:
-            ``Hypergraph.from_template("sdxl_text2img", repo_id="...", device="cuda")``
+            ``Hypergraph.from_template("sd15_text2img", repo_id="runwayml/stable-diffusion-v1-5")``
         """
-        from yggdrasill.templates import build_template
+        from yggdrasill.templates import build_template, list_templates
 
-        structure = build_template(template_name, **kwargs)
+        key = template_name.strip().lower()
+        if key not in list_templates():
+            raise ValueError(
+                f"Unknown template '{template_name}'. Available: {list(list_templates())}"
+            )
+        opts: Dict[str, Any] = dict(kwargs)
+        if repo_id is not None:
+            opts["repo_id"] = repo_id
+        opts.setdefault("device", device)
+        structure = build_template(key, **opts)
         if not isinstance(structure, cls):
             raise TypeError(
                 f"Template '{template_name}' produced {type(structure).__name__}, "
@@ -926,6 +1079,7 @@ class Hypergraph:
         callbacks: Optional[list] = None,
         dry_run: bool = False,
         validate_before: bool = True,
+        show_progress: bool = True,
         **kwargs: Any,
     ) -> Any:
         """Execute the hypergraph and return results.
@@ -943,15 +1097,25 @@ class Hypergraph:
         ------------------------
         * ``num_inference_steps`` -> ``num_loop_steps`` (executor)
         * ``seed`` -> ``seed`` (executor)
+        * ``max_steps`` -> ``max_steps`` (executor, for agent loops)
+        * ``show_progress=True`` — tqdm progress bar for denoising steps
         * Names matching an exposed input port -> ``inputs`` dict
         * Remaining kwargs -> ``pin_data`` config overrides on nodes that
           recognise the key in their config.
         """
         from yggdrasill.engine.executor import run as _run
 
+        if not self._exposed_inputs and not self._exposed_outputs and self._nodes:
+            self.infer_exposed_ports()
+
+        cbs = list(callbacks) if callbacks else []
+        if show_progress and not dry_run:
+            cbs.insert(0, _make_progress_callback())
+
         resolved_inputs, executor_kwargs = self._resolve_run_kwargs(
             inputs, kwargs,
             num_loop_steps=num_loop_steps,
+            device=device,
         )
 
         raw = _run(
@@ -960,11 +1124,12 @@ class Hypergraph:
             training=training,
             num_loop_steps=executor_kwargs.get("num_loop_steps", num_loop_steps),
             device=device,
-            callbacks=callbacks,
+            callbacks=cbs if cbs else callbacks,
             dry_run=dry_run,
             validate_before=validate_before,
             seed=executor_kwargs.get("seed"),
             pin_data=executor_kwargs.get("pin_data"),
+            max_steps=executor_kwargs.get("max_steps"),
         )
 
         if isinstance(raw, dict):
@@ -977,15 +1142,76 @@ class Hypergraph:
         kwargs: Dict[str, Any],
         *,
         num_loop_steps: Optional[int] = None,
+        device: Optional[Any] = None,
     ) -> tuple:
         """Split kwargs into (inputs_dict, executor_kwargs)."""
         resolved: Dict[str, Any] = dict(inputs or {})
         executor_kw: Dict[str, Any] = {}
 
-        if "num_inference_steps" in kwargs:
-            executor_kw["num_loop_steps"] = kwargs.pop("num_inference_steps")
+        # Propagate device to nodes that create tensors (latent_init, scheduler_setup)
+        effective_device = device
+        if effective_device is None:
+            try:
+                from yggdrasill.integrations.diffusers.model_store import ModelStore
+                ms = ModelStore.default()
+                if ms.device and ms.device != "cpu":
+                    effective_device = ms.device
+            except Exception:
+                pass
+        if effective_device is None:
+            for nid, node in self._nodes.items():
+                for attr in ("_unet", "_vae", "_scheduler", "_text_encoder"):
+                    model = getattr(node, attr, None)
+                    if model is not None and hasattr(model, "parameters"):
+                        try:
+                            p = next(model.parameters(), None)
+                            if p is not None:
+                                effective_device = str(p.device)
+                                break
+                        except (StopIteration, TypeError, RuntimeError):
+                            pass
+                if effective_device is not None:
+                    break
+        if effective_device is not None:
+            dev_str = str(effective_device)
+            for nid, node in self._nodes.items():
+                bt = getattr(node, "block_type", None) or ""
+                if "latent_init" in bt or "scheduler_setup" in bt:
+                    if not hasattr(node, "_config"):
+                        node._config = {}
+                    node._config["device"] = dev_str
+
+        num_inference_steps = kwargs.pop("num_inference_steps", None)
+        if num_inference_steps is not None:
+            executor_kw["num_loop_steps"] = num_inference_steps
+            for nid, node in self._nodes.items():
+                bt = getattr(node, "block_type", None)
+                if bt and "scheduler_setup" in str(bt):
+                    if not hasattr(node, "_config"):
+                        node._config = {}
+                    node._config["num_inference_steps"] = num_inference_steps
+                    break
         if "seed" in kwargs:
-            executor_kw["seed"] = kwargs.pop("seed")
+            seed_val = kwargs.pop("seed")
+            executor_kw["seed"] = seed_val
+            target_nid = None
+            for nid, node in self._nodes.items():
+                node_cfg = getattr(node, "_config", None) or {}
+                if "seed" not in node_cfg:
+                    continue
+                bt = getattr(node, "block_type", "") or ""
+                if "latent_init" in bt:
+                    target_nid = nid
+                    break
+                if target_nid is None:
+                    target_nid = nid
+            if target_nid is not None:
+                node = self._nodes[target_nid]
+                if not hasattr(node, "_config"):
+                    node._config = {}
+                node._config["seed"] = seed_val
+        if "max_steps" in kwargs:
+            executor_kw["max_steps"] = kwargs.pop("max_steps")
 
         input_spec = self.get_input_spec()
         exposed_names = set()
@@ -995,7 +1221,6 @@ class Hypergraph:
             port_name = spec_entry["port_name"]
             exposed_names.add(port_name)
 
-        pin_data: Dict[str, Dict[str, Any]] = {}
         for key, val in list(kwargs.items()):
             if key in exposed_names:
                 resolved[key] = val
@@ -1003,11 +1228,10 @@ class Hypergraph:
                 for nid, node in self._nodes.items():
                     node_cfg = getattr(node, "_config", None) or {}
                     if key in node_cfg:
-                        pin_data.setdefault(nid, {})[key] = val
+                        if not hasattr(node, "_config"):
+                            node._config = {}
+                        node._config[key] = val
                         break
-
-        if pin_data:
-            executor_kw["pin_data"] = pin_data
 
         return resolved, executor_kw
 
@@ -1024,15 +1248,61 @@ class Hypergraph:
         if output_port_names & diffusion_keys:
             from yggdrasill.diffusion.output import DiffusionOutput
 
-            image_key = PORT_DECODED_IMAGE if PORT_DECODED_IMAGE in raw else PORT_OUTPUT_IMAGE
-            return DiffusionOutput.from_executor_output(raw, image_key=image_key)
+            image_key = (
+                PORT_DECODED_IMAGE if PORT_DECODED_IMAGE in raw else
+                PORT_OUTPUT_IMAGE if PORT_OUTPUT_IMAGE in raw else
+                next((k for k in raw if k.endswith(":" + PORT_DECODED_IMAGE) or k.endswith(":" + PORT_OUTPUT_IMAGE)), None)
+            )
+            if image_key is not None:
+                return DiffusionOutput.from_executor_output(raw, image_key=image_key)
 
         return raw
 
+    def _is_canonical_diffusion_text2img(self, family: str) -> bool:
+        """True if graph has all required nodes for diffusion text2img."""
+        backbone = f"{family}/transformer" if family == "flux" else f"{family}/unet"
+        req = {
+            f"{family}/tokenizer",
+            f"{family}/prompt_encoder",
+            backbone,
+            f"{family}/vae_decode",
+            f"{family}/latent_init",
+            f"{family}/scheduler_setup",
+            f"{family}/scheduler_step",
+        }
+        if family == "sdxl":
+            req.add(f"{family}/added_conditioning")
+        present = {
+            getattr(n, "block_type", None) for n in self._nodes.values()
+        }
+        return req.issubset(present)
+
     def infer_exposed_ports(self) -> None:
-        """Auto-detect exposed inputs/outputs from uncovered ports."""
+        """Auto-detect exposed inputs/outputs. For canonical diffusion text2img,
+        only expose prompt, negative_prompt, decoded_image."""
+        from yggdrasill.diffusion import contracts as C
+
         self._exposed_inputs.clear()
         self._exposed_outputs.clear()
+
+        for family in ("sd15", "sdxl", "flux"):
+            if self._is_canonical_diffusion_text2img(family):
+                tok_id = self._find_node_id_by_block_type(f"{family}/tokenizer")
+                vae_id = self._find_node_id_by_block_type(f"{family}/vae_decode")
+                if tok_id:
+                    self._exposed_inputs.append(
+                        {"node_id": tok_id, "port_name": C.PORT_PROMPT, "name": C.PORT_PROMPT}
+                    )
+                    self._exposed_inputs.append(
+                        {"node_id": tok_id, "port_name": C.PORT_NEGATIVE_PROMPT, "name": C.PORT_NEGATIVE_PROMPT}
+                    )
+                if vae_id:
+                    self._exposed_outputs.append(
+                        {"node_id": vae_id, "port_name": C.PORT_DECODED_IMAGE, "name": C.PORT_OUTPUT_IMAGE}
+                    )
+                self._execution_version += 1
+                return
+
         for nid, node in self._nodes.items():
             if not isinstance(node, AbstractGraphNode):
                 continue
@@ -1092,6 +1362,8 @@ class Hypergraph:
 
     def to(self, device: Any) -> "Hypergraph":
         for node in self._nodes.values():
+            if hasattr(node, "_config") and node._config is not None:
+                node._config["device"] = device
             if hasattr(node, "to") and callable(node.to):
                 node.to(device)
         return self
