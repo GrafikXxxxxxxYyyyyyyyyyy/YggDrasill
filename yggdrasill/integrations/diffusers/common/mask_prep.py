@@ -1,17 +1,18 @@
-"""SD1.5 mask preparation for inpainting."""
+"""Inpainting mask preparation — shared by SD1.5, SDXL, and FLUX."""
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from yggdrasill.diffusion import contracts as C
+from yggdrasill.integrations.diffusers import contracts as C
 from yggdrasill.foundation.port import Port, PortDirection, PortType
 from yggdrasill.task_nodes.abstract import AbstractConverter
 
 
-class SD15MaskPrepNode(AbstractConverter):
-    """Prepares mask and masked-image latents for SD1.5 inpainting.
+class InpaintMaskPrepNode(AbstractConverter):
+    """Prepares mask and masked-image latents for inpainting.
 
     Supports both 9-channel (concat) and 4-channel (blend) UNet variants.
+    Shared by SD1.5, SDXL, and FLUX.
     """
 
     def __init__(
@@ -27,7 +28,7 @@ class SD15MaskPrepNode(AbstractConverter):
 
     @property
     def block_type(self) -> str:
-        return "sd15/mask_prep"
+        return "common/mask_prep"
 
     def declare_ports(self) -> List[Port]:
         return [
@@ -74,7 +75,7 @@ class SD15MaskPrepNode(AbstractConverter):
             C.PORT_MASKED_IMAGE_LATENTS: masked_latents,
         }
 
-    def to(self, device: Any) -> "SD15MaskPrepNode":
+    def to(self, device: Any) -> "InpaintMaskPrepNode":
         if self._vae is not None:
             self._vae.to(device)
         return self

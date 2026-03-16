@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import pytest
 
-from yggdrasill.diffusion import contracts as C
-from yggdrasill.diffusion.presets.flux import (
+from yggdrasill.integrations.diffusers import contracts as C
+from yggdrasill.integrations.diffusers.presets.flux import (
     build_flux_text2img_graph,
     build_flux_img2img_graph,
     build_flux_inpaint_graph,

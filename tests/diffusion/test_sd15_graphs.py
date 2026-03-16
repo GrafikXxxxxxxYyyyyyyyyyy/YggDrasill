@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import pytest
 
-from yggdrasill.diffusion import contracts as C
-from yggdrasill.diffusion.presets.sd15 import (
+from yggdrasill.integrations.diffusers import contracts as C
+from yggdrasill.integrations.diffusers.presets.sd15 import (
     build_sd15_text2img_graph,
     build_sd15_img2img_graph,
     build_sd15_inpaint_graph,

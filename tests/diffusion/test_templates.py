@@ -4,8 +4,8 @@ from __future__ import annotations
 import pytest
 
 from yggdrasill.engine.structure import Hypergraph
-import yggdrasill.templates as templates
-from yggdrasill.templates import build_template, list_templates
+from yggdrasill.integrations.diffusers import build_template, list_templates
+import yggdrasill.integrations.diffusers.templates as templates
 from yggdrasill.workflow.workflow import Workflow
 
 

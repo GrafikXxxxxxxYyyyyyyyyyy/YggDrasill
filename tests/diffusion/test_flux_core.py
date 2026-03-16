@@ -1,7 +1,7 @@
 """Tests for FLUX core nodes: prompt encoder, transformer, scheduler, latent init, VAE, controlnet."""
 from __future__ import annotations
 
-from yggdrasill.diffusion import contracts as C
+from yggdrasill.integrations.diffusers import contracts as C
 from yggdrasill.foundation.port import PortDirection
 
 from tests.diffusion.conftest import (

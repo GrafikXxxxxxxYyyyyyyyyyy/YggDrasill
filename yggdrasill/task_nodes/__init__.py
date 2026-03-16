@@ -26,10 +26,6 @@ from yggdrasill.task_nodes.role_rules import (
     get_rule_edges,
     suggest_edges_for_new_node,
 )
-from yggdrasill.task_nodes.auto_connect import (
-    apply_auto_connect,
-    use_task_node_auto_connect,
-)
 
 __all__ = [
     "Role",
@@ -54,6 +50,4 @@ __all__ = [
     "ROLE_EDGE_RULES",
     "get_rule_edges",
     "suggest_edges_for_new_node",
-    "apply_auto_connect",
-    "use_task_node_auto_connect",
 ]

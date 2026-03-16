@@ -5,7 +5,7 @@ import pytest
 
 from yggdrasill.engine.planner import clear_plan_cache
 from yggdrasill.engine.structure import Hypergraph
-from yggdrasill.task_nodes.auto_connect import apply_auto_connect, use_task_node_auto_connect
+from yggdrasill.hypergraph.auto_connect import apply_auto_connect, use_task_node_auto_connect
 from yggdrasill.task_nodes.role_rules import (
     get_rule_edges,
     suggest_edges_for_new_node,

@@ -42,21 +42,10 @@ class BlockRegistry:
         block_type = block_type.strip()
         factory = self._factories.get(block_type)
         if factory is None:
-            # Lazy-load diffusion nodes when sd15/sdxl/flux types are first used
-            if any(p in block_type for p in ("sd15", "sdxl", "flux", "adapter")):
-                try:
-                    from yggdrasill.integrations.diffusers.registry import (
-                        register_diffusion_nodes,
-                    )
-                    register_diffusion_nodes(self)
-                    factory = self._factories.get(block_type)
-                except ImportError:
-                    pass
-            if factory is None:
-                raise KeyError(
-                    f"Unknown block_type '{block_type}'. "
-                    f"Registered types: {sorted(self._factories.keys())}"
-                )
+            raise KeyError(
+                f"Unknown block_type '{block_type}'. "
+                f"Registered types: {sorted(self._factories.keys())}"
+            )
         _meta_keys = ("block_type", "type", "schema_version")
         rest = {k: v for k, v in config.items() if k not in _meta_keys}
         node_id = rest.pop("node_id", None)

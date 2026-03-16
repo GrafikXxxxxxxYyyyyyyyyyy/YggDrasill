@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from yggdrasill.diffusion import contracts as C
+from yggdrasill.integrations.diffusers import contracts as C
 from yggdrasill.engine.edge import Edge
 from yggdrasill.engine.structure import Hypergraph
 from yggdrasill.workflow.workflow import Workflow
@@ -20,18 +20,7 @@ def build_sdxl_text2img_graph(
     scheduler: Any = None,
     config: Optional[Dict[str, Any]] = None,
 ) -> Hypergraph:
-    """Build a canonical SDXL text-to-image hypergraph.
-
-    Graph structure::
-
-        prompt ──► Converter (tokenizer) ──► Conjector (prompt_enc) ──► SDXLAddedCond ──► SDXLUNet ◄── LatentInit
-                                                            │              ▲
-                                                            ▼              │
-                                                      SchedulerStep ──────┘
-                                                            │
-                                                            ▼
-                                                        VAEDecode ──► output
-    """
+    """Build a canonical SDXL text-to-image hypergraph."""
     from yggdrasill.integrations.diffusers.sdxl.tokenizer import SDXLTokenizerNode
     from yggdrasill.integrations.diffusers.sdxl.prompt_encoder import SDXLPromptEncoderNode
     from yggdrasill.integrations.diffusers.sdxl.added_conditioning import SDXLAddedConditioningNode
@@ -244,7 +233,7 @@ def build_sdxl_inpaint_graph(
     from yggdrasill.integrations.diffusers.sdxl.scheduler import SDXLSchedulerSetupNode, SDXLSchedulerStepNode
     from yggdrasill.integrations.diffusers.sdxl.latent_init import SDXLLatentInitNode
     from yggdrasill.integrations.diffusers.sdxl.vae import SDXLVAEDecodeNode
-    from yggdrasill.integrations.diffusers.sd15.mask_prep import SD15MaskPrepNode
+    from yggdrasill.integrations.diffusers.common.mask_prep import InpaintMaskPrepNode
 
     cfg = config or {}
     h = Hypergraph(graph_id="sdxl_inpaint")
@@ -257,7 +246,7 @@ def build_sdxl_inpaint_graph(
         "original_size": cfg.get("original_size", (1024, 1024)),
         "target_size": cfg.get("target_size", (1024, 1024)),
     })
-    mask_prep = SD15MaskPrepNode("mask_prep", vae=vae, config={
+    mask_prep = InpaintMaskPrepNode("mask_prep", vae=vae, config={
         "height": cfg.get("height", 1024), "width": cfg.get("width", 1024),
         "device": cfg.get("device", "cpu"),
     })
@@ -329,11 +318,7 @@ def build_sdxl_base_refiner_workflow(
     refiner_components: Dict[str, Any],
     config: Optional[Dict[str, Any]] = None,
 ) -> Workflow:
-    """Build SDXL base+refiner as a two-stage Workflow.
-
-    The base generates latents with ``output_type="latent"`` and
-    ``denoising_end``, then the refiner continues from ``denoising_start``.
-    """
+    """Build SDXL base+refiner as a two-stage Workflow."""
     cfg = config or {}
     denoising_end = cfg.get("denoising_end", 0.8)
 

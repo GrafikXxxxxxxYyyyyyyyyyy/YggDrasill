@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from yggdrasill.diffusion import contracts as C
+from yggdrasill.integrations.diffusers import contracts as C
 from yggdrasill.engine.edge import Edge
 from yggdrasill.engine.structure import Hypergraph
 
@@ -19,18 +19,7 @@ def build_flux_text2img_graph(
     scheduler: Any = None,
     config: Optional[Dict[str, Any]] = None,
 ) -> Hypergraph:
-    """Build a canonical FLUX text-to-image hypergraph.
-
-    Graph structure::
-
-        prompt ──► Converter (tokenizer) ──► Conjector (text_encoder) ──► FluxTransformer ◄── FluxLatentInit
-                                             │                     ▲
-                                             ▼                     │
-                                       FluxSchedulerStep ──────────┘
-                                             │
-                                             ▼
-                                        FluxVAEDecode ──► output
-    """
+    """Build a canonical FLUX text-to-image hypergraph."""
     from yggdrasill.integrations.diffusers.flux.tokenizer import FluxTokenizerNode
     from yggdrasill.integrations.diffusers.flux.prompt_encoder import FluxPromptEncoderNode
     from yggdrasill.integrations.diffusers.flux.transformer import FluxTransformerNode
@@ -219,7 +208,7 @@ def build_flux_inpaint_graph(
     )
     from yggdrasill.integrations.diffusers.flux.latent_init import FluxLatentInitNode
     from yggdrasill.integrations.diffusers.flux.vae import FluxVAEDecodeNode
-    from yggdrasill.integrations.diffusers.sd15.mask_prep import SD15MaskPrepNode
+    from yggdrasill.integrations.diffusers.common.mask_prep import InpaintMaskPrepNode
 
     cfg = config or {}
     h = Hypergraph(graph_id="flux_inpaint")
@@ -232,7 +221,7 @@ def build_flux_inpaint_graph(
         "prompt_enc", text_encoder=text_encoder, text_encoder_2=text_encoder_2,
         config={"max_sequence_length": cfg.get("max_sequence_length", 512)},
     )
-    mask_prep = SD15MaskPrepNode("mask_prep", vae=vae, config={
+    mask_prep = InpaintMaskPrepNode("mask_prep", vae=vae, config={
         "height": cfg.get("height", 1024), "width": cfg.get("width", 1024),
         "device": cfg.get("device", "cpu"),
     })

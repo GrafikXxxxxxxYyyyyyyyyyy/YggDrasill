@@ -35,6 +35,19 @@ class Workflow:
     """Hypergraph of hypergraphs -- implements the same structural protocol
     that the engine expects (node_ids, get_node, get_edges, etc.)."""
 
+    @classmethod
+    def from_template(cls, template_name: str, **kwargs: Any) -> "Workflow":
+        """Build a diffusion workflow from a template name. Requires diffusers addon."""
+        from yggdrasill.integrations.diffusers.templates import build_template
+
+        built = build_template(template_name, **kwargs)
+        if not isinstance(built, Workflow):
+            raise TypeError(
+                f"Template '{template_name}' returned {type(built).__name__}, "
+                "expected Workflow. Use Hypergraph.from_template for graph templates."
+            )
+        return built
+
     def __init__(self, workflow_id: Optional[str] = None) -> None:
         self._instance_id = next(_wf_instance_counter)
         self._workflow_id = workflow_id or "workflow"
@@ -154,7 +167,7 @@ class Workflow:
         trainable: bool = True,
     ) -> str:
         """Build a Hypergraph from *config* (or ``{"ref": "path"}``) and add it."""
-        from yggdrasill.engine.structure import _resolve_config_ref
+        from yggdrasill.hypergraph.structure import _resolve_config_ref
         resolved = _resolve_config_ref(config)
         hg = Hypergraph.from_config(resolved, registry=registry)
         self.add_node(graph_id, hg)
@@ -452,7 +465,7 @@ class Workflow:
         w.workflow_kind = config.get("workflow_kind")
         w.metadata = dict(config.get("metadata", {}))
 
-        from yggdrasill.engine.structure import _resolve_config_ref
+        from yggdrasill.hypergraph.structure import _resolve_config_ref
 
         for gc in config.get("graphs", []):
             gid = gc["graph_id"]
@@ -494,20 +507,6 @@ class Workflow:
                 raise ValueError(f"Workflow validation failed: {result.errors}")
 
         return w
-
-    @classmethod
-    def from_template(cls, template_name: str, **kwargs: Any) -> "Workflow":
-        """Build a workflow from a named high-level template."""
-        from yggdrasill.templates import build_template
-
-        structure = build_template(template_name, **kwargs)
-        if not isinstance(structure, cls):
-            raise TypeError(
-                f"Template '{template_name}' produced {type(structure).__name__}, "
-                f"expected {cls.__name__}. "
-                "Use Hypergraph.from_template(...) for graph templates."
-            )
-        return structure
 
     # --- save / load --------------------------------------------------------
 

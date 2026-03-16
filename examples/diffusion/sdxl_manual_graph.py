@@ -6,7 +6,7 @@ from pprint import pprint
 
 import torch
 
-from yggdrasill.diffusion.presets.sdxl import build_sdxl_text2img_graph
+from yggdrasill.integrations.diffusers.presets.sdxl import build_sdxl_text2img_graph
 from yggdrasill.engine.validator import validate
 from yggdrasill.integrations.diffusers.model_store import ModelStore
 from yggdrasill.integrations.diffusers.registry import register_diffusion_nodes

@@ -7,18 +7,18 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from yggdrasill.diffusion.presets.sd15 import (
+from yggdrasill.integrations.diffusers.presets.sd15 import (
     build_sd15_text2img_graph,
     build_sd15_img2img_graph,
     build_sd15_inpaint_graph,
 )
-from yggdrasill.diffusion.presets.sdxl import (
+from yggdrasill.integrations.diffusers.presets.sdxl import (
     build_sdxl_text2img_graph,
     build_sdxl_img2img_graph,
     build_sdxl_inpaint_graph,
     build_sdxl_base_refiner_workflow,
 )
-from yggdrasill.diffusion.presets.flux import (
+from yggdrasill.integrations.diffusers.presets.flux import (
     build_flux_text2img_graph,
     build_flux_img2img_graph,
     build_flux_inpaint_graph,

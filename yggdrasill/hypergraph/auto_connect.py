@@ -226,12 +226,3 @@ def use_task_node_auto_connect(hypergraph: Any) -> None:
     will automatically create edges based on role rules.
     """
     hypergraph._auto_connect_fn = apply_auto_connect
-
-
-def use_port_name_auto_connect(hypergraph: Any) -> None:
-    """Enable port-name-based auto-connect on *hypergraph*.
-
-    Best suited for diffusion graphs whose ports use canonical contract
-    names from :mod:`yggdrasill.diffusion.contracts`.
-    """
-    hypergraph._auto_connect_fn = apply_port_name_auto_connect

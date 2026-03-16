@@ -9,8 +9,8 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 from yggdrasill import Hypergraph
-from yggdrasill.diffusion.output import DiffusionOutput
-from yggdrasill.diffusion.components import (
+from yggdrasill.integrations.diffusers.output import DiffusionOutput
+from yggdrasill.integrations.diffusers.components import (
     COMPONENT_REGISTRY,
     resolve_component_type,
     is_component_type,
@@ -18,7 +18,7 @@ from yggdrasill.diffusion.components import (
     ComponentSpec,
 )
 from yggdrasill.engine.edge import Edge
-from yggdrasill.task_nodes.auto_connect import apply_port_name_auto_connect
+from yggdrasill.hypergraph.auto_connect import apply_port_name_auto_connect
 
 
 # ---------------------------------------------------------------------------
@@ -268,7 +268,7 @@ class TestAddNodePolymorphic:
 
     def test_add_node_rejects_bad_type_format(self):
         g = Hypergraph(name="test")
-        with pytest.raises(ValueError, match="Unrecognised type format"):
+        with pytest.raises(ValueError, match="family/block"):
             g.add_node("n1", type="noslash_nodot")
 
     def test_add_node_with_block_type(self):
@@ -287,6 +287,7 @@ class TestAddNodePolymorphic:
         with pytest.raises(ValueError, match="non-empty"):
             g.add_node("")
 
+    @pytest.mark.skip(reason="Component-type add_node removed; use DiffusionGraphBuilder")
     def test_sdxl_component_api_auto_adds_helper_nodes(self):
         from yggdrasill.integrations.diffusers.registry import register_diffusion_nodes
 
@@ -303,6 +304,7 @@ class TestAddNodePolymorphic:
         assert "sdxl/latent_init" in block_types
         assert "sdxl/added_conditioning" in block_types
 
+    @pytest.mark.skip(reason="Component-type add_node removed; use DiffusionGraphBuilder")
     def test_sdxl_helper_nodes_are_not_duplicated(self):
         from yggdrasill.integrations.diffusers.registry import register_diffusion_nodes
 
@@ -390,6 +392,7 @@ class TestReplaceNode:
         g.replace_node("backbone", node=new_prod)
         assert g.get_node("prod") is new_prod
 
+    @pytest.mark.skip(reason="_replace_pretrained_only removed from engine")
     def test_replace_scheduler_alias_targets_multiple_nodes(self):
         g = Hypergraph(name="test")
         g.add_node("sched_setup", MagicMock(block_type="sdxl/scheduler_setup"))
@@ -460,7 +463,9 @@ class TestKwargsRun:
             assert call_kwargs["seed"] == 42
 
     def test_diffusion_output_wrapping(self):
-        """When graph outputs include decoded_image, result should be DiffusionOutput."""
+        """Use run_diffusion from addon to get DiffusionOutput; graph.run() returns raw dict."""
+        from yggdrasill.integrations.diffusers.run import run as run_diffusion
+
         g = Hypergraph(name="test")
         g._exposed_inputs = []
         g._exposed_outputs = [
@@ -469,7 +474,7 @@ class TestKwargsRun:
 
         with patch("yggdrasill.engine.executor.run") as mock_run:
             mock_run.return_value = {"decoded_image": "fake_image"}
-            out = g.run()
+            out = run_diffusion(g)
             assert isinstance(out, DiffusionOutput)
             assert out.images == ["fake_image"]
 
@@ -540,19 +545,19 @@ class TestMultiAdapterAggregation:
         assert p1 is not None and p1.aggregation == PortAggregation.CONCAT
         assert p2 is not None and p2.aggregation == PortAggregation.CONCAT
 
-    def test_merge_residuals_single_value(self):
-        from yggdrasill.integrations.diffusers.sd15.unet import _merge_residuals
+    def testmerge_residuals_single_value(self):
+        from yggdrasill.integrations.diffusers.common.merge import merge_residuals
         val = (1, 2, 3)
-        assert _merge_residuals(val) == (1, 2, 3)
+        assert merge_residuals(val) == (1, 2, 3)
 
-    def test_merge_residuals_list_of_one(self):
-        from yggdrasill.integrations.diffusers.sd15.unet import _merge_residuals
+    def testmerge_residuals_list_of_one(self):
+        from yggdrasill.integrations.diffusers.common.merge import merge_residuals
         val = [(1, 2, 3)]
-        assert _merge_residuals(val) == (1, 2, 3)
+        assert merge_residuals(val) == (1, 2, 3)
 
-    def test_merge_residuals_scalar(self):
-        from yggdrasill.integrations.diffusers.sd15.unet import _merge_residuals
-        assert _merge_residuals(42) == 42
+    def testmerge_residuals_scalar(self):
+        from yggdrasill.integrations.diffusers.common.merge import merge_residuals
+        assert merge_residuals(42) == 42
 
 
 # ---------------------------------------------------------------------------
@@ -563,6 +568,7 @@ class TestMultiAdapterAggregation:
 class TestFullGraphAutoConnect:
     """Build a small SDXL graph using add_node with block types and verify wiring."""
 
+    @pytest.mark.skip(reason="Component-type add_node removed; use DiffusionGraphBuilder")
     def test_component_api_full_sdxl_build_without_explicit_helpers(self):
         from yggdrasill.integrations.diffusers.registry import register_diffusion_nodes
 
@@ -592,6 +598,7 @@ class TestFullGraphAutoConnect:
         assert ("scheduler_state", "scheduler_state") in port_pairs
         assert ("latents", "latents") in port_pairs
 
+    @pytest.mark.skip(reason="Component-type add_node removed; use DiffusionGraphBuilder")
     def test_component_api_supports_large_user_facing_sdxl_types(self):
         from yggdrasill.integrations.diffusers.registry import register_diffusion_nodes
 
@@ -672,7 +679,7 @@ class TestFullGraphAutoConnect:
         assert len(down_edges) == 2
 
     def test_infer_exposed_ports_after_build(self):
-        from yggdrasill.diffusion import contracts as C
+        from yggdrasill.integrations.diffusers import contracts as C
         from yggdrasill.engine.edge import Edge
         from yggdrasill.integrations.diffusers.registry import register_diffusion_nodes
         from yggdrasill.integrations.diffusers.sdxl.tokenizer import SDXLTokenizerNode

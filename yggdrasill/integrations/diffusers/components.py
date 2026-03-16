@@ -89,7 +89,6 @@ _SD15_COMPONENTS: Dict[str, ComponentSpec] = {
         load_keys=["tokenizer"],
         constructor_map={"sd15/tokenizer": {"tokenizer": "tokenizer"}},
     ),
-    # Conjector: TextEncoder only. Tokenizer = Converter (sd15.tokenizer).
     "sd15.prompt_encoder": ComponentSpec(
         block_types=["sd15/prompt_encoder"],
         load_keys=["text_encoder"],
@@ -147,7 +146,6 @@ _SDXL_COMPONENTS: Dict[str, ComponentSpec] = {
             "sdxl/tokenizer": {"tokenizer": "tokenizer", "tokenizer_2": "tokenizer_2"},
         },
     ),
-    # Conjector: TextEncoder only. Tokenizer = Converter (sdxl.tokenizer).
     "sdxl.prompt_encoder": ComponentSpec(
         block_types=["sdxl/prompt_encoder"],
         load_keys=["text_encoder", "text_encoder_2"],
@@ -221,7 +219,6 @@ _FLUX_COMPONENTS: Dict[str, ComponentSpec] = {
             "flux/tokenizer": {"tokenizer": "tokenizer", "tokenizer_2": "tokenizer_2"},
         },
     ),
-    # Conjector: TextEncoder only. Tokenizer = Converter (flux.tokenizer).
     "flux.prompt_encoder": ComponentSpec(
         block_types=["flux/prompt_encoder"],
         load_keys=["text_encoder", "text_encoder_2"],

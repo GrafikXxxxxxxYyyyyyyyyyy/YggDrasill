@@ -11,7 +11,7 @@ from typing import Any, Dict, Optional, Tuple, Type
 
 logger = logging.getLogger(__name__)
 
-from yggdrasill.diffusion.types import ModelDType
+from yggdrasill.integrations.diffusers.types import ModelDType
 
 
 def _import_torch() -> Any:

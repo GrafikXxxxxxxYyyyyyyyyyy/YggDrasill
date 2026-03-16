@@ -21,11 +21,3 @@ def apply_cfg(
         noise_pred = guidance_rescale * (noise_pred * factor) + (1.0 - guidance_rescale) * noise_pred
 
     return noise_pred
-
-
-def expand_for_cfg(tensor: Any, do_cfg: bool = True) -> Any:
-    """Duplicate tensor along batch dim for CFG (uncond + cond)."""
-    if not do_cfg:
-        return tensor
-    import torch
-    return torch.cat([tensor] * 2)

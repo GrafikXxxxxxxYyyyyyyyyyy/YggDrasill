@@ -1,8 +1,9 @@
 """Tests for SD1.5 core nodes: prompt encoder, UNet, scheduler, VAE, safety."""
 from __future__ import annotations
 
+import pytest
 
-from yggdrasill.diffusion import contracts as C
+from yggdrasill.integrations.diffusers import contracts as C
 from yggdrasill.foundation.port import PortDirection
 
 from tests.diffusion.conftest import (
@@ -116,6 +117,7 @@ class TestSD15Scheduler:
         assert "init_noise_sigma" in state
 
     def test_step_node_forward(self):
+        pytest.importorskip("torch")
         from yggdrasill.integrations.diffusers.sd15.scheduler import SD15SchedulerStepNode
         sched = FakeScheduler()
         node = SD15SchedulerStepNode("step", scheduler=sched)
@@ -202,8 +204,8 @@ class TestSD15Safety:
 class TestSD15MaskPrep:
 
     def test_ports(self):
-        from yggdrasill.integrations.diffusers.sd15.mask_prep import SD15MaskPrepNode
-        node = SD15MaskPrepNode("mp", vae=FakeVAE())
+        from yggdrasill.integrations.diffusers.common.mask_prep import InpaintMaskPrepNode
+        node = InpaintMaskPrepNode("mp", vae=FakeVAE())
         ports = node.declare_ports()
         in_names = {p.name for p in ports if p.direction == PortDirection.IN}
         out_names = {p.name for p in ports if p.direction == PortDirection.OUT}

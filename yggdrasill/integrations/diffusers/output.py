@@ -31,11 +31,24 @@ class DiffusionOutput:
         cls,
         output: Dict[str, Any],
         *,
-        image_key: str = "decoded_image",
+        image_key: Optional[str] = None,
         latent_key: str = "latents",
         nsfw_key: str = "nsfw_content_detected",
     ) -> "DiffusionOutput":
         """Build a ``DiffusionOutput`` from the raw dict returned by the executor."""
+        from yggdrasill.integrations.diffusers.contracts import (
+            PORT_DECODED_IMAGE,
+            PORT_OUTPUT_IMAGE,
+        )
+        if image_key is None:
+            image_key = (
+                PORT_DECODED_IMAGE if PORT_DECODED_IMAGE in output else
+                PORT_OUTPUT_IMAGE if PORT_OUTPUT_IMAGE in output else
+                next(
+                    (k for k in output if k.endswith(":" + PORT_DECODED_IMAGE) or k.endswith(":" + PORT_OUTPUT_IMAGE)),
+                    "decoded_image",
+                )
+            )
         images_raw = output.get(image_key)
         images: List[Any] = []
         if images_raw is not None:

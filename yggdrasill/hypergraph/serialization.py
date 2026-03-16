@@ -21,7 +21,7 @@ import warnings
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from yggdrasill.engine.structure import Hypergraph
+from yggdrasill.hypergraph.structure import Hypergraph
 from yggdrasill.foundation.block import AbstractBaseBlock
 
 

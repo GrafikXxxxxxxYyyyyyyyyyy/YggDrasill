@@ -3,7 +3,7 @@ from __future__ import annotations
 
 
 from yggdrasill.integrations.diffusers.model_store import ModelStore
-from yggdrasill.diffusion.types import ModelDType
+from yggdrasill.integrations.diffusers.types import ModelDType
 
 
 class TestModelStoreBasics:

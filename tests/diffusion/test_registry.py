@@ -22,7 +22,7 @@ class TestDiffusionRegistry:
             "sd15/latent_init",
             "sd15/vae_encode",
             "sd15/vae_decode",
-            "sd15/mask_prep",
+            "common/mask_prep",
             "sd15/safety",
             "sdxl/prompt_encoder",
             "sdxl/added_conditioning",
@@ -92,7 +92,7 @@ class TestDiffusionParity:
     """Verify structural parity between SD1.5/SDXL graphs and Diffusers semantics."""
 
     def test_sd15_text2img_node_roles(self):
-        from yggdrasill.diffusion.presets.sd15 import build_sd15_text2img_graph
+        from yggdrasill.integrations.diffusers.presets.sd15 import build_sd15_text2img_graph
         from tests.diffusion.conftest import (
             FakeTokenizer, FakeTextEncoder, FakeUNet, FakeVAE, FakeScheduler,
         )
@@ -110,7 +110,7 @@ class TestDiffusionParity:
         assert isinstance(vae, AbstractConverter)
 
     def test_sdxl_has_dual_encoder_path(self):
-        from yggdrasill.diffusion.presets.sdxl import build_sdxl_text2img_graph
+        from yggdrasill.integrations.diffusers.presets.sdxl import build_sdxl_text2img_graph
         from tests.diffusion.conftest import (
             FakeTokenizer, FakeTextEncoder, FakeTextEncoder2,
             FakeUNet, FakeVAE, FakeScheduler,

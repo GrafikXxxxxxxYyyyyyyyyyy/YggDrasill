@@ -1,8 +1,4 @@
-"""High-level named templates for common graphs and workflows.
-
-Templates provide a short ergonomic API on top of the lower-level graph
-builders and model-loading factories.
-"""
+"""High-level named templates for common diffusion graphs and workflows."""
 from __future__ import annotations
 
 from typing import Any, Callable, Dict, Final, Tuple
@@ -10,73 +6,62 @@ from typing import Any, Callable, Dict, Final, Tuple
 
 def _build_sd15_text2img(**kwargs: Any) -> Any:
     from yggdrasill.integrations.diffusers.factory import build_sd15_pipeline
-
     return build_sd15_pipeline(task="text2img", **kwargs)
 
 
 def _build_sd15_img2img(**kwargs: Any) -> Any:
     from yggdrasill.integrations.diffusers.factory import build_sd15_pipeline
-
     return build_sd15_pipeline(task="img2img", **kwargs)
 
 
 def _build_sd15_inpaint(**kwargs: Any) -> Any:
     from yggdrasill.integrations.diffusers.factory import build_sd15_pipeline
-
     return build_sd15_pipeline(task="inpaint", **kwargs)
 
 
 def _build_sdxl_text2img(**kwargs: Any) -> Any:
     from yggdrasill.integrations.diffusers.factory import build_sdxl_pipeline
-
     return build_sdxl_pipeline(task="text2img", **kwargs)
 
 
 def _build_sdxl_img2img(**kwargs: Any) -> Any:
     from yggdrasill.integrations.diffusers.factory import build_sdxl_pipeline
-
     return build_sdxl_pipeline(task="img2img", **kwargs)
 
 
 def _build_sdxl_inpaint(**kwargs: Any) -> Any:
     from yggdrasill.integrations.diffusers.factory import build_sdxl_pipeline
-
     return build_sdxl_pipeline(task="inpaint", **kwargs)
 
 
 def _build_sdxl_base_refiner(**kwargs: Any) -> Any:
     from yggdrasill.integrations.diffusers.factory import build_sdxl_base_refiner
-
     return build_sdxl_base_refiner(**kwargs)
 
 
 def _build_flux_text2img(**kwargs: Any) -> Any:
     from yggdrasill.integrations.diffusers.factory import build_flux_pipeline
-
     return build_flux_pipeline(task="text2img", **kwargs)
 
 
 def _build_flux_img2img(**kwargs: Any) -> Any:
     from yggdrasill.integrations.diffusers.factory import build_flux_pipeline
-
     return build_flux_pipeline(task="img2img", **kwargs)
 
 
 def _build_flux_inpaint(**kwargs: Any) -> Any:
     from yggdrasill.integrations.diffusers.factory import build_flux_pipeline
-
     return build_flux_pipeline(task="inpaint", **kwargs)
 
 
 def _build_flux_controlnet_text2img(**kwargs: Any) -> Any:
     from yggdrasill.integrations.diffusers.factory import build_flux_pipeline
-
     return build_flux_pipeline(task="controlnet_text2img", **kwargs)
 
 
 _TEMPLATE_BUILDERS: Dict[str, Callable[..., Any]] = {
     "sd15_text2img": _build_sd15_text2img,
-    "sd15_text2image": _build_sd15_text2img,  # alias
+    "sd15_text2image": _build_sd15_text2img,
     "sd15_img2img": _build_sd15_img2img,
     "sd15_inpaint": _build_sd15_inpaint,
     "sdxl_text2img": _build_sdxl_text2img,
@@ -88,6 +73,7 @@ _TEMPLATE_BUILDERS: Dict[str, Callable[..., Any]] = {
     "flux_inpaint": _build_flux_inpaint,
     "flux_controlnet_text2img": _build_flux_controlnet_text2img,
 }
+
 
 GRAPH_TEMPLATES: Final[Tuple[str, ...]] = (
     "sd15_text2image",
@@ -112,11 +98,7 @@ def list_templates() -> Tuple[str, ...]:
 
 
 def build_template(template_name: str, **kwargs: Any) -> Any:
-    """Build a structure from a short template name.
-
-    Example:
-        ``build_template("sdxl_text2img", repo_id="...", device="cuda")``
-    """
+    """Build a structure from a short template name."""
     key = template_name.strip().lower()
     builder = _TEMPLATE_BUILDERS.get(key)
     if builder is None:
@@ -125,3 +107,9 @@ def build_template(template_name: str, **kwargs: Any) -> Any:
             f"Available templates: {list_templates()}"
         )
     return builder(**kwargs)
+
+
+# Alias for from_template (plan compatibility)
+def from_template(template_name: str, **kwargs: Any) -> Any:
+    """Build a diffusion graph from a template name. Same as build_template."""
+    return build_template(template_name, **kwargs)

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from yggdrasill.diffusion import contracts as C
+from yggdrasill.integrations.diffusers import contracts as C
 from yggdrasill.engine.edge import Edge
 from yggdrasill.engine.structure import Hypergraph
 
@@ -220,7 +220,7 @@ def build_sd15_inpaint_graph(
     )
     from yggdrasill.integrations.diffusers.sd15.vae import SD15VAEDecodeNode
     from yggdrasill.integrations.diffusers.sd15.latent_init import SD15LatentInitNode
-    from yggdrasill.integrations.diffusers.sd15.mask_prep import SD15MaskPrepNode
+    from yggdrasill.integrations.diffusers.common.mask_prep import InpaintMaskPrepNode
 
     cfg = config or {}
 
@@ -228,7 +228,7 @@ def build_sd15_inpaint_graph(
 
     tok_node = SD15TokenizerNode("tokenizer", tokenizer=tokenizer)
     enc = SD15PromptEncoderNode("prompt_enc", text_encoder=text_encoder)
-    mask_prep = SD15MaskPrepNode("mask_prep", vae=vae, config={
+    mask_prep = InpaintMaskPrepNode("mask_prep", vae=vae, config={
         "height": cfg.get("height", 512),
         "width": cfg.get("width", 512),
         "device": cfg.get("device", "cpu"),

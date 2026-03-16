@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 
-from yggdrasill.diffusion import contracts as C
-from yggdrasill.diffusion.types import (
+from yggdrasill.integrations.diffusers import contracts as C
+from yggdrasill.integrations.diffusers.types import (
     DiffusionTask,
     GenerationParams,
     GuidanceConfig,

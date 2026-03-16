@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
-from yggdrasill.diffusion import contracts as C
+from yggdrasill.integrations.diffusers import contracts as C
 from yggdrasill.foundation.port import Port, PortDirection, PortType
 from yggdrasill.task_nodes.abstract import AbstractHelper
 

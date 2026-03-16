@@ -4,8 +4,10 @@ import warnings
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Generator, List, Optional
 
-from yggdrasill.diffusion import contracts as C
 from yggdrasill.engine.buffers import EdgeBuffers
+
+# Port name convention for cycle-based loops (scheduler emits num_loop_steps)
+_SCHEDULER_STATE_PORT = "scheduler_state"
 from yggdrasill.engine.planner import build_plan
 from yggdrasill.engine.validator import validate
 from yggdrasill.foundation.node import AbstractGraphNode
@@ -205,10 +207,10 @@ def run_stream(
 def _resolve_cycle_steps(structure: Any, buf: EdgeBuffers, default: int) -> int:
     """Use scheduler_state.num_loop_steps when available (e.g. PNDM has 51 steps for 50 inference)."""
     for edge in structure.get_edges():
-        if edge.source_port != C.PORT_SCHEDULER_STATE:
+        if edge.source_port != _SCHEDULER_STATE_PORT:
             continue
-        if buf.has(edge.source_node, C.PORT_SCHEDULER_STATE):
-            state = buf.read(edge.source_node, C.PORT_SCHEDULER_STATE)
+        if buf.has(edge.source_node, _SCHEDULER_STATE_PORT):
+            state = buf.read(edge.source_node, _SCHEDULER_STATE_PORT)
             if isinstance(state, dict):
                 k = state.get("num_loop_steps")
                 if isinstance(k, int) and k > 0:

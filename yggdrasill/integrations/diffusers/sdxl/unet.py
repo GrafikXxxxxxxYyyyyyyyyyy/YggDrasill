@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from yggdrasill.diffusion import contracts as C
+from yggdrasill.integrations.diffusers import contracts as C
 from yggdrasill.foundation.port import Port, PortAggregation, PortDirection, PortType
 from yggdrasill.task_nodes.abstract import AbstractBackbone
 
@@ -90,14 +90,14 @@ class SDXLUNetNode(AbstractBackbone):
             "added_cond_kwargs": added_cond_kwargs,
         }
 
-        from yggdrasill.integrations.diffusers.sd15.unet import _merge_residuals
+        from yggdrasill.integrations.diffusers.common.merge import merge_residuals
 
         down_residuals = inputs.get(C.PORT_DOWN_BLOCK_RESIDUALS)
         mid_residual = inputs.get(C.PORT_MID_BLOCK_RESIDUAL)
         if down_residuals is not None:
-            unet_kwargs["down_block_additional_residuals"] = _merge_residuals(down_residuals)
+            unet_kwargs["down_block_additional_residuals"] = merge_residuals(down_residuals)
         if mid_residual is not None:
-            unet_kwargs["mid_block_additional_residual"] = _merge_residuals(mid_residual)
+            unet_kwargs["mid_block_additional_residual"] = merge_residuals(mid_residual)
 
         timestep_cond = None
         if hasattr(self._unet, "config") and getattr(self._unet.config, "time_cond_proj_dim", None):
