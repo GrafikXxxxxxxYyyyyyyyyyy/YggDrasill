@@ -78,7 +78,7 @@ def register_diffusion_nodes(registry: Optional[BlockRegistry] = None) -> None:
         "flux/latent_init": FluxLatentInitNode,
         "flux/vae_encode": FluxVAEEncodeNode,
         "flux/vae_decode": FluxVAEDecodeNode,
-        "flux/controlnet": FluxControlNetNode,
+        "adapter/controlnet_flux": FluxControlNetNode,
     }
 
     for block_type, cls in nodes.items():

@@ -53,7 +53,7 @@ class SD15LatentInitNode(AbstractOuterModule):
         batch_size = self._config.get("batch_size", 1)
         num_channels = self._config.get("num_latent_channels", 4)
         device = self._config.get("device", "cpu")
-        dtype_str = self._config.get("dtype", "float32")
+        dtype_str = self._config.get("dtype", "float16")
 
         dtype_map = {
             "float32": torch.float32,
@@ -63,7 +63,7 @@ class SD15LatentInitNode(AbstractOuterModule):
             "fp16": torch.float16,
             "bf16": torch.bfloat16,
         }
-        dtype = dtype_map.get(dtype_str, torch.float32)
+        dtype = dtype_map.get(dtype_str, torch.float16)
 
         shape = (batch_size, num_channels, height // 8, width // 8)
         target_device = device if isinstance(device, (str, torch.device)) else str(device)

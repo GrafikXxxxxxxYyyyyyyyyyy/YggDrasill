@@ -62,7 +62,7 @@ def build_sd15_text2img_graph(
         "width": cfg.get("width", 512),
         "batch_size": cfg.get("batch_size", 1),
         "device": cfg.get("device", "cpu"),
-        "dtype": cfg.get("dtype", "float32"),
+        "dtype": cfg.get("dtype", "float16"),
         "seed": cfg.get("seed"),
     })
     unet_node = SD15UNetNode("unet", unet=unet, config={
@@ -154,7 +154,7 @@ def build_sd15_img2img_graph(
     })
     lat_init = SD15LatentInitNode("latent_init", config={
         "device": cfg.get("device", "cpu"),
-        "dtype": cfg.get("dtype", "float32"),
+        "dtype": cfg.get("dtype", "float16"),
     })
     unet_node = SD15UNetNode("unet", unet=unet, config={
         "guidance_scale": cfg.get("guidance_scale", 7.5),
@@ -241,7 +241,7 @@ def build_sd15_inpaint_graph(
         "height": cfg.get("height", 512),
         "width": cfg.get("width", 512),
         "device": cfg.get("device", "cpu"),
-        "dtype": cfg.get("dtype", "float32"),
+        "dtype": cfg.get("dtype", "float16"),
         "seed": cfg.get("seed"),
     })
     unet_node = SD15UNetNode("unet", unet=unet, config={

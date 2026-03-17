@@ -44,6 +44,19 @@ class ComponentSpec:
         When a component creates multiple block nodes, this suffix is
         appended to differentiate them (e.g. ``"_setup"`` / ``"_step"``
         for schedulers).
+    load_family : str | None
+        When set, overrides the component-type prefix for ModelStore loading.
+        E.g. ``adapter.controlnet_flux`` uses ``family="flux"`` to load
+        from (flux, controlnet).
+    load_pretrained_map : dict[str, str] | None
+        When set, maps each load_key to a specific pretrained repo.
+        E.g. IP-Adapter image_encoder loads from h94/IP-Adapter.
+    load_subfolder_map : dict[str, str] | None
+        When set, overrides subfolder per load_key (used with load_pretrained_map).
+        E.g. IP-Adapter image_encoder needs subfolder "models/image_encoder".
+    load_variant_map : dict[str, str] | None
+        When set, overrides variant per load_key. Use "" for components that
+        don't support fp16 variant (e.g. openai/clip-vit-large-patch14).
     """
 
     block_types: List[str]
@@ -51,6 +64,10 @@ class ComponentSpec:
     constructor_map: Dict[str, Dict[str, str]] = field(default_factory=dict)
     group: Optional[str] = None
     node_id_suffix: Optional[str] = None
+    load_family: Optional[str] = None
+    load_pretrained_map: Optional[Dict[str, str]] = None
+    load_subfolder_map: Optional[Dict[str, str]] = None
+    load_variant_map: Optional[Dict[str, str]] = None
 
 
 # ── SD 1.5 components ──────────────────────────────────────────────────
@@ -257,6 +274,39 @@ _ADAPTER_COMPONENTS: Dict[str, ComponentSpec] = {
         load_keys=["controlnet"],
         constructor_map={"adapter/controlnet": {"controlnet": "controlnet"}},
     ),
+    "sd15.controlnet": ComponentSpec(
+        block_types=["adapter/controlnet"],
+        load_keys=["controlnet"],
+        constructor_map={"adapter/controlnet": {"controlnet": "controlnet"}},
+        load_family="sd15",
+    ),
+    "sd15.ipadapter": ComponentSpec(
+        block_types=["adapter/ip_adapter"],
+        load_keys=["image_encoder", "feature_extractor"],
+        constructor_map={
+            "adapter/ip_adapter": {
+                "image_encoder": "image_encoder",
+                "feature_extractor": "feature_extractor",
+            },
+        },
+        load_family="adapter",
+        # ip-adapter_sd15.bin expects CLIP-ViT-H-14 (1024 dim)
+        # image_encoder from h94; feature_extractor from openai (h94 lacks preprocessor_config.json)
+        load_pretrained_map={
+            "image_encoder": "h94/IP-Adapter",
+            "feature_extractor": "openai/clip-vit-large-patch14",
+        },
+        load_subfolder_map={
+            "image_encoder": "models/image_encoder",
+        },
+        load_variant_map={"image_encoder": "", "feature_extractor": ""},
+    ),
+    "adapter.controlnet_flux": ComponentSpec(
+        block_types=["adapter/controlnet_flux"],
+        load_keys=["controlnet"],
+        constructor_map={"adapter/controlnet_flux": {"controlnet": "controlnet"}},
+        load_family="flux",
+    ),
     "adapter.ip_adapter": ComponentSpec(
         block_types=["adapter/ip_adapter"],
         load_keys=["image_encoder", "feature_extractor"],
@@ -266,11 +316,22 @@ _ADAPTER_COMPONENTS: Dict[str, ComponentSpec] = {
                 "feature_extractor": "feature_extractor",
             },
         },
+        # image_encoder from h94 (ViT-H 1024 dim); feature_extractor from openai (h94 lacks preprocessor)
+        load_pretrained_map={
+            "image_encoder": "h94/IP-Adapter",
+            "feature_extractor": "openai/clip-vit-large-patch14",
+        },
+        load_subfolder_map={
+            "image_encoder": "models/image_encoder",
+        },
+        load_variant_map={"image_encoder": "", "feature_extractor": ""},
     ),
+    # Backward compat: flux.controlnet → same as adapter.controlnet_flux
     "flux.controlnet": ComponentSpec(
-        block_types=["flux/controlnet"],
+        block_types=["adapter/controlnet_flux"],
         load_keys=["controlnet"],
-        constructor_map={"flux/controlnet": {"controlnet": "controlnet"}},
+        constructor_map={"adapter/controlnet_flux": {"controlnet": "controlnet"}},
+        load_family="flux",
     ),
 }
 
@@ -317,11 +378,17 @@ def load_components_from_pretrained(
     torch_dtype: Optional[Any] = None,
     variant: str = "",
     use_safetensors: Optional[bool] = None,
+    pretrained_map: Optional[Dict[str, str]] = None,
+    subfolder_map: Optional[Dict[str, str]] = None,
+    variant_map: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """Load specific components. Each loads separately; cached in ModelStore.
 
     use_safetensors: If False, load .bin (PyTorch) weights instead of .safetensors.
         Some repos (e.g. Lykon/DreamShaper) have only .bin in unet/.
+    pretrained_map: optional {load_key: repo_id} to load each key from a different repo.
+    subfolder_map: optional {load_key: subfolder} to override subfolder per key.
+    variant_map: optional {load_key: variant} to override variant per key (e.g. "" for CLIP).
     """
     if not load_keys:
         return {}
@@ -333,4 +400,7 @@ def load_components_from_pretrained(
         family, list(load_keys), pretrained,
         variant=variant, torch_dtype=torch_dtype,
         use_safetensors=use_safetensors,
+        pretrained_map=pretrained_map,
+        subfolder_map=subfolder_map,
+        variant_map=variant_map,
     )

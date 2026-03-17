@@ -39,6 +39,7 @@ class SD15UNetNode(AbstractBackbone):
             Port(C.PORT_TIMESTEP, PortDirection.IN, PortType.TENSOR),
             Port(C.PORT_PROMPT_EMBEDS, PortDirection.IN, PortType.TENSOR),
             Port(C.PORT_NEGATIVE_PROMPT_EMBEDS, PortDirection.IN, PortType.TENSOR, optional=True),
+            Port(C.PORT_IMAGE_EMBEDS, PortDirection.IN, PortType.TENSOR, optional=True, aggregation=PortAggregation.CONCAT),
             Port(C.PORT_SCHEDULER_STATE, PortDirection.IN, PortType.ANY, optional=True),
             Port(C.PORT_DOWN_BLOCK_RESIDUALS, PortDirection.IN, PortType.ANY, optional=True, aggregation=PortAggregation.CONCAT),
             Port(C.PORT_MID_BLOCK_RESIDUAL, PortDirection.IN, PortType.ANY, optional=True, aggregation=PortAggregation.CONCAT),
@@ -86,6 +87,12 @@ class SD15UNetNode(AbstractBackbone):
         kwargs: Dict[str, Any] = {
             "encoder_hidden_states": encoder_states,
         }
+        image_embeds = inputs.get(C.PORT_IMAGE_EMBEDS)
+        if image_embeds is not None:
+            if isinstance(image_embeds, list):
+                image_embeds = torch.cat(image_embeds, dim=0)
+            image_embeds = image_embeds.to(device=device, dtype=dtype)
+            kwargs["added_cond_kwargs"] = {"image_embeds": image_embeds}
         down_residuals = inputs.get(C.PORT_DOWN_BLOCK_RESIDUALS)
         mid_residual = inputs.get(C.PORT_MID_BLOCK_RESIDUAL)
         if down_residuals is not None:

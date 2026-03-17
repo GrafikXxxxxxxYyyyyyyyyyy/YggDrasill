@@ -4,6 +4,28 @@ from __future__ import annotations
 from typing import Any, List, Optional
 
 
+def load_image(image: Any) -> Any:
+    """Load image from URL or file path. Returns PIL Image. Pass-through for PIL/numpy/tensor."""
+
+    def _load_one(img: Any) -> Any:
+        if not isinstance(img, str):
+            return img
+        try:
+            from diffusers.utils import load_image as _load
+            return _load(img)
+        except ImportError:
+            from PIL import Image
+            import requests
+            from io import BytesIO
+            if img.startswith(("http://", "https://")):
+                return Image.open(BytesIO(requests.get(img).content)).convert("RGB")
+            return Image.open(img).convert("RGB")
+
+    if isinstance(image, list):
+        return [_load_one(x) for x in image]
+    return _load_one(image)
+
+
 def _import_torch() -> Any:
     import torch
     return torch
@@ -19,9 +41,11 @@ def preprocess_image(
 ) -> Any:
     """Convert PIL/numpy/torch image to model-ready tensor [B,C,H,W] in [-1,1].
 
+    Accepts URL strings and file paths (loaded via load_image).
     Delegates to ``diffusers.image_processor.VaeImageProcessor`` when available,
     with a pure-tensor fallback.
     """
+    image = load_image(image)
     torch = _import_torch()
 
     try:

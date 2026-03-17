@@ -5,11 +5,12 @@ from typing import Any, Dict, List, Optional
 
 from yggdrasill.integrations.diffusers import contracts as C
 from yggdrasill.foundation.port import Port, PortDirection, PortType
-from yggdrasill.task_nodes.abstract import AbstractInjector
+from yggdrasill.task_nodes.abstract import AbstractInnerModule
 
 
-class FluxControlNetNode(AbstractInjector):
-    """Wraps FluxControlNetModel to produce block samples for the transformer.
+class FluxControlNetNode(AbstractInnerModule):
+    """Inner Module: wraps FluxControlNetModel to produce block samples for the
+    transformer. Executed inside the denoising loop on each iteration.
 
     FLUX ControlNet produces two sets of residuals:
     - controlnet_block_samples: for joint (MMDiT) transformer blocks
@@ -31,7 +32,7 @@ class FluxControlNetNode(AbstractInjector):
 
     @property
     def block_type(self) -> str:
-        return "flux/controlnet"
+        return "adapter/controlnet_flux"
 
     def declare_ports(self) -> List[Port]:
         return [

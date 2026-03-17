@@ -5,14 +5,13 @@ from typing import Any, Dict, List, Optional
 
 from yggdrasill.integrations.diffusers import contracts as C
 from yggdrasill.foundation.port import Port, PortDirection, PortType
-from yggdrasill.task_nodes.abstract import AbstractInjector
+from yggdrasill.task_nodes.abstract import AbstractInnerModule
 
 
-class ControlNetNode(AbstractInjector):
-    """Runs ControlNet to produce down/mid block residuals for the UNet.
-
-    The residuals are passed via edges to the UNet node's optional
-    control residual input ports.
+class ControlNetNode(AbstractInnerModule):
+    """Inner Module: runs ControlNet inside the denoising loop to produce down/mid
+    block residuals for the UNet. Executed on each iteration; residuals are passed
+    via edges to the UNet node's optional control residual input ports.
     """
 
     def __init__(
@@ -23,8 +22,11 @@ class ControlNetNode(AbstractInjector):
         config: Optional[Dict[str, Any]] = None,
         controlnet: Any = None,
     ) -> None:
-        super().__init__(node_id=node_id, block_id=block_id, config=config)
+        cfg = dict(config or {})
+        controlnet = controlnet or cfg.pop("controlnet", None)
+        super().__init__(node_id=node_id, block_id=block_id, config=cfg)
         self._controlnet = controlnet
+        self._control_image_cache: Dict[Any, Any] = {}  # (input_id, h, w) -> tensor
 
     @property
     def block_type(self) -> str:
@@ -58,9 +60,20 @@ class ControlNetNode(AbstractInjector):
             height = self._config.get("height", latents.shape[-2] * 8)
             width = self._config.get("width", latents.shape[-1] * 8)
             dtype = latents.dtype
-            control_image = preprocess_image(
-                control_image, height=height, width=width, dtype=dtype,
-                device=str(latents.device),
+            dev = str(latents.device)
+            # Cache key: use string for URLs/paths (stable), id() for PIL/ndarray
+            cache_key = (
+                control_image if isinstance(control_image, str) else id(control_image),
+                height,
+                width,
+            )
+            if cache_key not in self._control_image_cache:
+                self._control_image_cache[cache_key] = preprocess_image(
+                    control_image, height=height, width=width, dtype=dtype,
+                    device=dev,
+                )
+            control_image = self._control_image_cache[cache_key].to(
+                device=latents.device, dtype=dtype
             )
 
         kwargs: Dict[str, Any] = {
@@ -75,6 +88,13 @@ class ControlNetNode(AbstractInjector):
             added_cond["time_ids"] = inputs[C.PORT_ADD_TIME_IDS]
         if added_cond:
             kwargs["added_cond_kwargs"] = added_cond
+
+        if self._controlnet is None:
+            raise RuntimeError(
+                f"{type(self).__name__}(node_id={self._node_id!r}): controlnet module is None. "
+                "Pass controlnet=... when constructing the node or via config. "
+                "When using DiffusionGraphBuilder.add_component, ensure pretrained= points to a valid repo."
+            )
 
         down_residuals, mid_residual = self._controlnet(
             latents,

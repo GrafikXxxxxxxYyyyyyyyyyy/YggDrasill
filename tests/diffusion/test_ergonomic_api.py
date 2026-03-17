@@ -138,6 +138,17 @@ class TestComponentRegistry:
         spec = resolve_component_type("adapter.controlnet")
         assert spec.block_types == ["adapter/controlnet"]
 
+    def test_adapter_controlnet_flux(self):
+        spec = resolve_component_type("adapter.controlnet_flux")
+        assert spec.block_types == ["adapter/controlnet_flux"]
+        assert spec.load_family == "flux"
+
+    def test_flux_controlnet_backward_compat(self):
+        """flux.controlnet resolves to adapter/controlnet_flux for backward compat."""
+        spec = resolve_component_type("flux.controlnet")
+        assert spec.block_types == ["adapter/controlnet_flux"]
+        assert spec.load_family == "flux"
+
     def test_flux_transformer(self):
         spec = resolve_component_type("flux.transformer")
         assert spec.block_types == ["flux/transformer"]
@@ -534,6 +545,16 @@ class TestMultiAdapterAggregation:
         port = node.get_port("down_block_additional_residuals")
         assert port is not None
         assert port.aggregation == PortAggregation.CONCAT
+
+    def test_sd15_unet_image_embeds_is_concat(self):
+        from yggdrasill.integrations.diffusers.sd15.unet import SD15UNetNode
+        from yggdrasill.foundation.port import PortAggregation
+
+        node = SD15UNetNode(node_id="unet")
+        port = node.get_port("image_embeds")
+        assert port is not None
+        assert port.aggregation == PortAggregation.CONCAT
+        assert port.optional
 
     def test_flux_transformer_controlnet_ports_are_concat(self):
         from yggdrasill.integrations.diffusers.flux.transformer import FluxTransformerNode

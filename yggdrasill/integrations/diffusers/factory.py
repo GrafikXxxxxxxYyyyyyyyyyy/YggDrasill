@@ -34,7 +34,7 @@ def build_sd15_pipeline(
     *,
     task: str = "text2img",
     variant: str = "",
-    torch_dtype: str = "float32",
+    torch_dtype: str = "float16",
     device: str = "cuda",
     enable_safety: bool = True,
     store: Optional[ModelStore] = None,
@@ -57,7 +57,7 @@ def build_sd15_pipeline(
     """
     import torch
     dtype_map = {"float16": torch.float16, "float32": torch.float32, "bfloat16": torch.bfloat16}
-    dtype = dtype_map.get(torch_dtype, torch.float32)
+    dtype = dtype_map.get(torch_dtype, torch.float16)
 
     ms = store or ModelStore.default()
     sd15_keys = ["tokenizer", "text_encoder", "unet", "vae", "scheduler"]

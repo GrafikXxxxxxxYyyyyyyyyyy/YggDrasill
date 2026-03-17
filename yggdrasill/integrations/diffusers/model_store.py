@@ -140,8 +140,6 @@ class ModelStore:
 
         path = f"{source}/{subfolder}" if subfolder else source
         logger.info("Loading %s from %s ...", cls.__name__, path)
-        if subfolder in ("unet", "vae", "text_encoder"):
-            logger.info("Large file download (progress below). In Jupyter: pip install ipywidgets for progress bar.")
         kwargs: Dict[str, Any] = {}
         if subfolder:
             kwargs["subfolder"] = subfolder
@@ -162,20 +160,7 @@ class ModelStore:
 
         component: Any = None
         try:
-            # Show download progress for large model files (e.g. UNet ~1.7GB)
-            try:
-                from huggingface_hub.utils import enable_progress_bars
-                enable_progress_bars()
-            except ImportError:
-                pass
-            try:
-                component = cls.from_pretrained(source, **kwargs)
-            finally:
-                try:
-                    from huggingface_hub.utils import disable_progress_bars
-                    disable_progress_bars()
-                except ImportError:
-                    pass
+            component = cls.from_pretrained(source, **kwargs)
         except Exception as e:
             err_str = str(e).lower()
             is_file_not_found = (
@@ -202,11 +187,6 @@ class ModelStore:
                     kwargs["use_safetensors"] = False
                     kwargs.pop("variant", None)
                 try:
-                    try:
-                        from huggingface_hub.utils import enable_progress_bars
-                        enable_progress_bars()
-                    except ImportError:
-                        pass
                     component = cls.from_pretrained(source, **kwargs)
                 except Exception as retry_err:
                     logger.error("Fallback failed: %s", retry_err)
@@ -214,12 +194,6 @@ class ModelStore:
                         f"Failed to load {cls.__name__} from {fallback_path}. "
                         "Tried default safetensors, variant=fp16, and .bin."
                     ) from retry_err
-                finally:
-                    try:
-                        from huggingface_hub.utils import disable_progress_bars
-                        disable_progress_bars()
-                    except ImportError:
-                        pass
         self.put(key, component)
         path = f"{source}/{subfolder}" if subfolder else source
         logger.info("Loaded %s from %s", cls.__name__, path)
@@ -231,6 +205,7 @@ class ModelStore:
         load_key: str,
         repo_id: str,
         *,
+        subfolder_override: Optional[str] = None,
         variant: str = "",
         revision: Optional[str] = None,
         torch_dtype: Optional[Any] = None,
@@ -241,6 +216,7 @@ class ModelStore:
 
         Each model loads separately via its own from_pretrained — no full pipeline.
         Scheduler (sd15) uses repo config for parity with diffusers pipeline.
+        subfolder_override: when set, overrides the loader's default subfolder.
         """
         from yggdrasill.integrations.diffusers.component_loaders import (
             get_loader,
@@ -251,6 +227,8 @@ class ModelStore:
         if loader is None:
             return None
         cls, subfolder = loader
+        if subfolder_override is not None:
+            subfolder = subfolder_override
         if cls is None and load_key == "scheduler":
             _ensure_logging_handler()
             key = self.cache_key(repo_id, subfolder, "Scheduler")
@@ -290,17 +268,30 @@ class ModelStore:
         revision: Optional[str] = None,
         torch_dtype: Optional[Any] = None,
         use_safetensors: Optional[bool] = None,
+        pretrained_map: Optional[Dict[str, str]] = None,
+        subfolder_map: Optional[Dict[str, str]] = None,
+        variant_map: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
-        """Load only the requested components. Each loads separately; results are cached."""
+        """Load only the requested components. Each loads separately; results are cached.
+
+        pretrained_map: optional {load_key: repo_id} to load each key from a different repo.
+        subfolder_map: optional {load_key: subfolder} to override subfolder per key.
+        variant_map: optional {load_key: variant} to override variant per key.
+        """
         _ensure_logging_handler()
-        logger.info("Loading components from %s: %s", repo_id, ", ".join(load_keys))
         result: Dict[str, Any] = {}
         for key in load_keys:
+            key_repo = (pretrained_map or {}).get(key, repo_id)
+            key_subfolder = (subfolder_map or {}).get(key) if subfolder_map else None
+            key_variant = (variant_map or {}).get(key, variant)
+            if not result and not pretrained_map:
+                logger.info("Loading components from %s: %s", key_repo, ", ".join(load_keys))
             comp = self.load_component_by_key(
                 family,
                 key,
-                repo_id,
-                variant=variant,
+                key_repo,
+                subfolder_override=key_subfolder,
+                variant=key_variant,
                 revision=revision,
                 torch_dtype=torch_dtype,
                 use_safetensors=use_safetensors,
@@ -308,7 +299,7 @@ class ModelStore:
             if comp is not None:
                 result[key] = comp
         if result:
-            logger.info("Loaded %d/%d components from %s: %s", len(result), len(load_keys), repo_id, ", ".join(result.keys()))
+            logger.info("Loaded %d/%d components: %s", len(result), len(load_keys), ", ".join(result.keys()))
         return result
 
     def move_to_device(self, component: Any, device: Optional[str] = None) -> Any:

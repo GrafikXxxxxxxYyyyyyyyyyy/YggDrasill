@@ -131,7 +131,7 @@ def _bootstrap_families() -> None:
         torch_dtype_default="bfloat16",
     )
 
-    # Adapter (controlnet, ip_adapter for sd15/sdxl; flux.controlnet lives in flux)
+    # Adapter (controlnet for sd15/sdxl; controlnet_flux for FLUX)
     register_family(
         "adapter",
         component_specs=dict(_ADAPTER_ONLY),

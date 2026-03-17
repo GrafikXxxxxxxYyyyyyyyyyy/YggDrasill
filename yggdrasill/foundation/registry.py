@@ -47,6 +47,13 @@ class BlockRegistry:
                 f"Registered types: {sorted(self._factories.keys())}"
             )
         _meta_keys = ("block_type", "type", "schema_version")
+        # Keys that must be passed as direct kwargs to the factory (model components).
+        # Ensures ControlNetNode, IPAdapterNode, etc. receive their modules even when
+        # nested inside config.
+        _component_pass_through = (
+            "controlnet", "unet", "vae", "scheduler", "tokenizer", "text_encoder",
+            "image_encoder", "feature_extractor", "transformer",
+        )
         rest = {k: v for k, v in config.items() if k not in _meta_keys}
         node_id = rest.pop("node_id", None)
         block_id = rest.pop("block_id", None)
@@ -62,6 +69,12 @@ class BlockRegistry:
             kwargs["block_id"] = block_id
         if node_id is not None:
             kwargs["node_id"] = node_id
+        # Pass model components as direct kwargs so adapter nodes receive them
+        for key in _component_pass_through:
+            if key in rest:
+                val = rest.pop(key)
+                if val is not None:
+                    kwargs[key] = val
         if rest:
             kwargs["config"] = rest
 

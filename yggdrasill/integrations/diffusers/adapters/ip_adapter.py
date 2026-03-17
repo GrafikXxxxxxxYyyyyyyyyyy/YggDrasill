@@ -24,7 +24,10 @@ class IPAdapterNode(AbstractInjector):
         image_encoder: Any = None,
         feature_extractor: Any = None,
     ) -> None:
-        super().__init__(node_id=node_id, block_id=block_id, config=config)
+        cfg = dict(config or {})
+        image_encoder = image_encoder or cfg.pop("image_encoder", None)
+        feature_extractor = feature_extractor or cfg.pop("feature_extractor", None)
+        super().__init__(node_id=node_id, block_id=block_id, config=cfg)
         self._image_encoder = image_encoder
         self._feature_extractor = feature_extractor
 
@@ -42,6 +45,9 @@ class IPAdapterNode(AbstractInjector):
         import torch
 
         ip_image = inputs[C.PORT_IP_ADAPTER_IMAGE]
+
+        from yggdrasill.integrations.diffusers.common.image_utils import load_image as _load_image
+        ip_image = _load_image(ip_image)
 
         if self._feature_extractor is not None:
             pixel_values = self._feature_extractor(

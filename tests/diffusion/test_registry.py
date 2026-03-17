@@ -43,7 +43,7 @@ class TestDiffusionRegistry:
             "flux/latent_init",
             "flux/vae_encode",
             "flux/vae_decode",
-            "flux/controlnet",
+            "adapter/controlnet_flux",
         ]
 
         for bt in expected_types:

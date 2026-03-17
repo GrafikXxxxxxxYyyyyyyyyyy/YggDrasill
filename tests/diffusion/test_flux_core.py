@@ -232,7 +232,13 @@ class TestFluxControlNet:
 
     def test_block_type(self):
         from yggdrasill.integrations.diffusers.flux.controlnet import FluxControlNetNode
-        assert FluxControlNetNode("cn", controlnet=FakeFluxControlNet()).block_type == "flux/controlnet"
+        assert FluxControlNetNode("cn", controlnet=FakeFluxControlNet()).block_type == "adapter/controlnet_flux"
+
+    def test_role_inner_module(self):
+        from yggdrasill.integrations.diffusers.flux.controlnet import FluxControlNetNode
+        from yggdrasill.task_nodes.roles import Role
+        node = FluxControlNetNode("cn", controlnet=FakeFluxControlNet())
+        assert node.role == Role.INNER_MODULE
 
     def test_ports(self):
         from yggdrasill.integrations.diffusers.flux.controlnet import FluxControlNetNode

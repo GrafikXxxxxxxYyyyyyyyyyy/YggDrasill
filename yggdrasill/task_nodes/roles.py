@@ -38,10 +38,15 @@ def role_from_block_type(block_type: str) -> Optional[str]:
     (``backbone_unet2d``).  For multi-word roles like ``inner_module``,
     longer prefixes are tried first.
 
+    ControlNet (adapter/controlnet, adapter/controlnet_flux) is always
+    Inner Module per canon (02 §7, DIFFUSION_MODELS §3.3).
+
     Returns the canonical role **string** (e.g. ``"backbone"``), not the
     ``Role`` enum, per spec PHASE_4 §6.2.
     """
     bt = block_type.strip().lower()
+    if "controlnet" in bt and "adapter" in bt:
+        return INNER_MODULE
     for role_str in sorted(KNOWN_ROLES, key=len, reverse=True):
         if bt == role_str:
             return role_str

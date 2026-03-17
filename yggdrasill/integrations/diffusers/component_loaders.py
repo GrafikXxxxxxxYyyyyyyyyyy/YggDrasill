@@ -32,7 +32,7 @@ def load_scheduler_from_repo(repo_id: str, subfolder: str = "scheduler") -> Any:
 
 
 def _init_sd15() -> None:
-    from diffusers import AutoencoderKL, UNet2DConditionModel
+    from diffusers import AutoencoderKL, ControlNetModel, UNet2DConditionModel
     from transformers import CLIPTextModel, CLIPTokenizer
 
     _register("sd15", "unet", UNet2DConditionModel, "unet")
@@ -40,6 +40,7 @@ def _init_sd15() -> None:
     _register("sd15", "text_encoder", CLIPTextModel, "text_encoder")
     _register("sd15", "tokenizer", CLIPTokenizer, "tokenizer")
     _register("sd15", "scheduler", None, "scheduler")
+    _register("sd15", "controlnet", ControlNetModel, "")
 
 
 def _init_sdxl() -> None:
@@ -53,6 +54,13 @@ def _init_sdxl() -> None:
     _register("sdxl", "tokenizer", CLIPTokenizer, "tokenizer")
     _register("sdxl", "tokenizer_2", CLIPTokenizer, "tokenizer_2")
     _register("sdxl", "scheduler", EulerDiscreteScheduler, "scheduler")
+
+
+def _init_adapter() -> None:
+    from transformers import CLIPImageProcessor, CLIPVisionModelWithProjection
+
+    _register("adapter", "image_encoder", CLIPVisionModelWithProjection, "")
+    _register("adapter", "feature_extractor", CLIPImageProcessor, "")
 
 
 def _init_flux() -> None:
@@ -78,6 +86,7 @@ def _ensure_registry() -> None:
     if not _COMPONENT_REGISTRY:
         _init_sd15()
         _init_sdxl()
+        _init_adapter()
         _init_flux()
 
 
