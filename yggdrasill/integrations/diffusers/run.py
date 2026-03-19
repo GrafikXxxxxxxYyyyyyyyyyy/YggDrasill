@@ -1,7 +1,7 @@
 """Diffusion run wrapper: prepares diffusion-specific kwargs and wraps output in DiffusionOutput."""
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from yggdrasill.integrations.diffusers import contracts as C
 from yggdrasill.integrations.diffusers.output import DiffusionOutput
@@ -26,8 +26,10 @@ def run(
         seed: Random seed for latent init.
         device: Target device.
         wrap_output: If True, return DiffusionOutput; otherwise raw dict.
-        **kwargs: Passed through to graph.run(). Supports controlnet_image and
-            ip_adapter_image as dicts mapping node_id -> image for multi-adapter graphs.
+        **kwargs: Passed through to graph.run(). ``controlnet_image`` /
+            ``ip_adapter_image`` may be dicts ``{node_id: image}``; omit a node id (or pass
+            ``None``) to disable that ControlNet / IP-Adapter for this run while leaving
+            it on the graph.
 
     Returns:
         DiffusionOutput when wrap_output=True, else raw executor dict.
@@ -45,14 +47,16 @@ def run(
     controlnet_image = run_kw.pop("controlnet_image", None)
     if isinstance(controlnet_image, dict):
         for nid, img in controlnet_image.items():
-            merged[f"{nid}:{C.PORT_CONTROL_IMAGE}"] = img
+            if img is not None:
+                merged[f"{nid}:{C.PORT_CONTROL_IMAGE}"] = img
     elif controlnet_image is not None:
         _assign_to_single_exposed(merged, graph, C.PORT_CONTROL_IMAGE, controlnet_image)
 
     ip_adapter_image = run_kw.pop("ip_adapter_image", None)
     if isinstance(ip_adapter_image, dict):
         for nid, img in ip_adapter_image.items():
-            merged[f"{nid}:{C.PORT_IP_ADAPTER_IMAGE}"] = img
+            if img is not None:
+                merged[f"{nid}:{C.PORT_IP_ADAPTER_IMAGE}"] = img
     elif ip_adapter_image is not None:
         _assign_to_single_exposed(merged, graph, C.PORT_IP_ADAPTER_IMAGE, ip_adapter_image)
 
@@ -62,15 +66,21 @@ def run(
 
     ip_adapter_conditioning_scale = run_kw.pop("ip_adapter_conditioning_scale", None)
     if isinstance(ip_adapter_conditioning_scale, dict):
-        _inject_ip_adapter_scale(graph, ip_adapter_conditioning_scale)
+        _inject_ip_adapter_scale(graph, ip_adapter_conditioning_scale, merged)
     elif ip_adapter_conditioning_scale is not None:
-        _inject_ip_adapter_scale(graph, {"default": ip_adapter_conditioning_scale})
+        _inject_ip_adapter_scale(graph, {"default": float(ip_adapter_conditioning_scale)}, merged)
 
     _prepare_diffusion_run(graph, run_kw)
     raw = graph.run(merged, **run_kw)
 
     if wrap_output:
+        # Hypergraph.run is patched on diffusers import to return DiffusionOutput when
+        # image ports are present; avoid double-wrapping.
+        if isinstance(raw, DiffusionOutput):
+            return raw
         return DiffusionOutput.from_executor_output(raw)
+    if isinstance(raw, DiffusionOutput):
+        return raw.raw
     return raw
 
 
@@ -85,18 +95,41 @@ def _inject_node_config(graph: Any, node_values: Dict[str, Any], config_key: str
             node._config[config_key] = val
 
 
-def _inject_ip_adapter_scale(graph: Any, scale_map: Dict[str, float]) -> None:
-    """Apply ip_adapter_conditioning_scale to UNet (scale is per IP-Adapter, we use first value)."""
+def _inject_ip_adapter_scale(
+    graph: Any, scale_map: Dict[str, Any], merged_inputs: Dict[str, Any],
+) -> None:
+    """Apply per–IP-Adapter scales on the UNet; adapters with no image get strength 0."""
     if not scale_map:
         return
-    scale = next(iter(scale_map.values()))
     try:
         from yggdrasill.integrations.diffusers.adapters.ip_adapter_loader import (
             _set_ip_adapter_scale_on_unet,
         )
     except ImportError:
         return
-    for nid in getattr(graph, "node_ids", []) or getattr(graph, "_nodes", {}).keys():
+
+    node_ids = list(getattr(graph, "node_ids", []) or getattr(graph, "_nodes", {}).keys())
+    ip_nodes: List[str] = []
+    for nid in sorted(node_ids):
+        node = graph.get_node(nid) if hasattr(graph, "get_node") else None
+        if node is not None and getattr(node, "block_type", "") == "adapter/ip_adapter":
+            ip_nodes.append(nid)
+    default_scale = float(scale_map.get("default", 1.0))
+    if ip_nodes:
+        scales: List[float] = []
+        for nid in ip_nodes:
+            key = f"{nid}:{C.PORT_IP_ADAPTER_IMAGE}"
+            active = key in merged_inputs and merged_inputs.get(key) is not None
+            if active:
+                v = scale_map.get(nid, default_scale)
+                scales.append(float(v))
+            else:
+                scales.append(0.0)
+        scale_payload: Any = scales[0] if len(scales) == 1 else scales
+    else:
+        scale_payload = float(next(iter(scale_map.values())))
+
+    for nid in node_ids:
         node = graph.get_node(nid) if hasattr(graph, "get_node") else None
         if node is None:
             continue
@@ -104,7 +137,7 @@ def _inject_ip_adapter_scale(graph: Any, scale_map: Dict[str, float]) -> None:
         if bt.endswith("/unet") or bt.endswith("/transformer"):
             unet = getattr(node, "_unet", None)
             if unet is not None:
-                _set_ip_adapter_scale_on_unet(unet, scale)
+                _set_ip_adapter_scale_on_unet(unet, scale_payload)
             break
 
 
@@ -157,3 +190,34 @@ def _prepare_diffusion_run(graph: Any, run_kwargs: Dict[str, Any]) -> None:
     device = run_kwargs.get("device")
     if device is not None and hasattr(graph, "to") and callable(getattr(graph, "to")):
         graph.to(device)
+
+    # Match pipeline_controlnet: width/height must drive latent_init *and* ControlNet conditioning.
+    # ControlNet nodes from add_component often had no width/height keys, so graph.run(width=…)
+    # did not update them (structure._resolve_run_kwargs only patches keys already in node._config).
+    w, h = run_kwargs.get("width"), run_kwargs.get("height")
+    if w is not None or h is not None:
+        nodes = getattr(graph, "_nodes", None) or {}
+        for node in nodes.values():
+            bt = getattr(node, "block_type", "") or ""
+            if "latent_init" not in bt and "adapter/controlnet" not in bt:
+                continue
+            if not hasattr(node, "_config"):
+                node._config = {}
+            if w is not None:
+                node._config["width"] = int(w)
+            if h is not None:
+                node._config["height"] = int(h)
+
+    # CFG batch doubling must agree between UNet and ControlNet. If guidance_scale is only on the UNet
+    # (or vice versa), one path runs batch 1 and the other batch 2 → shape errors or garbage latents.
+    gs = run_kwargs.get("guidance_scale")
+    if gs is not None:
+        gsf = float(gs)
+        nodes = getattr(graph, "_nodes", None) or {}
+        for node in nodes.values():
+            bt = getattr(node, "block_type", "") or ""
+            if not (bt.endswith("/unet") or "adapter/controlnet" in bt):
+                continue
+            if not hasattr(node, "_config"):
+                node._config = {}
+            node._config["guidance_scale"] = gsf

@@ -67,8 +67,12 @@ def _load_ip_adapter_state_dict(
     return state_dict
 
 
-def _set_ip_adapter_scale_on_unet(unet: Any, scale: float) -> None:
-    """Set IP-Adapter scale on UNet attn processors (same logic as pipeline.set_ip_adapter_scale)."""
+def _set_ip_adapter_scale_on_unet(unet: Any, scale: Any) -> None:
+    """Set IP-Adapter scale(s) on UNet (aligned with diffusers ``IPAdapterMixin.set_ip_adapter_scale``).
+
+    *scale* may be a float (one strength for all loaded IP-Adapters) or a list of floats
+    (one per loaded adapter, e.g. ``[0.6, 0.0]`` when the second adapter has no image).
+    """
     try:
         from diffusers.loaders.unet_loader_utils import _maybe_expand_lora_scales
         from diffusers.models.attention_processor import (
@@ -79,16 +83,28 @@ def _set_ip_adapter_scale_on_unet(unet: Any, scale: float) -> None:
     except ImportError:
         return
 
-    scale_list = [scale]
-    scale_configs = _maybe_expand_lora_scales(unet, scale_list, default_scale=0.0)
+    if not isinstance(scale, list):
+        scale = [scale]
+    scale_configs = _maybe_expand_lora_scales(unet, scale, default_scale=0.0)
 
-    for attn_processor in getattr(unet, "attn_processors", {}).values():
-        if isinstance(
+    for attn_name, attn_processor in getattr(unet, "attn_processors", {}).items():
+        if not isinstance(
             attn_processor,
             (IPAdapterAttnProcessor, IPAdapterAttnProcessor2_0, IPAdapterXFormersAttnProcessor),
         ):
-            if len(scale_configs) == len(attn_processor.scale):
-                attn_processor.scale = scale_configs
+            continue
+        if len(scale_configs) != len(attn_processor.scale):
+            continue
+        sc = list(scale_configs)
+        if len(sc) == 1:
+            sc = sc * len(attn_processor.scale)
+        for i, scale_config in enumerate(sc):
+            if isinstance(scale_config, dict):
+                for k, s in scale_config.items():
+                    if attn_name.startswith(k):
+                        attn_processor.scale[i] = s
+            else:
+                attn_processor.scale[i] = scale_config
 
 
 def load_ip_adapter_into_unet(

@@ -30,6 +30,7 @@ class IPAdapterNode(AbstractInjector):
         super().__init__(node_id=node_id, block_id=block_id, config=cfg)
         self._image_encoder = image_encoder
         self._feature_extractor = feature_extractor
+        self._cached_zero_image_embeds: Any = None
 
     @property
     def block_type(self) -> str:
@@ -37,14 +38,38 @@ class IPAdapterNode(AbstractInjector):
 
     def declare_ports(self) -> List[Port]:
         return [
-            Port(C.PORT_IP_ADAPTER_IMAGE, PortDirection.IN, PortType.IMAGE),
+            Port(C.PORT_IP_ADAPTER_IMAGE, PortDirection.IN, PortType.IMAGE, optional=True),
             Port(C.PORT_IMAGE_EMBEDS, PortDirection.OUT, PortType.TENSOR),
         ]
+
+    def _inactive_image_embeds(self) -> Any:
+        """Zeros with the same shape as a real encoding so multi-IP-Adapter UNets stay aligned."""
+        import torch
+
+        if self._feature_extractor is not None and self._image_encoder is not None:
+            if self._cached_zero_image_embeds is None:
+                from PIL import Image
+
+                img = Image.new("RGB", (64, 64), (0, 0, 0))
+                pixel_values = self._feature_extractor(
+                    images=[img], return_tensors="pt"
+                ).pixel_values
+                dev = next(self._image_encoder.parameters()).device
+                dt = next(self._image_encoder.parameters()).dtype
+                pixel_values = pixel_values.to(device=dev, dtype=dt)
+                with torch.inference_mode():
+                    ref = self._image_encoder(pixel_values).image_embeds
+                self._cached_zero_image_embeds = torch.zeros_like(ref)
+            return self._cached_zero_image_embeds
+        dim = int(self._config.get("ip_adapter_embed_dim", 1024))
+        return torch.zeros(1, dim)
 
     def forward(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         import torch
 
-        ip_image = inputs[C.PORT_IP_ADAPTER_IMAGE]
+        ip_image = inputs.get(C.PORT_IP_ADAPTER_IMAGE)
+        if ip_image is None:
+            return {C.PORT_IMAGE_EMBEDS: self._inactive_image_embeds()}
 
         from yggdrasill.integrations.diffusers.common.image_utils import load_image as _load_image
         ip_image = _load_image(ip_image)
@@ -75,6 +100,7 @@ class IPAdapterNode(AbstractInjector):
         return {C.PORT_IMAGE_EMBEDS: image_embeds}
 
     def to(self, device: Any) -> "IPAdapterNode":
+        self._cached_zero_image_embeds = None
         if self._image_encoder is not None:
             self._image_encoder.to(device)
         return self

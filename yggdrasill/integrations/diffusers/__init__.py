@@ -53,18 +53,21 @@ def _wrap_hypergraph_run_for_diffusion():
             _assign_to_single_exposed,
             _inject_ip_adapter_scale,
             _inject_node_config,
+            _prepare_diffusion_run,
         )
         merged = dict(inputs or {})
         controlnet_image = kwargs.pop("controlnet_image", None)
         if isinstance(controlnet_image, dict):
             for nid, img in controlnet_image.items():
-                merged[f"{nid}:{PORT_CONTROL_IMAGE}"] = img
+                if img is not None:
+                    merged[f"{nid}:{PORT_CONTROL_IMAGE}"] = img
         elif controlnet_image is not None:
             _assign_to_single_exposed(merged, self, PORT_CONTROL_IMAGE, controlnet_image)
         ip_adapter_image = kwargs.pop("ip_adapter_image", None)
         if isinstance(ip_adapter_image, dict):
             for nid, img in ip_adapter_image.items():
-                merged[f"{nid}:{PORT_IP_ADAPTER_IMAGE}"] = img
+                if img is not None:
+                    merged[f"{nid}:{PORT_IP_ADAPTER_IMAGE}"] = img
         elif ip_adapter_image is not None:
             _assign_to_single_exposed(merged, self, PORT_IP_ADAPTER_IMAGE, ip_adapter_image)
         controlnet_conditioning_scale = kwargs.pop("controlnet_conditioning_scale", None)
@@ -72,9 +75,12 @@ def _wrap_hypergraph_run_for_diffusion():
             _inject_node_config(self, controlnet_conditioning_scale, "conditioning_scale")
         ip_adapter_conditioning_scale = kwargs.pop("ip_adapter_conditioning_scale", None)
         if isinstance(ip_adapter_conditioning_scale, dict):
-            _inject_ip_adapter_scale(self, ip_adapter_conditioning_scale)
+            _inject_ip_adapter_scale(self, ip_adapter_conditioning_scale, merged)
         elif ip_adapter_conditioning_scale is not None:
-            _inject_ip_adapter_scale(self, {"default": ip_adapter_conditioning_scale})
+            _inject_ip_adapter_scale(self, {"default": float(ip_adapter_conditioning_scale)}, merged)
+        # Same as run_diffusion(): sync device, width/height onto latent_init + ControlNet
+        # (structure._resolve_run_kwargs only patches keys already present in node._config).
+        _prepare_diffusion_run(self, kwargs)
         result = _original_run(self, merged, **kwargs)
         if isinstance(result, dict) and (
             PORT_OUTPUT_IMAGE in result or PORT_DECODED_IMAGE in result

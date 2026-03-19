@@ -11,12 +11,21 @@ def merge_residuals(value: Any) -> Any:
     residual tuples (one per adapter).  This helper element-wise sums
     them into a single residual tuple suitable for the UNet/Transformer.
     If the value is not a list (single adapter), it is returned as-is.
+
+    A plain ``list`` of tensors with different shapes is treated as **one**
+    adapter's down-block stack (as returned by some Diffusers ControlNet paths),
+    not as multiple adapters — it is converted to a tuple without summing.
     """
     if not isinstance(value, list):
         return value
     if len(value) == 1:
         return value[0]
     import torch
+
+    if all(isinstance(x, torch.Tensor) for x in value):
+        if len(value) >= 2 and value[0].shape != value[1].shape:
+            return tuple(value)
+
     merged = value[0]
     if isinstance(merged, (list, tuple)):
         merged = list(merged)

@@ -109,6 +109,10 @@ class SD15VAEDecodeNode(AbstractConverter):
 
         scaling_factor = getattr(self._vae.config, "scaling_factor", 0.18215)
         latents = latents / scaling_factor
+        # Input dtype must match VAE weights (e.g. fp16 model + fp32 latents -> conv dtype error).
+        p = next(self._vae.parameters(), None)
+        if p is not None:
+            latents = latents.to(device=p.device, dtype=p.dtype)
 
         with torch.no_grad():
             image = self._vae.decode(latents, return_dict=False)[0]

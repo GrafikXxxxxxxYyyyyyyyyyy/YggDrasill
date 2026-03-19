@@ -8,6 +8,37 @@ from yggdrasill.foundation.port import Port, PortDirection, PortType
 from yggdrasill.task_nodes.abstract import AbstractHelper
 
 
+def _zeros_like_prompt_tensor(pooled: Any) -> Any:
+    """Match ``torch.zeros_like(pooled)`` but support tensor-like test stubs (e.g. FakeTensor)."""
+    import torch
+
+    if isinstance(pooled, torch.Tensor):
+        return torch.zeros_like(pooled)
+    shape = tuple(pooled.shape) if hasattr(pooled, "shape") else (1,)
+    device = getattr(pooled, "device", "cpu")
+    if not isinstance(device, torch.device):
+        device = torch.device(device) if isinstance(device, str) else torch.device("cpu")
+    dtype = getattr(pooled, "dtype", torch.float32)
+    if isinstance(dtype, str):
+        dtype = getattr(torch, dtype, torch.float32)
+    return torch.zeros(shape, device=device, dtype=dtype)
+
+
+def _device_dtype_like(ref: Any) -> Tuple[Any, Any]:
+    """``(device, dtype)`` suitable for ``Tensor.to(...)``, including tensor-like test stubs."""
+    import torch
+
+    if isinstance(ref, torch.Tensor):
+        return ref.device, ref.dtype
+    dev = getattr(ref, "device", "cpu")
+    if not isinstance(dev, torch.device):
+        dev = torch.device(dev) if isinstance(dev, str) else torch.device("cpu")
+    dtype = getattr(ref, "dtype", torch.float32)
+    if isinstance(dtype, str):
+        dtype = getattr(torch, dtype, torch.float32)
+    return dev, dtype
+
+
 class SDXLAddedConditioningNode(AbstractHelper):
     """Builds add_text_embeds and add_time_ids for SDXL UNet.
 
@@ -61,7 +92,7 @@ class SDXLAddedConditioningNode(AbstractHelper):
         pooled = inputs[C.PORT_POOLED_PROMPT_EMBEDS]
         neg_pooled = inputs.get(C.PORT_NEGATIVE_POOLED_PROMPT_EMBEDS)
         if neg_pooled is None:
-            neg_pooled = torch.zeros_like(pooled)
+            neg_pooled = _zeros_like_prompt_tensor(pooled)
 
         requires_aesthetics = self._config.get("requires_aesthetics_score", False)
         original_size = tuple(self._config.get("original_size", (1024, 1024)))
@@ -81,8 +112,9 @@ class SDXLAddedConditioningNode(AbstractHelper):
             neg_time_ids = self._build_time_ids(neg_original, neg_crops, neg_target)
 
         batch_size = pooled.shape[0] if pooled.ndim > 1 else 1
-        time_ids = time_ids.unsqueeze(0).expand(batch_size, -1).to(pooled.device, dtype=pooled.dtype)
-        neg_time_ids = neg_time_ids.unsqueeze(0).expand(batch_size, -1).to(pooled.device, dtype=pooled.dtype)
+        cast_dev, cast_dtype = _device_dtype_like(pooled)
+        time_ids = time_ids.unsqueeze(0).expand(batch_size, -1).to(device=cast_dev, dtype=cast_dtype)
+        neg_time_ids = neg_time_ids.unsqueeze(0).expand(batch_size, -1).to(device=cast_dev, dtype=cast_dtype)
 
         return {
             C.PORT_ADD_TEXT_EMBEDS: pooled,

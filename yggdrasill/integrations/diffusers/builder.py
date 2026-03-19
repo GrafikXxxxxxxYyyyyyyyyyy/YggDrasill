@@ -218,6 +218,11 @@ class DiffusionGraphBuilder:
             cfg.setdefault("subfolder", "models")
             cfg.setdefault("weight_name", "ip-adapter_sd15.bin")
         cfg.update(kwargs)
+        if pretrained is not None:
+            cfg.setdefault("pretrained", str(pretrained))
+        if "controlnet" in component_type:
+            cfg.setdefault("width", 512)
+            cfg.setdefault("height", 512)
 
         # Resolve torch_dtype: use family default when loading pretrained
         dtype_to_load = torch_dtype

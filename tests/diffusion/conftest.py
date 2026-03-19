@@ -60,6 +60,12 @@ class FakeTensor:
     def clamp(self, *args, **kwargs):
         return self
 
+    def item(self):
+        return float(self._value)
+
+    def flatten(self):
+        return [float(self._value)]
+
     def cpu(self):
         return self
 
@@ -166,6 +172,14 @@ class FakeUNet:
             in_channels=channels,
             time_cond_proj_dim=None,
         )
+        self._param = None
+        if torch_available:
+            import torch
+            self._param = torch.nn.Parameter(torch.zeros(1, dtype=torch.float32))
+
+    def parameters(self):
+        if self._param is not None:
+            yield self._param
 
     def __call__(self, latents, timestep, **kwargs):
         return SimpleNamespace(sample=FakeTensor(latents.shape))
@@ -209,6 +223,7 @@ class FakeScheduler:
         self.timesteps = FakeTensor((50,))
         self.init_noise_sigma = 1.0
         self.order = 1
+        self.counter = 0
 
     def set_timesteps(self, num_steps, device=None, **kwargs):
         self.timesteps = FakeTensor((num_steps,))
@@ -217,6 +232,7 @@ class FakeScheduler:
         return latents
 
     def step(self, noise_pred, timestep, latents, **kwargs):
+        self.counter += 1
         return SimpleNamespace(prev_sample=FakeTensor(latents.shape))
 
 

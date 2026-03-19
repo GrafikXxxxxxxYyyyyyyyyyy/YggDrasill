@@ -55,6 +55,11 @@ class SD15SchedulerSetupNode(AbstractOuterModule):
         self._scheduler.set_timesteps(num_steps, device=device, **kwargs)
 
         timesteps = self._scheduler.timesteps
+        # Mirrors pipeline ``for i, t in enumerate(timesteps)``: sched_step advances an explicit index on the
+        # shared scheduler so next_timestep is ts[i+1] even when timesteps[i]==timesteps[i+1] (PNDM) or when
+        # the scheduler has no ``counter`` / ``step_index`` (DDIM, etc.).
+        setattr(self._scheduler, "_yggdrasill_step_idx", 0)
+
         return {
             C.PORT_TIMESTEPS: timesteps,
             C.PORT_SCHEDULER_STATE: {
@@ -135,21 +140,22 @@ class SD15SchedulerStepNode(AbstractInnerModule):
         }
 
     def _get_next_timestep(self, timestep: Any) -> Any:
-        """Return the next timestep in the scheduler sequence, or current if last.
+        """Return ``timesteps[i+1]`` after the i-th ``scheduler.step`` (same as pipeline ``enumerate``).
 
-        PNDM with skip_prk_steps produces duplicates (e.g. [981, 961, 961, 941, ...]).
-        Use scheduler.counter (incremented by step()) as the index - matches diffusers
-        ``for i, t in enumerate(timesteps)`` semantics.
+        Diffusers pipelines never rely on ``scheduler.counter`` alone: they use loop index ``i``. PNDM can
+        repeat the same *value* at consecutive indices; value-based lookup would be wrong. Some schedulers
+        (e.g. DDIM) expose neither ``counter`` nor ``step_index``. We keep ``_yggdrasill_step_idx`` on the
+        shared scheduler object (reset in ``scheduler_setup``) so ``next_timestep`` always advances.
         """
         if not hasattr(self._scheduler, "timesteps") or self._scheduler.timesteps is None:
             return timestep
         ts = self._scheduler.timesteps
         if len(ts) == 0:
             return timestep
-        # After step(), counter is 1-based (number of steps completed)
-        idx = getattr(self._scheduler, "counter", 0)
-        if idx < len(ts):
-            return ts[idx]
+        i = int(getattr(self._scheduler, "_yggdrasill_step_idx", 0))
+        setattr(self._scheduler, "_yggdrasill_step_idx", i + 1)
+        if i + 1 < len(ts):
+            return ts[i + 1]
         return timestep
 
     def _clamp_timestep(self, t: Any) -> Any:

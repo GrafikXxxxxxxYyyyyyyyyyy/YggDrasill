@@ -43,7 +43,7 @@ class FluxControlNetNode(AbstractInnerModule):
             Port(C.PORT_IMG_IDS, PortDirection.IN, PortType.TENSOR),
             Port(C.PORT_TXT_IDS, PortDirection.IN, PortType.TENSOR),
             Port(C.PORT_GUIDANCE, PortDirection.IN, PortType.TENSOR, optional=True),
-            Port(C.PORT_CONTROL_IMAGE, PortDirection.IN, PortType.IMAGE),
+            Port(C.PORT_CONTROL_IMAGE, PortDirection.IN, PortType.IMAGE, optional=True),
             Port(C.PORT_CONTROLNET_BLOCK_SAMPLES, PortDirection.OUT, PortType.ANY),
             Port(C.PORT_CONTROLNET_SINGLE_BLOCK_SAMPLES, PortDirection.OUT, PortType.ANY),
         ]
@@ -55,7 +55,9 @@ class FluxControlNetNode(AbstractInnerModule):
         pooled_projections = inputs[C.PORT_POOLED_PROJECTIONS]
         img_ids = inputs[C.PORT_IMG_IDS]
         txt_ids = inputs[C.PORT_TXT_IDS]
-        control_image = inputs[C.PORT_CONTROL_IMAGE]
+        control_image = inputs.get(C.PORT_CONTROL_IMAGE)
+        if control_image is None:
+            return {}
 
         conditioning_scale = self._config.get("controlnet_conditioning_scale", 1.0)
 

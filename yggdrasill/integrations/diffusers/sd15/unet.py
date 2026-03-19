@@ -62,7 +62,21 @@ class SD15UNetNode(AbstractBackbone):
         device = next(self._unet.parameters()).device
         latents = latents.to(device=device, dtype=dtype)
         if isinstance(timestep, torch.Tensor):
-            timestep = timestep.to(device)
+            timestep = timestep.to(device=device)
+            if timestep.ndim > 0:
+                timestep = timestep.reshape(-1)[0]
+            # Match diffusers timesteps tensor (usually int64); float timestep breaks time embed.
+            if timestep.dtype in (torch.float16, torch.bfloat16, torch.float32, torch.float64):
+                timestep = timestep.long()
+        else:
+            if hasattr(timestep, "item") and callable(getattr(timestep, "item")):
+                try:
+                    t_val = int(timestep.item())
+                except (TypeError, ValueError):
+                    t_val = int(timestep)
+            else:
+                t_val = int(timestep)
+            timestep = torch.tensor(t_val, device=device, dtype=torch.long)
         neg_embeds = inputs.get(C.PORT_NEGATIVE_PROMPT_EMBEDS)
         sched_state = inputs.get(C.PORT_SCHEDULER_STATE)
 
@@ -87,35 +101,61 @@ class SD15UNetNode(AbstractBackbone):
         kwargs: Dict[str, Any] = {
             "encoder_hidden_states": encoder_states,
         }
+        b_cond = latent_input.shape[0] // 2 if do_cfg else latent_input.shape[0]
         image_embeds = inputs.get(C.PORT_IMAGE_EMBEDS)
+        from yggdrasill.integrations.diffusers.common.ip_adapter_embeds import (
+            format_ip_adapter_image_embeds,
+            raw_zero_ip_adapter_image_embeds_for_unet,
+            unet_requires_image_embeds_in_added_cond,
+        )
+
         if image_embeds is not None:
-            if isinstance(image_embeds, list):
-                image_embeds = torch.cat(image_embeds, dim=0)
-            image_embeds = image_embeds.to(device=device, dtype=dtype)
-            kwargs["added_cond_kwargs"] = {"image_embeds": image_embeds}
+            kwargs["added_cond_kwargs"] = {
+                "image_embeds": format_ip_adapter_image_embeds(
+                    image_embeds,
+                    device=device,
+                    dtype=dtype,
+                    do_classifier_free_guidance=do_cfg,
+                )
+            }
+        elif unet_requires_image_embeds_in_added_cond(self._unet):
+            # Diffusers runs ``\"image_embeds\" not in added_cond_kwargs`` without a None-guard;
+            # default ``added_cond_kwargs=None`` then raises TypeError.
+            kwargs["added_cond_kwargs"] = {
+                "image_embeds": format_ip_adapter_image_embeds(
+                    raw_zero_ip_adapter_image_embeds_for_unet(
+                        self._unet, b_cond, device=device, dtype=dtype
+                    ),
+                    device=device,
+                    dtype=dtype,
+                    do_classifier_free_guidance=do_cfg,
+                )
+            }
+        def _residuals_to_unet_dtype(x: Any) -> Any:
+            if x is None:
+                return None
+            if isinstance(x, (list, tuple)):
+                return type(x)(_residuals_to_unet_dtype(t) for t in x)
+            if hasattr(x, "to"):
+                return x.to(device=device, dtype=dtype)
+            return x
+
         down_residuals = inputs.get(C.PORT_DOWN_BLOCK_RESIDUALS)
         mid_residual = inputs.get(C.PORT_MID_BLOCK_RESIDUAL)
         if down_residuals is not None:
-            down_residuals = merge_residuals(down_residuals)
+            down_residuals = _residuals_to_unet_dtype(merge_residuals(down_residuals))
             kwargs["down_block_additional_residuals"] = down_residuals
         if mid_residual is not None:
-            mid_residual = merge_residuals(mid_residual)
+            mid_residual = _residuals_to_unet_dtype(merge_residuals(mid_residual))
             kwargs["mid_block_additional_residual"] = mid_residual
 
-        # Use autocast for half-precision models so internal time_embedding stays in correct dtype
-        if dtype in (torch.float16, torch.bfloat16) and device.type == "cuda":
-            with torch.autocast("cuda", dtype=dtype):
-                noise_pred = self._unet(
-                    latent_input,
-                    timestep,
-                    **kwargs,
-                ).sample
-        else:
-            noise_pred = self._unet(
-                latent_input,
-                timestep,
-                **kwargs,
-            ).sample
+        # Match diffusers pipelines: no autocast here. fp16/bf16 weights already run in
+        # matching dtype; autocast with ControlNet residuals can destabilize the denoiser.
+        noise_pred = self._unet(
+            latent_input,
+            timestep,
+            **kwargs,
+        ).sample
 
         if do_cfg:
             pred_uncond, pred_cond = noise_pred.chunk(2)

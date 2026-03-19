@@ -50,7 +50,18 @@ class TestControlNetNode:
         })
         assert C.PORT_DOWN_BLOCK_RESIDUALS in out
         assert C.PORT_MID_BLOCK_RESIDUAL in out
-        assert isinstance(out[C.PORT_DOWN_BLOCK_RESIDUALS], list)
+        assert isinstance(out[C.PORT_DOWN_BLOCK_RESIDUALS], tuple)
+
+    @requires_torch
+    def test_forward_skips_without_control_image(self):
+        from yggdrasill.integrations.diffusers.adapters.controlnet import ControlNetNode
+        node = ControlNetNode("cn", controlnet=FakeControlNet())
+        out = node.forward({
+            C.PORT_LATENTS: FakeTensor((1, 4, 64, 64)),
+            C.PORT_TIMESTEP: FakeTensor((1,)),
+            C.PORT_PROMPT_EMBEDS: FakeTensor((1, 77, 768)),
+        })
+        assert out == {}
 
 
 class TestIPAdapterNode:
@@ -88,6 +99,17 @@ class TestIPAdapterNode:
         out = node.forward({C.PORT_IP_ADAPTER_IMAGE: embeds})
         assert C.PORT_IMAGE_EMBEDS in out
         assert out[C.PORT_IMAGE_EMBEDS] is embeds
+
+    @requires_torch
+    def test_forward_inactive_returns_zero_embeds(self):
+        import torch
+        from yggdrasill.integrations.diffusers.adapters.ip_adapter import IPAdapterNode
+        node = IPAdapterNode("ip")
+        out = node.forward({})
+        assert C.PORT_IMAGE_EMBEDS in out
+        z = out[C.PORT_IMAGE_EMBEDS]
+        assert isinstance(z, torch.Tensor)
+        assert z.shape == (1, 1024)
 
 
 class TestIPAdapterLoader:

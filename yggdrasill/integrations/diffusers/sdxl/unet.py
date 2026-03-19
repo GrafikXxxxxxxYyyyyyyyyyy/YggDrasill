@@ -78,12 +78,32 @@ class SDXLUNetNode(AbstractBackbone):
             "time_ids": time_ids_cat,
         }
 
+        dtype = next(self._unet.parameters()).dtype
+        device = next(self._unet.parameters()).device
+        b_cond = latent_input.shape[0] // 2 if do_cfg else latent_input.shape[0]
         image_embeds = inputs.get(C.PORT_IMAGE_EMBEDS)
+        from yggdrasill.integrations.diffusers.common.ip_adapter_embeds import (
+            format_ip_adapter_image_embeds,
+            raw_zero_ip_adapter_image_embeds_for_unet,
+            unet_requires_image_embeds_in_added_cond,
+        )
+
         if image_embeds is not None:
-            if isinstance(image_embeds, list):
-                import torch
-                image_embeds = torch.cat(image_embeds, dim=0)
-            added_cond_kwargs["image_embeds"] = image_embeds
+            added_cond_kwargs["image_embeds"] = format_ip_adapter_image_embeds(
+                image_embeds,
+                device=device,
+                dtype=dtype,
+                do_classifier_free_guidance=do_cfg,
+            )
+        elif unet_requires_image_embeds_in_added_cond(self._unet):
+            added_cond_kwargs["image_embeds"] = format_ip_adapter_image_embeds(
+                raw_zero_ip_adapter_image_embeds_for_unet(
+                    self._unet, b_cond, device=device, dtype=dtype
+                ),
+                device=device,
+                dtype=dtype,
+                do_classifier_free_guidance=do_cfg,
+            )
 
         unet_kwargs: Dict[str, Any] = {
             "encoder_hidden_states": encoder_states,

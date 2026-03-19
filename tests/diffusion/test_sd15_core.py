@@ -80,13 +80,15 @@ class TestSD15UNet:
 
     @requires_torch
     def test_forward_with_cfg(self):
+        import torch
         from yggdrasill.integrations.diffusers.sd15.unet import SD15UNetNode
         node = SD15UNetNode("unet", unet=FakeUNet(), config={"guidance_scale": 7.5})
+        # CFG path uses torch.cat on latents/embeds; FakeTensor is not a torch.Tensor.
         out = node.forward({
-            C.PORT_LATENTS: FakeTensor((1, 4, 64, 64)),
-            C.PORT_TIMESTEP: FakeTensor((1,)),
-            C.PORT_PROMPT_EMBEDS: FakeTensor((1, 77, 768)),
-            C.PORT_NEGATIVE_PROMPT_EMBEDS: FakeTensor((1, 77, 768)),
+            C.PORT_LATENTS: torch.zeros(1, 4, 64, 64),
+            C.PORT_TIMESTEP: torch.tensor(999, dtype=torch.long),
+            C.PORT_PROMPT_EMBEDS: torch.zeros(1, 77, 768),
+            C.PORT_NEGATIVE_PROMPT_EMBEDS: torch.zeros(1, 77, 768),
         })
         assert C.PORT_NOISE_PRED in out
 

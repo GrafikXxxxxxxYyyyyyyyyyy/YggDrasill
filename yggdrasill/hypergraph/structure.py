@@ -765,6 +765,15 @@ class Hypergraph:
         num_inference_steps = kwargs.pop("num_inference_steps", None)
         if num_inference_steps is not None:
             executor_kw["num_loop_steps"] = num_inference_steps
+            # set_timesteps() reads scheduler_setup._config — it is not an exposed input,
+            # so without this sync the schedule can stay at the template default (e.g. 50)
+            # while the executor uses a different num_loop_steps from run().
+            for node in self._nodes.values():
+                bt = getattr(node, "block_type", "") or ""
+                if "scheduler_setup" in bt:
+                    if not hasattr(node, "_config"):
+                        node._config = {}
+                    node._config["num_inference_steps"] = num_inference_steps
         if "seed" in kwargs:
             executor_kw["seed"] = kwargs.pop("seed")
         if "max_steps" in kwargs:
@@ -782,13 +791,14 @@ class Hypergraph:
             if key in exposed_names:
                 resolved[key] = val
             else:
+                # Apply to every node that already defines this key (e.g. guidance_scale on
+                # both UNet and ControlNet). A single break would leave adapters out of sync.
                 for nid, node in self._nodes.items():
                     node_cfg = getattr(node, "_config", None) or {}
                     if key in node_cfg:
                         if not hasattr(node, "_config"):
                             node._config = {}
                         node._config[key] = val
-                        break
 
         return resolved, executor_kw
 

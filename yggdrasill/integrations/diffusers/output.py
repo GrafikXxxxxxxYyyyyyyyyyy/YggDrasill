@@ -36,6 +36,8 @@ class DiffusionOutput:
         nsfw_key: str = "nsfw_content_detected",
     ) -> "DiffusionOutput":
         """Build a ``DiffusionOutput`` from the raw dict returned by the executor."""
+        if isinstance(output, cls):
+            return output
         from yggdrasill.integrations.diffusers.contracts import (
             PORT_DECODED_IMAGE,
             PORT_OUTPUT_IMAGE,
