@@ -94,9 +94,17 @@ class EdgeBuffers:
             nid = entry.get("node_id") or entry.get("graph_id")
             pname = entry["port_name"]
             name = entry.get("name")
-            key = name if name is not None else f"{nid}:{pname}"
-            if key in inputs:
-                buf.write(nid, pname, inputs[key])
-            elif (nid, pname) in inputs:
+            candidates: List[str] = []
+            if name is not None:
+                candidates.append(name)
+            candidates.append(pname)
+            candidates.append(f"{nid}:{pname}")
+            written = False
+            for k in candidates:
+                if k in inputs:
+                    buf.write(nid, pname, inputs[k])
+                    written = True
+                    break
+            if not written and (nid, pname) in inputs:
                 buf.write(nid, pname, inputs[(nid, pname)])
         return buf

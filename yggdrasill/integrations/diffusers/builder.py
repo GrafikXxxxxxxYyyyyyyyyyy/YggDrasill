@@ -22,6 +22,98 @@ from yggdrasill.integrations.diffusers.components import (
 from yggdrasill.integrations.diffusers.family_registry import get_family_spec
 
 
+_FALLBACK_SCHEDULER_REPO: Dict[str, str] = {
+    "sd15": "runwayml/stable-diffusion-v1-5",
+    "sdxl": "stabilityai/stable-diffusion-xl-base-1.0",
+    "flux": "black-forest-labs/FLUX.1-dev",
+}
+
+
+def _instantiate_scheduler_by_type(
+    scheduler_type: str,
+    template: Any,
+    family: str,
+) -> Any:
+    """Build a Diffusers scheduler from *scheduler_type*, optionally matching *template* config."""
+    key = scheduler_type.strip().lower().replace("-", "_")
+    import diffusers.schedulers as sched_mod
+
+    ldm_classes: Dict[str, Any] = {
+        "euler": sched_mod.EulerDiscreteScheduler,
+        "euler_ancestral": sched_mod.EulerAncestralDiscreteScheduler,
+        "ddim": sched_mod.DDIMScheduler,
+        "ddpm": sched_mod.DDPMScheduler,
+        "pndm": sched_mod.PNDMScheduler,
+        "lms": sched_mod.LMSDiscreteScheduler,
+        "dpm": sched_mod.DPMSolverMultistepScheduler,
+        "dpm_solver": sched_mod.DPMSolverMultistepScheduler,
+        "dpmsolver": sched_mod.DPMSolverMultistepScheduler,
+        "dpmsolver_multistep": sched_mod.DPMSolverMultistepScheduler,
+        "heun": sched_mod.HeunDiscreteScheduler,
+        "unipc": sched_mod.UniPCMultistepScheduler,
+    }
+    flux_classes: Dict[str, Any] = {
+        "flow_match": sched_mod.FlowMatchEulerDiscreteScheduler,
+        "flux": sched_mod.FlowMatchEulerDiscreteScheduler,
+        "euler": sched_mod.FlowMatchEulerDiscreteScheduler,
+    }
+    mapping = flux_classes if family == "flux" else ldm_classes
+    cls = mapping.get(key)
+    if cls is None:
+        raise ValueError(
+            f"Unknown scheduler_type '{scheduler_type}' for family '{family}'. "
+            f"Try one of: {', '.join(sorted(mapping.keys()))}"
+        )
+
+    if template is not None and hasattr(template, "config"):
+        try:
+            return cls.from_config(template.config)
+        except Exception:
+            pass
+
+    repo = _FALLBACK_SCHEDULER_REPO.get(family, _FALLBACK_SCHEDULER_REPO["sd15"])
+    return cls.from_pretrained(repo, subfolder="scheduler")
+
+
+def _infer_hypergraph_device(graph: Any) -> Any:
+    """Resolve target device for a diffusion graph.
+
+    Order: ``metadata['device']`` (set by :meth:`Hypergraph.to`), then any
+    non-cpu ``node._config['device']``, then ``cpu`` from config, then first
+    module parameter device among common diffusion attributes.
+    """
+    meta = getattr(graph, "metadata", None) or {}
+    d = meta.get("device")
+    if d is not None:
+        return d
+    nodes = getattr(graph, "_nodes", None) or {}
+    last_cpu: Any = None
+    for node in nodes.values():
+        cfg = getattr(node, "_config", None) or {}
+        cd = cfg.get("device")
+        if cd is None:
+            continue
+        if str(cd) != "cpu":
+            return cd
+        last_cpu = cd
+    if last_cpu is not None:
+        return last_cpu
+    for node in nodes.values():
+        for attr in (
+            "_unet", "_vae", "_text_encoder", "_transformer", "_controlnet",
+        ):
+            mod = getattr(node, attr, None)
+            if mod is None:
+                continue
+            try:
+                p = next(mod.parameters(), None)
+                if p is not None:
+                    return p.device
+            except Exception:
+                continue
+    return None
+
+
 def _load_ip_adapter_weights_into_graph(
     graph: Any,
     *,
@@ -75,6 +167,12 @@ class DiffusionGraphBuilder:
         self._graph = graph or Hypergraph(graph_id=graph_id)
         self._added_groups: Dict[str, str] = {}  # group -> node_id
         self._completed: bool = False
+
+    def _apply_graph_device(self) -> None:
+        """Move all nodes (and schedulers) to the graph's inferred device."""
+        dev = _infer_hypergraph_device(self._graph)
+        if dev is not None and hasattr(self._graph, "to"):
+            self._graph.to(dev)
 
     @property
     def graph(self) -> Hypergraph:
@@ -138,7 +236,26 @@ class DiffusionGraphBuilder:
             self._completed = True
             return
 
-        # Add latent_init and complete the pipeline (matches from_template defaults)
+        # SD1.5 manual stack: one graph for text2img / img2img / inpaint (optional image, mask).
+        if family == "sd15":
+            from yggdrasill.integrations.diffusers.sd15.universal import (
+                try_complete_sd15_universal_diffusion,
+            )
+
+            if try_complete_sd15_universal_diffusion(self._graph):
+                for nid in self._graph.node_ids:
+                    node = self._graph.get_node(nid)
+                    bt = getattr(node, "block_type", "") or ""
+                    if "scheduler_setup" in bt and hasattr(node, "_config"):
+                        node._config = node._config or {}
+                        node._config.setdefault("device", "cuda")
+                        node._config.setdefault("num_inference_steps", 50)
+                self.expose_default_io()
+                self._graph.metadata.setdefault("num_loop_steps", 50)
+                self._completed = True
+                return
+
+        # Fallback: text2img-only completion (no image/mask path).
         latent_type = f"{family}.latent_init" if family else "sd15.latent_init"
         cfg: Dict[str, Any] = {
             "height": 512,
@@ -271,6 +388,7 @@ class DiffusionGraphBuilder:
                 existing_node = self._graph._nodes.get(existing_id)
                 if existing_node is not None and hasattr(existing_node, "update_from_components"):
                     existing_node.update_from_components(kwargs)
+                    self._apply_graph_device()
                     return self
 
             if len(spec.block_types) == 1:
@@ -309,6 +427,11 @@ class DiffusionGraphBuilder:
                 ip_adapter_scale=cfg.get(C.CFG_IP_ADAPTER_SCALE),
             )
 
+        # After first .graph / .run, _ensure_text2img_complete() sets _completed and will
+        # not call expose_default_io again; new ControlNet / IP-Adapter nodes must expose
+        # control_image / ip_adapter_image or run-time dicts never reach EdgeBuffers.
+        self.expose_default_io()
+        self._apply_graph_device()
         return self
 
     def _find_unet_node(self) -> Optional[Any]:
@@ -325,6 +448,8 @@ class DiffusionGraphBuilder:
         from yggdrasill.hypergraph.auto_connect import apply_port_name_auto_connect
         self._graph.add_node(node_id, node)
         apply_port_name_auto_connect(self._graph, node_id, node)
+        self.expose_default_io()
+        self._apply_graph_device()
         return self
 
     def add_edge(self, source: str, source_port: str, target: str, target_port: str) -> "DiffusionGraphBuilder":
@@ -367,8 +492,23 @@ class DiffusionGraphBuilder:
 
         return self
 
+    def _resolve_scheduler_base_id(self) -> Optional[str]:
+        """Return base id (e.g. ``sched``) for ``sched_setup`` / ``sched_step`` pair."""
+        for nid in sorted(self._graph.node_ids):
+            node = self._graph.get_node(nid)
+            if node is None:
+                continue
+            bt = getattr(node, "block_type", "") or ""
+            if "scheduler_setup" in bt and nid.endswith("_setup"):
+                return nid[: -len("_setup")]
+        return None
+
     def _resolve_role_to_node_id(self, role_or_id: str) -> str:
         """Resolve canonical role name (e.g. 'Backbone') to actual graph node id."""
+        if role_or_id in ("Scheduler", "scheduler"):
+            base = self._resolve_scheduler_base_id()
+            if base is not None:
+                return base
         role_map = {
             "Backbone": ("unet", "transformer"),
             "Conjector": ("prompt_encoder",),
@@ -394,6 +534,7 @@ class DiffusionGraphBuilder:
         variant: str = "",
         torch_dtype: Optional[Any] = None,
         use_safetensors: Optional[bool] = None,
+        **kwargs: Any,
     ) -> "DiffusionGraphBuilder":
         """Replace an existing node with a new component from *component_type*.
 
@@ -402,10 +543,11 @@ class DiffusionGraphBuilder:
         id (e.g. "sched") to replace both setup and step nodes.
 
         Supports canonical role names: ``Backbone`` → unet/transformer node,
-        ``Conjector`` → prompt_encoder node.
+        ``Conjector`` → prompt_encoder node, ``Scheduler`` → scheduler pair
+        (``sched_setup`` / ``sched_step``).
 
         Args:
-            node_id: Graph node id to replace (or role name: Backbone, Conjector).
+            node_id: Graph node id to replace (or role name: Backbone, Conjector, Scheduler).
             component_type: E.g. "sd15.unet", "sd15.scheduler".
         pretrained: HF repo id or local path for loading.
         config: Node config overrides.
@@ -414,10 +556,16 @@ class DiffusionGraphBuilder:
         torch_dtype: Target dtype for loaded models.
         use_safetensors: If False, load .bin instead of .safetensors (needed for
             repos like Lykon/DreamShaper that have only diffusion_pytorch_model.bin).
+        **kwargs: Merged into node config; use ``scheduler_type="euler"`` (etc.) to swap
+            the Diffusers scheduler class without reloading the whole repo (SD/SDXL/FLUX).
 
         Returns:
             self for chaining.
         """
+        cfg = dict(config or {})
+        cfg.update(kwargs)
+        scheduler_type = cfg.pop("scheduler_type", None)
+
         node_id = self._resolve_role_to_node_id(node_id)
         if not is_component_type(component_type):
             raise ValueError(
@@ -427,9 +575,6 @@ class DiffusionGraphBuilder:
         spec = resolve_component_type(component_type)
         family = component_type.split(".", 1)[0]
         load_family = getattr(spec, "load_family", None) or family
-        family_spec = get_family_spec(family)
-
-        cfg = dict(config or {})
 
         components_loaded: Dict[str, Any] = {}
         if pretrained and spec.load_keys:
@@ -449,6 +594,25 @@ class DiffusionGraphBuilder:
                     "Check repo structure (unet/, diffusion_pytorch_model.safetensors or .fp16.safetensors or .bin)."
                 )
 
+        if scheduler_type and spec.load_keys and "scheduler" in spec.load_keys:
+            template = components_loaded.get("scheduler")
+            if template is None:
+                setup_nid = f"{node_id}_setup"
+                old_setup = self._graph.get_node(setup_nid)
+                template = getattr(old_setup, "_scheduler", None) if old_setup else None
+            components_loaded["scheduler"] = _instantiate_scheduler_by_type(
+                scheduler_type, template, family
+            )
+        elif (
+            spec.load_keys == ["scheduler"]
+            and not components_loaded
+            and not scheduler_type
+        ):
+            raise RuntimeError(
+                f"replace_component({component_type!r}) needs pretrained=... "
+                f"and/or scheduler_type=... (e.g. scheduler_type='euler')."
+            )
+
         from yggdrasill.foundation.registry import BlockRegistry
         reg = BlockRegistry.global_registry()
 
@@ -459,8 +623,7 @@ class DiffusionGraphBuilder:
                 val = components_loaded.get(load_key)
                 if val is not None:
                     kwargs[ctor_kwarg] = val
-            if config:
-                kwargs["config"] = dict(cfg)
+            kwargs["config"] = dict(cfg)
 
             if len(spec.block_types) == 1:
                 nid = node_id
@@ -483,4 +646,26 @@ class DiffusionGraphBuilder:
             new_node = reg.build(build_cfg)
             self._graph.replace_node(nid, node=new_node)
 
+        _meta = getattr(self._graph, "metadata", None) or {}
+        if (
+            component_type in ("sd15.unet", "sd15.backbone")
+            and (
+                self._graph.graph_id == "sd15_inpaint"
+                or _meta.get("sd15_universal")
+            )
+        ):
+            from yggdrasill.integrations.diffusers.lazy_component import resolve_if_lazy
+            from yggdrasill.integrations.diffusers.presets.sd15 import (
+                reconfigure_sd15_inpaint_for_unet_in_channels,
+            )
+
+            un_n = self._graph.get_node(node_id)
+            inner = getattr(un_n, "_unet", None) if un_n is not None else None
+            inner = resolve_if_lazy(inner) if inner is not None else None
+            uc = getattr(inner, "config", None) if inner is not None else None
+            in_ch = int(getattr(uc, "in_channels", 4)) if uc is not None else 4
+            reconfigure_sd15_inpaint_for_unet_in_channels(self._graph, in_channels=in_ch)
+
+        self.expose_default_io()
+        self._apply_graph_device()
         return self

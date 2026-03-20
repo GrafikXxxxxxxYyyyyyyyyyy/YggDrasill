@@ -1,7 +1,7 @@
 """Diffusion run wrapper: prepares diffusion-specific kwargs and wraps output in DiffusionOutput."""
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from yggdrasill.integrations.diffusers import contracts as C
 from yggdrasill.integrations.diffusers.output import DiffusionOutput
@@ -43,6 +43,8 @@ def run(
         run_kw["device"] = device
 
     merged = dict(inputs or {})
+    if "image" in merged and C.PORT_INIT_IMAGE not in merged:
+        merged[C.PORT_INIT_IMAGE] = merged.pop("image")
 
     controlnet_image = run_kw.pop("controlnet_image", None)
     if isinstance(controlnet_image, dict):
@@ -70,7 +72,11 @@ def run(
     elif ip_adapter_conditioning_scale is not None:
         _inject_ip_adapter_scale(graph, {"default": float(ip_adapter_conditioning_scale)}, merged)
 
-    _prepare_diffusion_run(graph, run_kw)
+    if "image" in run_kw:
+        _img2img = run_kw.pop("image")
+        run_kw.setdefault(C.PORT_INIT_IMAGE, _img2img)
+
+    _prepare_diffusion_run(graph, run_kw, merged_inputs=merged)
     raw = graph.run(merged, **run_kw)
 
     if wrap_output:
@@ -179,7 +185,32 @@ def verify_devices(graph: Any, expected: str = "cuda") -> Dict[str, str]:
     return result
 
 
-def _prepare_diffusion_run(graph: Any, run_kwargs: Dict[str, Any]) -> None:
+def _sd15_universal_skip_nodes(
+    graph: Any, merged: Dict[str, Any], run_kw: Dict[str, Any],
+) -> Set[str]:
+    """Skip encode/mask nodes for text2img on manually completed universal SD1.5 graphs."""
+    meta = getattr(graph, "metadata", None) or {}
+    if not meta.get("sd15_universal"):
+        return set()
+
+    def _has(keys: tuple) -> bool:
+        for k in keys:
+            if merged.get(k) is not None:
+                return True
+            if run_kw.get(k) is not None:
+                return True
+        return False
+
+    if not _has(("image", "init_image")):
+        return {"img_encode", "mask_prep"}
+    return set()
+
+
+def _prepare_diffusion_run(
+    graph: Any,
+    run_kwargs: Dict[str, Any],
+    merged_inputs: Optional[Dict[str, Any]] = None,
+) -> None:
     """In-place preparation for diffusion run (device, node config overrides).
 
     Call before graph.run() when you need to inject num_inference_steps,
@@ -187,6 +218,12 @@ def _prepare_diffusion_run(graph: Any, run_kwargs: Dict[str, Any]) -> None:
     routes num_inference_steps→num_loop_steps and seed to the executor;
     this hook is for any extra diffusion-specific setup.
     """
+    merged = dict(merged_inputs or {})
+    extra_skip = _sd15_universal_skip_nodes(graph, merged, run_kwargs)
+    if extra_skip:
+        prev = set(run_kwargs.get("skip_node_ids") or ())
+        run_kwargs["skip_node_ids"] = prev | extra_skip
+
     device = run_kwargs.get("device")
     if device is not None and hasattr(graph, "to") and callable(getattr(graph, "to")):
         graph.to(device)

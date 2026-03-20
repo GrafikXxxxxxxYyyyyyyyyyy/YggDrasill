@@ -228,6 +228,14 @@ class FakeScheduler:
     def set_timesteps(self, num_steps, device=None, **kwargs):
         self.timesteps = FakeTensor((num_steps,))
 
+    def set_begin_index(self, index: int) -> None:
+        """Match Diffusers SchedulerMixin (no-op for fake)."""
+        self._begin_index = index
+
+    def add_noise(self, original_samples, noise, timesteps):
+        """Match Diffusers API; return latents unchanged for graph tests."""
+        return original_samples
+
     def scale_model_input(self, latents, timestep):
         return latents
 

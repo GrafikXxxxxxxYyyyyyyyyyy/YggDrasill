@@ -39,6 +39,8 @@ PORT_INIT_IMAGE = "init_image"
 PORT_MASK_IMAGE = "mask_image"
 PORT_MASKED_IMAGE_LATENTS = "masked_image_latents"
 PORT_MASK_LATENTS = "mask_latents"
+# Full-image VAE latents (no initial denoise noise) for 4-channel inpaint compositing
+PORT_CLEAN_IMAGE_LATENTS = "clean_image_latents"
 
 # ---------------------------------------------------------------------------
 # Canonical port names — denoising loop

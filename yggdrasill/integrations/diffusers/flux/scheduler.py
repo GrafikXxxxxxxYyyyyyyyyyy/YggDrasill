@@ -75,6 +75,11 @@ class FluxSchedulerSetupNode(AbstractOuterModule):
         b = base_shift - m * base_seq_len
         return m * image_seq_len + b
 
+    def to(self, device: Any) -> "FluxSchedulerSetupNode":
+        if self._scheduler is not None and hasattr(self._scheduler, "to"):
+            self._scheduler.to(device)
+        return self
+
 
 class FluxSchedulerStepNode(AbstractInnerModule):
     """Performs one FlowMatchEulerDiscrete step.
@@ -118,3 +123,8 @@ class FluxSchedulerStepNode(AbstractInnerModule):
             "next_latent": next_latents,
             "next_timestep": timestep,
         }
+
+    def to(self, device: Any) -> "FluxSchedulerStepNode":
+        if self._scheduler is not None and hasattr(self._scheduler, "to"):
+            self._scheduler.to(device)
+        return self

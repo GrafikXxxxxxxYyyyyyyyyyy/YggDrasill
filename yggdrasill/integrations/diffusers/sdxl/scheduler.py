@@ -81,6 +81,14 @@ class SDXLSchedulerSetupNode(AbstractOuterModule):
 
         return result
 
+    def to(self, device: Any) -> "SDXLSchedulerSetupNode":
+        from yggdrasill.integrations.diffusers.lazy_component import resolve_if_lazy
+
+        self._scheduler = resolve_if_lazy(self._scheduler)
+        if self._scheduler is not None and hasattr(self._scheduler, "to"):
+            self._scheduler.to(device)
+        return self
+
 
 class SDXLSchedulerStepNode(AbstractInnerModule):
     """Performs one scheduler step (same LDM contract as SD1.5; standalone copy)."""
@@ -115,14 +123,23 @@ class SDXLSchedulerStepNode(AbstractInnerModule):
         self._scheduler = resolve_if_lazy(self._scheduler)
 
         latents = inputs[C.PORT_LATENTS]
-        timestep = self._clamp_timestep(inputs[C.PORT_TIMESTEP])
+        timestep_in = inputs[C.PORT_TIMESTEP]
         noise_pred = inputs[C.PORT_NOISE_PRED]
 
-        t = timestep
-        if hasattr(t, "item"):
-            t = int(t.item())
-        elif t is not None:
-            t = int(t)
+        from yggdrasill.integrations.diffusers.common.scheduler_step import (
+            coerce_timestep_for_scheduler_step,
+            scheduler_uses_float_timestep_in_step,
+        )
+
+        if scheduler_uses_float_timestep_in_step(self._scheduler):
+            t = coerce_timestep_for_scheduler_step(timestep_in, latents, self._scheduler)
+        else:
+            timestep = self._clamp_timestep(timestep_in)
+            t = timestep
+            if hasattr(t, "item"):
+                t = int(t.item())
+            elif t is not None:
+                t = int(t)
 
         eta = self._config.get("eta", 0.0)
         generator = self._config.get("generator")
@@ -139,12 +156,23 @@ class SDXLSchedulerStepNode(AbstractInnerModule):
             **step_kwargs,
         )
         next_latents = result[0] if isinstance(result, (tuple, list)) else result.prev_sample
-        next_timestep = self._clamp_timestep(self._get_next_timestep(timestep))
+        if scheduler_uses_float_timestep_in_step(self._scheduler):
+            next_timestep = self._get_next_timestep(timestep_in)
+        else:
+            next_timestep = self._clamp_timestep(self._get_next_timestep(timestep))
 
         return {
             "next_latent": next_latents,
             "next_timestep": next_timestep,
         }
+
+    def to(self, device: Any) -> "SDXLSchedulerStepNode":
+        from yggdrasill.integrations.diffusers.lazy_component import resolve_if_lazy
+
+        self._scheduler = resolve_if_lazy(self._scheduler)
+        if self._scheduler is not None and hasattr(self._scheduler, "to"):
+            self._scheduler.to(device)
+        return self
 
     def _get_next_timestep(self, timestep: Any) -> Any:
         if not hasattr(self._scheduler, "timesteps") or self._scheduler.timesteps is None:

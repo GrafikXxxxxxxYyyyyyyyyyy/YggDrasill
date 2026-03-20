@@ -32,8 +32,8 @@ class InpaintMaskPrepNode(AbstractConverter):
 
     def declare_ports(self) -> List[Port]:
         return [
-            Port(C.PORT_INIT_IMAGE, PortDirection.IN, PortType.IMAGE),
-            Port(C.PORT_MASK_IMAGE, PortDirection.IN, PortType.IMAGE),
+            Port(C.PORT_INIT_IMAGE, PortDirection.IN, PortType.IMAGE, optional=True),
+            Port(C.PORT_MASK_IMAGE, PortDirection.IN, PortType.IMAGE, optional=True),
             Port(C.PORT_MASK_LATENTS, PortDirection.OUT, PortType.TENSOR),
             Port(C.PORT_MASKED_IMAGE_LATENTS, PortDirection.OUT, PortType.TENSOR),
         ]
@@ -45,15 +45,30 @@ class InpaintMaskPrepNode(AbstractConverter):
             preprocess_mask,
         )
 
-        image = inputs[C.PORT_INIT_IMAGE]
-        mask = inputs[C.PORT_MASK_IMAGE]
+        image = inputs.get(C.PORT_INIT_IMAGE)
+        mask = inputs.get(C.PORT_MASK_IMAGE)
+        if image is None:
+            raise RuntimeError(
+                "common/mask_prep ran without init_image; executor should skip this node "
+                "for text2img (universal SD1.5 graph)."
+            )
         height = self._config.get("height", 512)
         width = self._config.get("width", 512)
         device = self._config.get("device", "cpu")
         dtype = getattr(self._vae, "dtype", None) if self._vae else None
 
-        mask_tensor = preprocess_mask(mask, height=height, width=width, dtype=dtype, device=device)
         image_tensor = preprocess_image(image, height=height, width=width, dtype=dtype, device=device)
+        if mask is None:
+            mask_tensor = torch.ones(
+                image_tensor.shape[0],
+                1,
+                image_tensor.shape[2],
+                image_tensor.shape[3],
+                device=image_tensor.device,
+                dtype=image_tensor.dtype,
+            )
+        else:
+            mask_tensor = preprocess_mask(mask, height=height, width=width, dtype=dtype, device=device)
 
         masked_image = image_tensor * (mask_tensor < 0.5)
 
@@ -69,6 +84,10 @@ class InpaintMaskPrepNode(AbstractConverter):
         if mask_tensor.shape[-2:] != (latent_h, latent_w):
             import torch.nn.functional as F
             mask_tensor = F.interpolate(mask_tensor, size=(latent_h, latent_w), mode="nearest")
+
+        # Strict 0/1 at latent resolution avoids soft-edge blending (halos / ghost outlines) in the
+        # 4-channel UNet path, which composites with (1 - mask) * ref + mask * denoised.
+        mask_tensor = (mask_tensor >= 0.5).to(dtype=mask_tensor.dtype)
 
         return {
             C.PORT_MASK_LATENTS: mask_tensor,

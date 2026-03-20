@@ -17,6 +17,9 @@ def register_diffusion_nodes(registry: Optional[BlockRegistry] = None) -> None:
         SD15SchedulerSetupNode, SD15SchedulerStepNode,
     )
     from yggdrasill.integrations.diffusers.sd15.latent_init import SD15LatentInitNode
+    from yggdrasill.integrations.diffusers.sd15.inpaint_blend import (
+        SD15InpaintFourChannelBlendNode,
+    )
     from yggdrasill.integrations.diffusers.sd15.vae import SD15VAEEncodeNode, SD15VAEDecodeNode
     from yggdrasill.integrations.diffusers.common.mask_prep import InpaintMaskPrepNode
     from yggdrasill.integrations.diffusers.sd15.safety import SD15SafetyNode
@@ -53,6 +56,7 @@ def register_diffusion_nodes(registry: Optional[BlockRegistry] = None) -> None:
         "sd15/scheduler_setup": SD15SchedulerSetupNode,
         "sd15/scheduler_step": SD15SchedulerStepNode,
         "sd15/latent_init": SD15LatentInitNode,
+        "sd15/inpaint_four_channel_blend": SD15InpaintFourChannelBlendNode,
         "sd15/vae_encode": SD15VAEEncodeNode,
         "sd15/vae_decode": SD15VAEDecodeNode,
         "common/mask_prep": InpaintMaskPrepNode,

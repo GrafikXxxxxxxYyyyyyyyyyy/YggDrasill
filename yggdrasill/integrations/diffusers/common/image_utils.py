@@ -176,6 +176,7 @@ def preprocess_mask(
 ) -> Any:
     """Convert mask to tensor [B,1,H/8,W/8] in [0,1]."""
     torch = _import_torch()
+    mask = load_image(mask)
 
     try:
         from diffusers.image_processor import VaeImageProcessor

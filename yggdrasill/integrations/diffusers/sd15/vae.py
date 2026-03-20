@@ -29,7 +29,7 @@ class SD15VAEEncodeNode(AbstractConverter):
 
     def declare_ports(self) -> List[Port]:
         return [
-            Port(C.PORT_INIT_IMAGE, PortDirection.IN, PortType.IMAGE),
+            Port(C.PORT_INIT_IMAGE, PortDirection.IN, PortType.IMAGE, optional=True),
             Port(C.PORT_LATENTS, PortDirection.OUT, PortType.TENSOR),
         ]
 
@@ -40,7 +40,12 @@ class SD15VAEEncodeNode(AbstractConverter):
         import torch
         from yggdrasill.integrations.diffusers.common.image_utils import preprocess_image
 
-        image = inputs[C.PORT_INIT_IMAGE]
+        image = inputs.get(C.PORT_INIT_IMAGE)
+        if image is None:
+            raise RuntimeError(
+                "sd15/vae_encode ran without init_image; executor should skip this node "
+                "for text2img (universal SD1.5 graph)."
+            )
         device = self._config.get("device", "cpu")
         dtype = getattr(self._vae, "dtype", None)
 

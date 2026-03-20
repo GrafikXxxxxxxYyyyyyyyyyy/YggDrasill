@@ -748,6 +748,7 @@ class Hypergraph:
             seed=executor_kwargs.get("seed"),
             pin_data=executor_kwargs.get("pin_data"),
             max_steps=executor_kwargs.get("max_steps"),
+            skip_node_ids=executor_kwargs.get("skip_node_ids"),
         )
 
     def _resolve_run_kwargs(
@@ -778,6 +779,10 @@ class Hypergraph:
             executor_kw["seed"] = kwargs.pop("seed")
         if "max_steps" in kwargs:
             executor_kw["max_steps"] = kwargs.pop("max_steps")
+        if "skip_node_ids" in kwargs:
+            sk = kwargs.pop("skip_node_ids")
+            if sk is not None:
+                executor_kw["skip_node_ids"] = set(sk) if not isinstance(sk, set) else sk
 
         input_spec = self.get_input_spec()
         exposed_names = set()
@@ -865,6 +870,7 @@ class Hypergraph:
     # --- device / trainable ----------------------------------------------
 
     def to(self, device: Any) -> "Hypergraph":
+        self._metadata["device"] = device
         for node in self._nodes.values():
             if hasattr(node, "_config") and node._config is not None:
                 node._config["device"] = device

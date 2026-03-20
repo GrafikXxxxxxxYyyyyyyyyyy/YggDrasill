@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Generator, List, Optional
+from typing import Any, Callable, Dict, Generator, List, Optional, Set
 
 from yggdrasill.engine.buffers import EdgeBuffers
 
 # Port name convention for cycle-based loops (scheduler emits num_loop_steps)
 _SCHEDULER_STATE_PORT = "scheduler_state"
+# Carry ports fed by scheduler ``next_*`` outputs (ignore for cycle topo; see _cycle_node_order).
+_LOOP_CARRY_TARGET_PORTS = frozenset({"latents", "timestep"})
 from yggdrasill.engine.planner import build_plan
 from yggdrasill.engine.validator import validate
 from yggdrasill.foundation.node import AbstractGraphNode
@@ -46,6 +48,7 @@ def run(
     destination_node_id: Optional[str] = None,
     dirty_node_ids: Optional[List[str]] = None,
     interrupt_on: Optional[List[str]] = None,
+    skip_node_ids: Optional[Set[str]] = None,
 ) -> Dict[str, Any] | RunResult:
     """Execute the structure (Hypergraph, Workflow, etc.) and return outputs.
 
@@ -83,7 +86,9 @@ def run(
 
     plan = build_plan(structure)
 
-    skip = _compute_skip_set(structure, plan, run_data, dirty_node_ids)
+    skip = set(skip_node_ids or ()) | _compute_skip_set(
+        structure, plan, run_data, dirty_node_ids,
+    )
 
     cbs = callbacks or []
     pin = pin_data or {}
@@ -221,8 +226,11 @@ def _resolve_cycle_steps(structure: Any, buf: EdgeBuffers, default: int) -> int:
 def _cycle_node_order(structure: Any, comp: Any) -> List[str]:
     """Order cycle nodes so dependencies run first.
 
-    Ignores feedback edges (source_port starts with ``next_``) so that within
-    a denoising loop, backbone (UNet) runs before solver (scheduler_step).
+    Ignores latent-loop feedback edges ``next_* -> {latents, timestep}`` (scheduler
+    carry) so the backbone runs before ``scheduler_step`` on the first iteration.
+
+    Other ``next_*`` edges (e.g. ``next_latent`` into ``latents_post_step`` on
+    an inpaint blend node) still impose order so ``scheduler_step`` runs first.
     """
     comp = set(comp)
     if len(comp) <= 1:
@@ -232,7 +240,7 @@ def _cycle_node_order(structure: Any, comp: Any) -> List[str]:
     for e in edges:
         if e.source_node not in comp or e.target_node not in comp or e.source_node == e.target_node:
             continue
-        if e.source_port.startswith("next_"):
+        if e.source_port.startswith("next_") and e.target_port in _LOOP_CARRY_TARGET_PORTS:
             continue
         pred[e.target_node].add(e.source_node)
     order: List[str] = []

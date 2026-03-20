@@ -80,6 +80,21 @@ class SDXLUNetNode(AbstractBackbone):
 
         dtype = next(self._unet.parameters()).dtype
         device = next(self._unet.parameters()).device
+
+        if isinstance(timestep, torch.Tensor):
+            timestep = timestep.to(device=device)
+            if timestep.ndim > 0:
+                timestep = timestep.reshape(-1)[0]
+            if timestep.dtype in (torch.float16, torch.bfloat16, torch.float32, torch.float64):
+                timestep = timestep.to(dtype=dtype)
+            else:
+                timestep = timestep.long()
+        else:
+            if isinstance(timestep, float):
+                timestep = torch.tensor(timestep, device=device, dtype=dtype)
+            else:
+                timestep = torch.tensor(int(timestep), device=device, dtype=torch.long)
+
         b_cond = latent_input.shape[0] // 2 if do_cfg else latent_input.shape[0]
         image_embeds = inputs.get(C.PORT_IMAGE_EMBEDS)
         from yggdrasill.integrations.diffusers.common.ip_adapter_embeds import (

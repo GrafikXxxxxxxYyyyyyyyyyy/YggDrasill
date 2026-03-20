@@ -41,6 +41,7 @@ def _wrap_hypergraph_run_for_diffusion():
     from yggdrasill.engine.structure import Hypergraph
     from yggdrasill.integrations.diffusers.contracts import (
         PORT_DECODED_IMAGE,
+        PORT_INIT_IMAGE,
         PORT_OUTPUT_IMAGE,
         PORT_CONTROL_IMAGE,
         PORT_IP_ADAPTER_IMAGE,
@@ -56,6 +57,11 @@ def _wrap_hypergraph_run_for_diffusion():
             _prepare_diffusion_run,
         )
         merged = dict(inputs or {})
+        if "image" in merged and PORT_INIT_IMAGE not in merged:
+            merged[PORT_INIT_IMAGE] = merged.pop("image")
+        if "image" in kwargs:
+            _img = kwargs.pop("image")
+            kwargs.setdefault(PORT_INIT_IMAGE, _img)
         controlnet_image = kwargs.pop("controlnet_image", None)
         if isinstance(controlnet_image, dict):
             for nid, img in controlnet_image.items():
@@ -80,7 +86,7 @@ def _wrap_hypergraph_run_for_diffusion():
             _inject_ip_adapter_scale(self, {"default": float(ip_adapter_conditioning_scale)}, merged)
         # Same as run_diffusion(): sync device, width/height onto latent_init + ControlNet
         # (structure._resolve_run_kwargs only patches keys already present in node._config).
-        _prepare_diffusion_run(self, kwargs)
+        _prepare_diffusion_run(self, kwargs, merged_inputs=merged)
         result = _original_run(self, merged, **kwargs)
         if isinstance(result, dict) and (
             PORT_OUTPUT_IMAGE in result or PORT_DECODED_IMAGE in result

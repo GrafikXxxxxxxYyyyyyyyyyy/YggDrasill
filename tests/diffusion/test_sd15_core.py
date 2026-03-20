@@ -65,6 +65,8 @@ class TestSD15UNet:
         assert C.PORT_LATENTS in in_names
         assert C.PORT_TIMESTEP in in_names
         assert C.PORT_PROMPT_EMBEDS in in_names
+        assert C.PORT_MASK_LATENTS in in_names
+        assert C.PORT_MASKED_IMAGE_LATENTS in in_names
         assert C.PORT_NOISE_PRED in out_names
 
     @requires_torch
@@ -89,6 +91,21 @@ class TestSD15UNet:
             C.PORT_TIMESTEP: torch.tensor(999, dtype=torch.long),
             C.PORT_PROMPT_EMBEDS: torch.zeros(1, 77, 768),
             C.PORT_NEGATIVE_PROMPT_EMBEDS: torch.zeros(1, 77, 768),
+        })
+        assert C.PORT_NOISE_PRED in out
+
+    @requires_torch
+    def test_forward_inpaint_nine_channel(self):
+        import torch
+        from yggdrasill.integrations.diffusers.sd15.unet import SD15UNetNode
+        unet = FakeUNet(channels=9)
+        node = SD15UNetNode("unet", unet=unet, config={"guidance_scale": 1.0})
+        out = node.forward({
+            C.PORT_LATENTS: torch.zeros(1, 4, 64, 64),
+            C.PORT_TIMESTEP: torch.tensor(999, dtype=torch.long),
+            C.PORT_PROMPT_EMBEDS: torch.zeros(1, 77, 768),
+            C.PORT_MASK_LATENTS: torch.zeros(1, 1, 64, 64),
+            C.PORT_MASKED_IMAGE_LATENTS: torch.zeros(1, 4, 64, 64),
         })
         assert C.PORT_NOISE_PRED in out
 
@@ -181,6 +198,44 @@ class TestSD15LatentInit:
         init = FakeTensor((1, 4, 64, 64))
         out = node.forward({C.PORT_INIT_LATENTS: init})
         assert C.PORT_LATENTS in out
+
+    @requires_torch
+    def test_img2img_strength_truncates_scheduler(self):
+        import torch
+        pytest.importorskip("diffusers")
+        from diffusers import DDIMScheduler
+
+        from yggdrasill.integrations.diffusers.sd15.latent_init import SD15LatentInitNode
+
+        sched = DDIMScheduler(
+            beta_end=0.012,
+            beta_schedule="scaled_linear",
+            beta_start=0.00085,
+            clip_sample=False,
+            num_train_timesteps=1000,
+            prediction_type="epsilon",
+            set_alpha_to_one=False,
+            steps_offset=1,
+        )
+        sched.set_timesteps(50, device="cpu")
+        state = {
+            "scheduler": sched,
+            "init_noise_sigma": float(getattr(sched, "init_noise_sigma", 1.0)),
+            "num_loop_steps": 50,
+        }
+        node = SD15LatentInitNode(
+            "li",
+            config={"strength": 0.8, "device": "cpu", "seed": 42},
+        )
+        enc = torch.randn(1, 4, 64, 64)
+        out = node.forward({
+            C.PORT_INIT_LATENTS: enc,
+            C.PORT_SCHEDULER_STATE: state,
+        })
+        assert C.PORT_LATENTS in out
+        assert len(sched.timesteps) == 40
+        assert state["num_loop_steps"] == 40
+        assert not torch.allclose(out[C.PORT_LATENTS], enc)
 
 
 class TestSD15Safety:

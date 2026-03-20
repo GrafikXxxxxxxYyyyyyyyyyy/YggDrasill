@@ -28,9 +28,13 @@ from yggdrasill.engine.structure import Hypergraph
 from yggdrasill.integrations.diffusers.model_store import ModelStore
 from yggdrasill.workflow.workflow import Workflow
 
+# SD1.5 Hub defaults (inpaint: 9-ch UNet; base v1-5: 4-ch + latent compositing).
+_SD15_DEFAULT_REPO = "runwayml/stable-diffusion-v1-5"
+_SD15_INPAINT_DEFAULT_REPO = "runwayml/stable-diffusion-inpainting"
+
 
 def build_sd15_pipeline(
-    repo_id: str = "runwayml/stable-diffusion-v1-5",
+    repo_id: Optional[str] = None,
     *,
     task: str = "text2img",
     variant: str = "",
@@ -44,7 +48,9 @@ def build_sd15_pipeline(
     """Build a complete SD1.5 pipeline graph from a HF repo.
 
     Args:
-        repo_id: HF Hub repo id or local path.
+        repo_id: HF Hub repo id or local path. If omitted, ``task="inpaint"`` defaults to
+            ``runwayml/stable-diffusion-inpainting`` (9-channel UNet); other tasks default to
+            ``runwayml/stable-diffusion-v1-5``.
         task: One of "text2img", "img2img", "inpaint".
         variant: Model variant (e.g. "fp16").
         torch_dtype: PyTorch dtype string.
@@ -59,10 +65,16 @@ def build_sd15_pipeline(
     dtype_map = {"float16": torch.float16, "float32": torch.float32, "bfloat16": torch.bfloat16}
     dtype = dtype_map.get(torch_dtype, torch.float16)
 
+    resolved_repo = (
+        repo_id
+        if repo_id is not None
+        else (_SD15_INPAINT_DEFAULT_REPO if task == "inpaint" else _SD15_DEFAULT_REPO)
+    )
+
     ms = store or ModelStore.default()
     sd15_keys = ["tokenizer", "text_encoder", "unet", "vae", "scheduler"]
     components = ms.load_components_by_keys(
-        "sd15", sd15_keys, repo_id,
+        "sd15", sd15_keys, resolved_repo,
         variant=variant if variant else ("fp16" if dtype == torch.float16 else ""),
         torch_dtype=dtype,
     )
@@ -82,7 +94,8 @@ def build_sd15_pipeline(
         "config": cfg,
     }
 
-    if enable_safety:
+    # Only text2img graph wires optional safety_checker / feature_extractor.
+    if enable_safety and task == "text2img":
         comp_kwargs["safety_checker"] = None
         comp_kwargs["feature_extractor"] = None
 

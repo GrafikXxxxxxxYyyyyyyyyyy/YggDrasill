@@ -29,6 +29,13 @@ class TestEdgeBuffersDirect:
         buf = EdgeBuffers.init_from_inputs(spec, inputs)
         assert buf.read("N", "in") == 99
 
+    def test_init_from_inputs_falls_back_to_port_name_when_expose_name_differs(self):
+        """e.g. expose name ``image`` but run() supplies ``init_image`` (diffusion)."""
+        from yggdrasill.engine.buffers import EdgeBuffers
+        spec = [{"node_id": "enc", "port_name": "init_image", "name": "image"}]
+        buf = EdgeBuffers.init_from_inputs(spec, {"init_image": "url"})
+        assert buf.read("enc", "init_image") == "url"
+
 
 class TestExecutorChain:
     def test_chain_three(self):
@@ -59,6 +66,25 @@ class TestExecutorCycle:
         h = make_cycle("A", "B")
         out = run(h, {"x": 1}, num_loop_steps=2, validate_before=False)
         assert out["y"] == 1  # identity pass-through on each iteration
+
+    def test_cycle_order_inpaint_blend_after_scheduler_step(self):
+        """Regression: next_latent -> latents_post_step must not be ignored (SD15 4-ch inpaint)."""
+        from yggdrasill.engine.executor import _cycle_node_order
+
+        class _G:
+            _edges = [
+                Edge("unet", "noise_pred", "sched_step", "noise_pred"),
+                Edge("sched_step", "next_latent", "inpaint_blend", "latents_post_step"),
+                Edge("inpaint_blend", "next_latent", "unet", "latents"),
+                Edge("sched_step", "next_timestep", "unet", "timestep"),
+            ]
+
+            def get_edges(self):
+                return self._edges
+
+        order = _cycle_node_order(_G(), {"unet", "sched_step", "inpaint_blend"})
+        assert order.index("sched_step") < order.index("inpaint_blend")
+        assert order.index("unet") < order.index("sched_step")
 
 
 class TestExecutorDryRun:

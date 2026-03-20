@@ -39,6 +39,13 @@ class SD15UNetNode(AbstractBackbone):
             Port(C.PORT_TIMESTEP, PortDirection.IN, PortType.TENSOR),
             Port(C.PORT_PROMPT_EMBEDS, PortDirection.IN, PortType.TENSOR),
             Port(C.PORT_NEGATIVE_PROMPT_EMBEDS, PortDirection.IN, PortType.TENSOR, optional=True),
+            Port(C.PORT_MASK_LATENTS, PortDirection.IN, PortType.TENSOR, optional=True),
+            Port(
+                C.PORT_MASKED_IMAGE_LATENTS,
+                PortDirection.IN,
+                PortType.TENSOR,
+                optional=True,
+            ),
             Port(C.PORT_IMAGE_EMBEDS, PortDirection.IN, PortType.TENSOR, optional=True, aggregation=PortAggregation.CONCAT),
             Port(C.PORT_SCHEDULER_STATE, PortDirection.IN, PortType.ANY, optional=True),
             Port(C.PORT_DOWN_BLOCK_RESIDUALS, PortDirection.IN, PortType.ANY, optional=True, aggregation=PortAggregation.CONCAT),
@@ -57,28 +64,41 @@ class SD15UNetNode(AbstractBackbone):
         timestep = inputs[C.PORT_TIMESTEP]
         prompt_embeds = inputs[C.PORT_PROMPT_EMBEDS]
 
+        from yggdrasill.integrations.diffusers.common.scheduler_step import (
+            scheduler_uses_float_timestep_in_step,
+        )
+
         # Ensure dtype match with UNet (avoids "Half and Float" in time_embedding)
         dtype = next(self._unet.parameters()).dtype
         device = next(self._unet.parameters()).device
         latents = latents.to(device=device, dtype=dtype)
+        sched_state = inputs.get(C.PORT_SCHEDULER_STATE)
+        sched = sched_state.get("scheduler") if isinstance(sched_state, dict) else None
+        use_float_t = scheduler_uses_float_timestep_in_step(sched)
+
         if isinstance(timestep, torch.Tensor):
             timestep = timestep.to(device=device)
             if timestep.ndim > 0:
                 timestep = timestep.reshape(-1)[0]
-            # Match diffusers timesteps tensor (usually int64); float timestep breaks time embed.
-            if timestep.dtype in (torch.float16, torch.bfloat16, torch.float32, torch.float64):
+            if not use_float_t and timestep.dtype in (
+                torch.float16, torch.bfloat16, torch.float32, torch.float64,
+            ):
                 timestep = timestep.long()
+            elif use_float_t:
+                timestep = timestep.to(dtype=dtype)
         else:
             if hasattr(timestep, "item") and callable(getattr(timestep, "item")):
                 try:
-                    t_val = int(timestep.item())
+                    t_val = timestep.item()
                 except (TypeError, ValueError):
-                    t_val = int(timestep)
+                    t_val = timestep
             else:
-                t_val = int(timestep)
-            timestep = torch.tensor(t_val, device=device, dtype=torch.long)
+                t_val = timestep
+            if use_float_t:
+                timestep = torch.tensor(float(t_val), device=device, dtype=dtype)
+            else:
+                timestep = torch.tensor(int(t_val), device=device, dtype=torch.long)
         neg_embeds = inputs.get(C.PORT_NEGATIVE_PROMPT_EMBEDS)
-        sched_state = inputs.get(C.PORT_SCHEDULER_STATE)
 
         guidance_scale = self._config.get("guidance_scale", 7.5)
         do_cfg = guidance_scale > 1.0 and neg_embeds is not None
@@ -97,6 +117,24 @@ class SD15UNetNode(AbstractBackbone):
             sched = sched_state.get("scheduler")
             if sched is not None and hasattr(sched, "scale_model_input"):
                 latent_input = sched.scale_model_input(latent_input, timestep)
+
+        mask_latents = inputs.get(C.PORT_MASK_LATENTS)
+        masked_latents = inputs.get(C.PORT_MASKED_IMAGE_LATENTS)
+        in_ch = getattr(getattr(self._unet, "config", None), "in_channels", 4)
+        if (
+            mask_latents is not None
+            and masked_latents is not None
+            and in_ch == 9
+        ):
+            mask_latents = mask_latents.to(device=device, dtype=dtype)
+            masked_latents = masked_latents.to(device=device, dtype=dtype)
+            if do_cfg:
+                mask_latents = torch.cat([mask_latents, mask_latents], dim=0)
+                masked_latents = torch.cat([masked_latents, masked_latents], dim=0)
+            latent_input = torch.cat(
+                [latent_input, mask_latents, masked_latents],
+                dim=1,
+            )
 
         kwargs: Dict[str, Any] = {
             "encoder_hidden_states": encoder_states,
