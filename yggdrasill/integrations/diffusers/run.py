@@ -185,14 +185,31 @@ def verify_devices(graph: Any, expected: str = "cuda") -> Dict[str, str]:
     return result
 
 
-def _sd15_universal_skip_nodes(
+def _latent_init_accepts_missing_encoded_latents(graph: Any) -> bool:
+    """True if some ``latent_init`` node can run without ``init_latents`` (noise-only path)."""
+    for nid in getattr(graph, "node_ids", ()) or ():
+        node = graph.get_node(nid) if hasattr(graph, "get_node") else None
+        if node is None:
+            continue
+        bt = getattr(node, "block_type", "") or ""
+        if "latent_init" not in bt:
+            continue
+        port = node.get_port(C.PORT_INIT_LATENTS) if hasattr(node, "get_port") else None
+        return port is None or bool(getattr(port, "optional", False))
+    return False
+
+
+def _diffusion_universal_skip_nodes(
     graph: Any, merged: Dict[str, Any], run_kw: Dict[str, Any],
 ) -> Set[str]:
-    """Skip encode/mask nodes for text2img on manually completed universal SD1.5 graphs."""
-    meta = getattr(graph, "metadata", None) or {}
-    if not meta.get("sd15_universal"):
-        return set()
+    """Skip encode / mask prep when no init image is provided.
 
+    * Graphs completed by ``try_complete_*_universal_diffusion`` set
+      ``sd15_universal`` / ``sdxl_universal``.
+    * Img2img presets (``sd15_img2img``, etc.) also wire ``img_encode`` →
+      ``latent_init`` but omit ``sd15_universal``; the same skip applies for
+      text2img-style runs (e.g. template + ControlNet without ``image``).
+    """
     def _has(keys: tuple) -> bool:
         for k in keys:
             if merged.get(k) is not None:
@@ -201,9 +218,23 @@ def _sd15_universal_skip_nodes(
                 return True
         return False
 
-    if not _has(("image", "init_image")):
+    if _has(("image", "init_image")):
+        return set()
+
+    meta = getattr(graph, "metadata", None) or {}
+    if meta.get("sd15_universal") or meta.get("sdxl_universal"):
         return {"img_encode", "mask_prep"}
-    return set()
+
+    nids = set(getattr(graph, "node_ids", ()) or ())
+    if "img_encode" not in nids:
+        return set()
+    if not _latent_init_accepts_missing_encoded_latents(graph):
+        return set()
+
+    skip: Set[str] = {"img_encode"}
+    if "mask_prep" in nids:
+        skip.add("mask_prep")
+    return skip
 
 
 def _prepare_diffusion_run(
@@ -219,7 +250,7 @@ def _prepare_diffusion_run(
     this hook is for any extra diffusion-specific setup.
     """
     merged = dict(merged_inputs or {})
-    extra_skip = _sd15_universal_skip_nodes(graph, merged, run_kwargs)
+    extra_skip = _diffusion_universal_skip_nodes(graph, merged, run_kwargs)
     if extra_skip:
         prev = set(run_kwargs.get("skip_node_ids") or ())
         run_kwargs["skip_node_ids"] = prev | extra_skip
@@ -236,7 +267,11 @@ def _prepare_diffusion_run(
         nodes = getattr(graph, "_nodes", None) or {}
         for node in nodes.values():
             bt = getattr(node, "block_type", "") or ""
-            if "latent_init" not in bt and "adapter/controlnet" not in bt:
+            if (
+                "latent_init" not in bt
+                and "adapter/controlnet" not in bt
+                and "sdxl/added_conditioning" not in bt
+            ):
                 continue
             if not hasattr(node, "_config"):
                 node._config = {}
@@ -244,6 +279,9 @@ def _prepare_diffusion_run(
                 node._config["width"] = int(w)
             if h is not None:
                 node._config["height"] = int(h)
+            if "sdxl/added_conditioning" in bt and w is not None and h is not None:
+                node._config["original_size"] = (int(h), int(w))
+                node._config["target_size"] = (int(h), int(w))
 
     # CFG batch doubling must agree between UNet and ControlNet. If guidance_scale is only on the UNet
     # (or vice versa), one path runs batch 1 and the other batch 2 → shape errors or garbage latents.

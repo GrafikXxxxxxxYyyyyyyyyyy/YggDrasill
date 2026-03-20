@@ -142,7 +142,7 @@ def _load_ip_adapter_weights_into_graph(
     import logging
     logging.getLogger(__name__).warning(
         "IP-Adapter weights not loaded: no UNet/transformer node in graph. "
-        "Add sd15.unet (or sdxl.unet / flux.transformer) before sd15.ipadapter."
+        "Add sd15.unet (or sdxl.unet / flux.transformer) before sd15.ipadapter / sdxl.ipadapter."
     )
 
 
@@ -219,8 +219,12 @@ class DiffusionGraphBuilder:
                 has_sched_step = True
             if "latent_init" in bt:
                 has_latent_init = True
+            # Backbone family for latent_init fallback — must not be overwritten by
+            # ``adapter/controlnet`` or ``adapter/ip_adapter`` (last nodes in typical builds).
             if "/" in bt:
-                family = bt.split("/")[0] or family
+                root = bt.split("/")[0]
+                if root != "adapter":
+                    family = root
 
         if not (
             has_tokenizer
@@ -255,6 +259,26 @@ class DiffusionGraphBuilder:
                 self._completed = True
                 return
 
+        if family == "sdxl":
+            from yggdrasill.integrations.diffusers.sdxl.universal import (
+                try_complete_sdxl_universal_diffusion,
+            )
+
+            if try_complete_sdxl_universal_diffusion(self._graph):
+                for nid in self._graph.node_ids:
+                    node = self._graph.get_node(nid)
+                    bt = getattr(node, "block_type", "") or ""
+                    if "scheduler_setup" in bt and hasattr(node, "_config"):
+                        node._config = node._config or {}
+                        node._config.setdefault("device", "cuda")
+                        node._config.setdefault("num_inference_steps", 50)
+                        node._config.setdefault("height", 1024)
+                        node._config.setdefault("width", 1024)
+                self.expose_default_io()
+                self._graph.metadata.setdefault("num_loop_steps", 50)
+                self._completed = True
+                return
+
         # Fallback: text2img-only completion (no image/mask path).
         latent_type = f"{family}.latent_init" if family else "sd15.latent_init"
         cfg: Dict[str, Any] = {
@@ -263,6 +287,9 @@ class DiffusionGraphBuilder:
             "device": "cuda",
             "dtype": "float16",
         }
+        if family == "sdxl":
+            cfg["height"] = 1024
+            cfg["width"] = 1024
         self.add_component("LatentInit", latent_type, config=cfg)
 
         # Update scheduler_setup config for device and num_inference_steps
@@ -324,22 +351,29 @@ class DiffusionGraphBuilder:
             cfg["subfolder"] = subfolder
         if weight_name is not None:
             cfg["weight_name"] = weight_name
-        # Default IP-Adapter config when adding sd15.ipadapter with h94/IP-Adapter
+        # Default IP-Adapter config when adding ipadapter with h94/IP-Adapter
         if (
-            component_type in ("sd15.ipadapter", "adapter.ip_adapter")
-            and pretrained
+            pretrained
             and "h94/IP-Adapter" in str(pretrained)
             and subfolder is None
             and weight_name is None
         ):
-            cfg.setdefault("subfolder", "models")
-            cfg.setdefault("weight_name", "ip-adapter_sd15.bin")
+            if component_type == "sdxl.ipadapter":
+                cfg.setdefault("subfolder", "sdxl_models")
+                cfg.setdefault("weight_name", "ip-adapter_sdxl.bin")
+            elif component_type in ("sd15.ipadapter", "adapter.ip_adapter"):
+                cfg.setdefault("subfolder", "models")
+                cfg.setdefault("weight_name", "ip-adapter_sd15.bin")
         cfg.update(kwargs)
         if pretrained is not None:
             cfg.setdefault("pretrained", str(pretrained))
         if "controlnet" in component_type:
-            cfg.setdefault("width", 512)
-            cfg.setdefault("height", 512)
+            if component_type.startswith("sdxl."):
+                cfg.setdefault("width", 1024)
+                cfg.setdefault("height", 1024)
+            else:
+                cfg.setdefault("width", 512)
+                cfg.setdefault("height", 512)
 
         # Resolve torch_dtype: use family default when loading pretrained
         dtype_to_load = torch_dtype
@@ -665,6 +699,25 @@ class DiffusionGraphBuilder:
             uc = getattr(inner, "config", None) if inner is not None else None
             in_ch = int(getattr(uc, "in_channels", 4)) if uc is not None else 4
             reconfigure_sd15_inpaint_for_unet_in_channels(self._graph, in_channels=in_ch)
+
+        if (
+            component_type in ("sdxl.unet", "sdxl.backbone")
+            and (
+                self._graph.graph_id == "sdxl_inpaint"
+                or _meta.get("sdxl_universal")
+            )
+        ):
+            from yggdrasill.integrations.diffusers.lazy_component import resolve_if_lazy
+            from yggdrasill.integrations.diffusers.presets.sdxl import (
+                reconfigure_sdxl_inpaint_for_unet_in_channels,
+            )
+
+            un_n = self._graph.get_node(node_id)
+            inner = getattr(un_n, "_unet", None) if un_n is not None else None
+            inner = resolve_if_lazy(inner) if inner is not None else None
+            uc = getattr(inner, "config", None) if inner is not None else None
+            in_ch = int(getattr(uc, "in_channels", 4)) if uc is not None else 4
+            reconfigure_sdxl_inpaint_for_unet_in_channels(self._graph, in_channels=in_ch)
 
         self.expose_default_io()
         self._apply_graph_device()

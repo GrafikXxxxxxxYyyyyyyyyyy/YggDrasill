@@ -138,6 +138,16 @@ class TestComponentRegistry:
         spec = resolve_component_type("adapter.controlnet")
         assert spec.block_types == ["adapter/controlnet"]
 
+    def test_sdxl_controlnet(self):
+        spec = resolve_component_type("sdxl.controlnet")
+        assert spec.block_types == ["adapter/controlnet"]
+        assert spec.load_family == "sdxl"
+
+    def test_sdxl_ipadapter(self):
+        spec = resolve_component_type("sdxl.ipadapter")
+        assert spec.block_types == ["adapter/ip_adapter"]
+        assert spec.load_subfolder_map.get("image_encoder") == "sdxl_models/image_encoder"
+
     def test_adapter_controlnet_flux(self):
         spec = resolve_component_type("adapter.controlnet_flux")
         assert spec.block_types == ["adapter/controlnet_flux"]

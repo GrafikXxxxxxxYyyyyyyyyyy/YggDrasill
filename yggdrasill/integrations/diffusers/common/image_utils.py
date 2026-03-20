@@ -249,5 +249,8 @@ def numpy_to_pil(images: Any) -> List[Any]:
 
     if images.ndim == 3:
         images = images[np.newaxis, ...]
-    images = (images * 255).round().astype(np.uint8)
+    images = np.asarray(images, dtype=np.float64)
+    images = np.nan_to_num(images, nan=0.0, posinf=1.0, neginf=0.0)
+    images = np.clip(images, 0.0, 1.0)
+    images = (images * 255.0).round().astype(np.uint8)
     return [PILImage.fromarray(img) for img in images]

@@ -13,7 +13,7 @@ from yggdrasill.task_nodes.abstract import AbstractOuterModule
 
 
 class SDXLLatentInitNode(AbstractOuterModule):
-    """Initializes latents for SDXL text2img / img2img (defaults 1024x1024)."""
+    """Initializes latents for SDXL text2img / img2img / inpaint (defaults 1024x1024)."""
 
     def __init__(
         self,
@@ -44,15 +44,17 @@ class SDXLLatentInitNode(AbstractOuterModule):
 
         existing_latents = inputs.get(C.PORT_INIT_LATENTS)
         sched_state = inputs.get(C.PORT_SCHEDULER_STATE, {})
-        init_noise_sigma = sched_state.get("init_noise_sigma", 1.0) if isinstance(sched_state, dict) else 1.0
+        if not isinstance(sched_state, dict):
+            sched_state = {}
+        init_noise_sigma = sched_state.get("init_noise_sigma", 1.0)
 
         if existing_latents is not None:
-            latents = existing_latents * init_noise_sigma
-            timestep = self._clamp_timestep(self._get_first_timestep(sched_state))
-            return {C.PORT_LATENTS: latents, C.PORT_TIMESTEP: timestep}
+            return self._forward_from_encoded_latents(
+                existing_latents, sched_state, init_noise_sigma,
+            )
 
-        height = self._config.get("height", 512)
-        width = self._config.get("width", 512)
+        height = self._config.get("height", 1024)
+        width = self._config.get("width", 1024)
         batch_size = self._config.get("batch_size", 1)
         num_channels = self._config.get("num_latent_channels", 4)
         device = self._config.get("device", "cpu")
@@ -76,9 +78,109 @@ class SDXLLatentInitNode(AbstractOuterModule):
         if seed is not None:
             generator = torch.Generator(device=target_device).manual_seed(int(seed))
 
-        latents = torch.randn(shape, generator=generator, device=target_device, dtype=dtype) * init_noise_sigma
+        noise = torch.randn(shape, generator=generator, device=target_device, dtype=dtype)
+        sig = init_noise_sigma
+        if isinstance(sig, torch.Tensor):
+            latents = noise * sig.to(device=target_device, dtype=dtype)
+        else:
+            latents = noise * float(sig)
         timestep = self._clamp_timestep(self._get_first_timestep(sched_state))
 
+        if self._config.get("inpaint_4ch_composite"):
+            sched_state["_inpaint_blend_noise"] = noise
+
+        return {C.PORT_LATENTS: latents, C.PORT_TIMESTEP: timestep}
+
+    def _forward_from_encoded_latents(
+        self,
+        existing_latents: Any,
+        sched_state: Dict[str, Any],
+        init_noise_sigma: float,
+    ) -> Dict[str, Any]:
+        """img2img path: match Diffusers ``get_timesteps`` + ``add_noise``."""
+        import torch
+
+        scheduler = sched_state.get("scheduler")
+        try:
+            use_torch = torch.is_tensor(existing_latents)
+        except Exception:
+            use_torch = False
+
+        if not use_torch or scheduler is None or not hasattr(scheduler, "add_noise"):
+            latents = existing_latents * init_noise_sigma
+            timestep = self._clamp_timestep(self._get_first_timestep(sched_state))
+            return {C.PORT_LATENTS: latents, C.PORT_TIMESTEP: timestep}
+
+        strength = float(self._config.get("strength", 0.8))
+        if strength <= 0 or strength > 1.0:
+            raise ValueError(f"strength must be in (0, 1], got {strength}")
+
+        timesteps = getattr(scheduler, "timesteps", None)
+        if timesteps is None:
+            latents = existing_latents * init_noise_sigma
+            timestep = self._clamp_timestep(self._get_first_timestep(sched_state))
+            return {C.PORT_LATENTS: latents, C.PORT_TIMESTEP: timestep}
+
+        n = len(timesteps)
+        if n == 0:
+            latents = existing_latents * init_noise_sigma
+            timestep = self._clamp_timestep(self._get_first_timestep(sched_state))
+            return {C.PORT_LATENTS: latents, C.PORT_TIMESTEP: timestep}
+
+        init_timestep = min(int(n * strength), n)
+        if strength > 0 and init_timestep == 0:
+            init_timestep = 1
+        t_start = max(n - init_timestep, 0)
+        order = int(getattr(scheduler, "order", 1))
+        start_idx = t_start * order
+
+        if isinstance(timesteps, torch.Tensor):
+            new_ts = timesteps[start_idx:].clone()
+            scheduler.timesteps = new_ts
+        else:
+            new_ts = timesteps[start_idx:]
+            scheduler.timesteps = new_ts
+
+        if hasattr(scheduler, "set_begin_index"):
+            scheduler.set_begin_index(start_idx)
+
+        sched_state["num_loop_steps"] = len(scheduler.timesteps)
+
+        device = existing_latents.device
+        dtype = existing_latents.dtype
+        generator = None
+        seed = self._config.get("seed")
+        if seed is not None:
+            generator = torch.Generator(device=device).manual_seed(int(seed))
+
+        first_t = scheduler.timesteps[0]
+        if strength >= 1.0:
+            noise = torch.randn(
+                existing_latents.shape,
+                generator=generator,
+                device=device,
+                dtype=dtype,
+            )
+            sig = init_noise_sigma
+            if isinstance(sig, torch.Tensor):
+                latents = noise * sig.to(device=device, dtype=dtype)
+            else:
+                latents = noise * float(sig)
+            timestep = self._clamp_timestep(first_t)
+            if self._config.get("inpaint_4ch_composite"):
+                sched_state["_inpaint_blend_noise"] = noise
+            return {C.PORT_LATENTS: latents, C.PORT_TIMESTEP: timestep}
+
+        noise = torch.randn(
+            existing_latents.shape,
+            generator=generator,
+            device=device,
+            dtype=dtype,
+        )
+        latents = scheduler.add_noise(existing_latents, noise, first_t)
+        timestep = self._clamp_timestep(first_t)
+        if self._config.get("inpaint_4ch_composite"):
+            sched_state["_inpaint_blend_noise"] = noise
         return {C.PORT_LATENTS: latents, C.PORT_TIMESTEP: timestep}
 
     def _get_first_timestep(self, sched_state: Any):

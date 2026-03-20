@@ -27,6 +27,19 @@ class SDXLPromptEncoderNode(AbstractConjector):
         self._text_encoder = text_encoder
         self._text_encoder_2 = text_encoder_2
 
+    def update_from_components(self, kwargs: Dict[str, Any]) -> None:
+        """Merge components from a follow-up ``add_component`` (grouped ``sdxl.text_encoder_*``)."""
+        enc = kwargs.get("text_encoder")
+        if enc is not None:
+            self._text_encoder = enc
+        enc2 = kwargs.get("text_encoder_2")
+        if enc2 is not None:
+            self._text_encoder_2 = enc2
+        cfg = kwargs.get("config")
+        if cfg:
+            self._config = dict(self._config or {})
+            self._config.update(cfg)
+
     @property
     def block_type(self) -> str:
         return "sdxl/prompt_encoder"

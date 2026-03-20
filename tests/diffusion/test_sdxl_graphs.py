@@ -76,6 +76,16 @@ class TestSDXLText2ImgGraph:
         )
         assert found, "pooled_prompt_embeds → added_cond edge missing"
 
+    def test_negative_pooled_to_unet_for_cfg(self, sdxl_kwargs):
+        g = build_sdxl_text2img_graph(**sdxl_kwargs)
+        edges = g.get_edges()
+        assert any(
+            e.source_node == "prompt_enc"
+            and e.source_port == C.PORT_NEGATIVE_POOLED_PROMPT_EMBEDS
+            and e.target_node == "unet"
+            for e in edges
+        ), "negative_pooled_prompt_embeds → unet required for SDXL CFG"
+
     def test_add_time_ids_edge(self, sdxl_kwargs):
         g = build_sdxl_text2img_graph(**sdxl_kwargs)
         edges = g.get_edges()
@@ -85,6 +95,25 @@ class TestSDXLText2ImgGraph:
             for e in edges
         )
         assert found, "add_time_ids → unet edge missing"
+
+    def test_scheduler_loop_edges(self, sdxl_kwargs):
+        g = build_sdxl_text2img_graph(**sdxl_kwargs)
+        edges = g.get_edges()
+        assert any(
+            e.source_node == "latent_init" and e.target_node == "sched_step"
+            and e.target_port == C.PORT_LATENTS
+            for e in edges
+        )
+        assert any(
+            e.source_node == "sched_step" and e.source_port == "next_latent"
+            and e.target_node == "sched_step" and e.target_port == C.PORT_LATENTS
+            for e in edges
+        )
+        assert any(
+            e.source_node == "sched_setup" and e.target_node == "unet"
+            and e.target_port == C.PORT_SCHEDULER_STATE
+            for e in edges
+        )
 
     def test_config_roundtrip(self, sdxl_kwargs):
         g = build_sdxl_text2img_graph(**sdxl_kwargs)
@@ -113,17 +142,95 @@ class TestSDXLImg2ImgGraph:
         port_names = {s["port_name"] for s in g.get_input_spec()}
         assert C.PORT_INIT_IMAGE in port_names
 
+    def test_negative_pooled_and_time_ids_edges(self, sdxl_kwargs):
+        g = build_sdxl_img2img_graph(**sdxl_kwargs)
+        edges = g.get_edges()
+        assert any(
+            e.source_node == "prompt_enc"
+            and e.source_port == C.PORT_NEGATIVE_POOLED_PROMPT_EMBEDS
+            and e.target_node == "added_cond"
+            for e in edges
+        )
+        assert any(
+            e.source_node == "added_cond"
+            and e.source_port == C.PORT_NEGATIVE_ADD_TIME_IDS
+            and e.target_node == "unet"
+            for e in edges
+        )
+        assert any(
+            e.source_node == "prompt_enc"
+            and e.source_port == C.PORT_NEGATIVE_POOLED_PROMPT_EMBEDS
+            and e.target_node == "unet"
+            for e in edges
+        )
+
 
 class TestSDXLInpaintGraph:
 
     def test_builds(self, sdxl_kwargs):
         g = build_sdxl_inpaint_graph(**sdxl_kwargs)
         assert "mask_prep" in g.node_ids
+        assert "img_encode" in g.node_ids
 
     def test_exposed_mask(self, sdxl_kwargs):
         g = build_sdxl_inpaint_graph(**sdxl_kwargs)
         port_names = {s["port_name"] for s in g.get_input_spec()}
         assert C.PORT_MASK_IMAGE in port_names
+
+    def test_nine_channel_unet_skips_blend(self):
+        kw = {
+            "tokenizer": FakeTokenizer(),
+            "tokenizer_2": FakeTokenizer(),
+            "text_encoder": FakeTextEncoder(),
+            "text_encoder_2": FakeTextEncoder2(),
+            "unet": FakeUNet(channels=9),
+            "vae": FakeVAE(scaling_factor=0.13025),
+            "scheduler": FakeScheduler(),
+        }
+        g = build_sdxl_inpaint_graph(**kw)
+        assert "inpaint_blend" not in g.node_ids
+        edges = g.get_edges()
+        assert any(
+            e.source_node == "mask_prep" and e.target_node == "unet"
+            and e.source_port == C.PORT_MASK_LATENTS
+            for e in edges
+        )
+
+    def test_four_channel_unet_adds_blend(self):
+        kw = {
+            "tokenizer": FakeTokenizer(),
+            "tokenizer_2": FakeTokenizer(),
+            "text_encoder": FakeTextEncoder(),
+            "text_encoder_2": FakeTextEncoder2(),
+            "unet": FakeUNet(channels=4),
+            "vae": FakeVAE(scaling_factor=0.13025),
+            "scheduler": FakeScheduler(),
+        }
+        g = build_sdxl_inpaint_graph(**kw)
+        assert "inpaint_blend" in g.node_ids
+        edges = g.get_edges()
+        assert any(
+            e.source_node == "sched_step" and e.target_node == "inpaint_blend"
+            for e in edges
+        )
+
+    def test_negative_cfg_edges(self, sdxl_kwargs):
+        g = build_sdxl_inpaint_graph(**sdxl_kwargs)
+        edges = g.get_edges()
+        assert any(
+            e.source_port == C.PORT_NEGATIVE_POOLED_PROMPT_EMBEDS
+            and e.target_node == "added_cond"
+            for e in edges
+        )
+        assert any(
+            e.source_port == C.PORT_NEGATIVE_ADD_TIME_IDS and e.target_node == "unet"
+            for e in edges
+        )
+        assert any(
+            e.source_port == C.PORT_NEGATIVE_POOLED_PROMPT_EMBEDS
+            and e.target_node == "unet"
+            for e in edges
+        )
 
 
 class TestSDXLBaseRefinerWorkflow:

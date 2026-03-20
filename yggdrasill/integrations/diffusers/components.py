@@ -163,6 +163,18 @@ _SDXL_COMPONENTS: Dict[str, ComponentSpec] = {
             "sdxl/tokenizer": {"tokenizer": "tokenizer", "tokenizer_2": "tokenizer_2"},
         },
     ),
+    "sdxl.tokenizer_1": ComponentSpec(
+        block_types=["sdxl/tokenizer"],
+        load_keys=["tokenizer"],
+        constructor_map={"sdxl/tokenizer": {"tokenizer": "tokenizer"}},
+        group="sdxl.tokenizer",
+    ),
+    "sdxl.tokenizer_2": ComponentSpec(
+        block_types=["sdxl/tokenizer"],
+        load_keys=["tokenizer_2"],
+        constructor_map={"sdxl/tokenizer": {"tokenizer_2": "tokenizer_2"}},
+        group="sdxl.tokenizer",
+    ),
     "sdxl.prompt_encoder": ComponentSpec(
         block_types=["sdxl/prompt_encoder"],
         load_keys=["text_encoder", "text_encoder_2"],
@@ -175,6 +187,12 @@ _SDXL_COMPONENTS: Dict[str, ComponentSpec] = {
         group="sdxl.prompt_encoder",
     ),
     "sdxl.text_encoder": ComponentSpec(
+        block_types=["sdxl/prompt_encoder"],
+        load_keys=["text_encoder"],
+        constructor_map={"sdxl/prompt_encoder": {"text_encoder": "text_encoder"}},
+        group="sdxl.prompt_encoder",
+    ),
+    "sdxl.text_encoder_1": ComponentSpec(
         block_types=["sdxl/prompt_encoder"],
         load_keys=["text_encoder"],
         constructor_map={"sdxl/prompt_encoder": {"text_encoder": "text_encoder"}},
@@ -280,6 +298,12 @@ _ADAPTER_COMPONENTS: Dict[str, ComponentSpec] = {
         constructor_map={"adapter/controlnet": {"controlnet": "controlnet"}},
         load_family="sd15",
     ),
+    "sdxl.controlnet": ComponentSpec(
+        block_types=["adapter/controlnet"],
+        load_keys=["controlnet"],
+        constructor_map={"adapter/controlnet": {"controlnet": "controlnet"}},
+        load_family="sdxl",
+    ),
     "sd15.ipadapter": ComponentSpec(
         block_types=["adapter/ip_adapter"],
         load_keys=["image_encoder", "feature_extractor"],
@@ -298,6 +322,25 @@ _ADAPTER_COMPONENTS: Dict[str, ComponentSpec] = {
         },
         load_subfolder_map={
             "image_encoder": "models/image_encoder",
+        },
+        load_variant_map={"image_encoder": "", "feature_extractor": ""},
+    ),
+    "sdxl.ipadapter": ComponentSpec(
+        block_types=["adapter/ip_adapter"],
+        load_keys=["image_encoder", "feature_extractor"],
+        constructor_map={
+            "adapter/ip_adapter": {
+                "image_encoder": "image_encoder",
+                "feature_extractor": "feature_extractor",
+            },
+        },
+        load_family="adapter",
+        load_pretrained_map={
+            "image_encoder": "h94/IP-Adapter",
+            "feature_extractor": "openai/clip-vit-large-patch14",
+        },
+        load_subfolder_map={
+            "image_encoder": "sdxl_models/image_encoder",
         },
         load_variant_map={"image_encoder": "", "feature_extractor": ""},
     ),

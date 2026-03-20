@@ -118,7 +118,11 @@ class TestSDXLUNet:
         out_names = {p.name for p in ports if p.direction == PortDirection.OUT}
         assert C.PORT_LATENTS in in_names
         assert C.PORT_ADD_TEXT_EMBEDS in in_names
+        assert C.PORT_NEGATIVE_POOLED_PROMPT_EMBEDS in in_names
         assert C.PORT_ADD_TIME_IDS in in_names
+        assert C.PORT_MASK_LATENTS in in_names
+        assert C.PORT_MASKED_IMAGE_LATENTS in in_names
+        assert C.PORT_SCHEDULER_STATE in in_names
         assert C.PORT_NOISE_PRED in out_names
 
     def test_block_type(self):

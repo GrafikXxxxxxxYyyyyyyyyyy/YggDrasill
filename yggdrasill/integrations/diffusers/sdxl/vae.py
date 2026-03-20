@@ -91,6 +91,10 @@ class SDXLVAEDecodeNode(AbstractConverter):
         ]
 
     def forward(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        from yggdrasill.integrations.diffusers.lazy_component import resolve_if_lazy
+
+        self._vae = resolve_if_lazy(self._vae)
+
         import torch
         from yggdrasill.integrations.diffusers.common.image_utils import postprocess_image
 
@@ -106,6 +110,10 @@ class SDXLVAEDecodeNode(AbstractConverter):
             latents = latents / scaling + shift
         else:
             latents = latents / scaling
+
+        p = next(self._vae.parameters(), None)
+        if p is not None:
+            latents = latents.to(device=p.device, dtype=p.dtype)
 
         with torch.no_grad():
             image = self._vae.decode(latents, return_dict=False)[0]

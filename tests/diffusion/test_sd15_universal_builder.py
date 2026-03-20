@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 from yggdrasill.engine.structure import Hypergraph
-from yggdrasill.integrations.diffusers.run import _sd15_universal_skip_nodes
+from yggdrasill.integrations.diffusers.run import _diffusion_universal_skip_nodes
+from yggdrasill.integrations.diffusers import contracts as C
+from yggdrasill.integrations.diffusers.adapters.controlnet import ControlNetNode
 from yggdrasill.integrations.diffusers.sd15.universal import try_complete_sd15_universal_diffusion
 
 from tests.diffusion.conftest import (
+    FakeControlNet,
     FakeScheduler,
     FakeTextEncoder,
     FakeTokenizer,
@@ -62,10 +65,37 @@ def test_try_complete_wires_four_channel_universal() -> None:
 def test_universal_skip_nodes_without_image() -> None:
     g = Hypergraph()
     g.metadata["sd15_universal"] = True
-    assert _sd15_universal_skip_nodes(g, {}, {}) == {"img_encode", "mask_prep"}
+    assert _diffusion_universal_skip_nodes(g, {}, {}) == {"img_encode", "mask_prep"}
 
 
 def test_universal_skip_nodes_with_image() -> None:
     g = Hypergraph()
     g.metadata["sd15_universal"] = True
-    assert _sd15_universal_skip_nodes(g, {"image": "x"}, {}) == set()
+    assert _diffusion_universal_skip_nodes(g, {"image": "x"}, {}) == set()
+
+
+def test_try_complete_rewires_controlnet_latents_after_latent_init() -> None:
+    """ControlNet added before universal completion must receive ``latents`` from ``latent_init``."""
+    g = _manual_sd15_stack(unet_channels=4)
+    g.add_node(
+        "MyCN",
+        ControlNetNode("MyCN", controlnet=FakeControlNet()),
+        auto_connect=False,
+    )
+    assert try_complete_sd15_universal_diffusion(g) is True
+    found = any(
+        e.source_node == "latent_init"
+        and e.source_port == C.PORT_LATENTS
+        and e.target_node == "MyCN"
+        and e.target_port == C.PORT_LATENTS
+        for e in g.get_edges()
+    )
+    assert found, "latent_init.latents → MyCN.latents missing after try_complete"
+
+
+def test_skip_nodes_without_universal_flag_when_img_encode_topology() -> None:
+    """Img2img-style graphs (or cleared metadata) still skip encode when no image."""
+    g = _manual_sd15_stack(unet_channels=4)
+    assert try_complete_sd15_universal_diffusion(g) is True
+    g.metadata.pop("sd15_universal", None)
+    assert _diffusion_universal_skip_nodes(g, {}, {}) == {"img_encode", "mask_prep"}

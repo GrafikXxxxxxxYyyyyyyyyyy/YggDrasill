@@ -22,6 +22,7 @@ def register_diffusion_nodes(registry: Optional[BlockRegistry] = None) -> None:
     )
     from yggdrasill.integrations.diffusers.sd15.vae import SD15VAEEncodeNode, SD15VAEDecodeNode
     from yggdrasill.integrations.diffusers.common.mask_prep import InpaintMaskPrepNode
+    from yggdrasill.integrations.diffusers.common.inpaint_latent_blend import InpaintLatentBlendNode
     from yggdrasill.integrations.diffusers.sd15.safety import SD15SafetyNode
 
     from yggdrasill.integrations.diffusers.sdxl.tokenizer import SDXLTokenizerNode
@@ -60,6 +61,7 @@ def register_diffusion_nodes(registry: Optional[BlockRegistry] = None) -> None:
         "sd15/vae_encode": SD15VAEEncodeNode,
         "sd15/vae_decode": SD15VAEDecodeNode,
         "common/mask_prep": InpaintMaskPrepNode,
+        "common/inpaint_latent_blend": InpaintLatentBlendNode,
         "sd15/safety": SD15SafetyNode,
         "sdxl/tokenizer": SDXLTokenizerNode,
         "sdxl/prompt_encoder": SDXLPromptEncoderNode,

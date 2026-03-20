@@ -12,7 +12,7 @@ class SDXLUNetNode(AbstractBackbone):
     """Wraps UNet2DConditionModel for SDXL with full conditioning.
 
     Handles CFG, added_cond_kwargs (text_embeds + time_ids),
-    and optional ControlNet/IP-Adapter residuals.
+    optional ControlNet/IP-Adapter residuals, and 9-channel inpaint concat.
     """
 
     def __init__(
@@ -23,8 +23,9 @@ class SDXLUNetNode(AbstractBackbone):
         config: Optional[Dict[str, Any]] = None,
         unet: Any = None,
     ) -> None:
-        super().__init__(node_id=node_id, block_id=block_id, config=config)
-        self._unet = unet
+        cfg = dict(config or {})
+        self._unet = unet or cfg.pop("unet", None)
+        super().__init__(node_id=node_id, block_id=block_id, config=cfg)
 
     @property
     def block_type(self) -> str:
@@ -36,26 +37,78 @@ class SDXLUNetNode(AbstractBackbone):
             Port(C.PORT_TIMESTEP, PortDirection.IN, PortType.TENSOR),
             Port(C.PORT_PROMPT_EMBEDS, PortDirection.IN, PortType.TENSOR),
             Port(C.PORT_NEGATIVE_PROMPT_EMBEDS, PortDirection.IN, PortType.TENSOR, optional=True),
+            Port(
+                C.PORT_NEGATIVE_POOLED_PROMPT_EMBEDS,
+                PortDirection.IN,
+                PortType.TENSOR,
+                optional=True,
+            ),
             Port(C.PORT_ADD_TEXT_EMBEDS, PortDirection.IN, PortType.TENSOR),
             Port(C.PORT_ADD_TIME_IDS, PortDirection.IN, PortType.TENSOR),
             Port(C.PORT_NEGATIVE_ADD_TIME_IDS, PortDirection.IN, PortType.TENSOR, optional=True),
+            Port(C.PORT_MASK_LATENTS, PortDirection.IN, PortType.TENSOR, optional=True),
+            Port(
+                C.PORT_MASKED_IMAGE_LATENTS,
+                PortDirection.IN,
+                PortType.TENSOR,
+                optional=True,
+            ),
             Port(C.PORT_IMAGE_EMBEDS, PortDirection.IN, PortType.TENSOR, optional=True, aggregation=PortAggregation.CONCAT),
+            Port(C.PORT_SCHEDULER_STATE, PortDirection.IN, PortType.ANY, optional=True),
             Port(C.PORT_DOWN_BLOCK_RESIDUALS, PortDirection.IN, PortType.ANY, optional=True, aggregation=PortAggregation.CONCAT),
             Port(C.PORT_MID_BLOCK_RESIDUAL, PortDirection.IN, PortType.ANY, optional=True, aggregation=PortAggregation.CONCAT),
             Port(C.PORT_NOISE_PRED, PortDirection.OUT, PortType.TENSOR),
         ]
 
     def forward(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        from yggdrasill.integrations.diffusers.lazy_component import resolve_if_lazy
+
+        self._unet = resolve_if_lazy(self._unet)
+
         import torch
         from yggdrasill.integrations.diffusers.common.guidance import apply_cfg
+        from yggdrasill.integrations.diffusers.common.scheduler_step import (
+            scheduler_uses_float_timestep_in_step,
+        )
 
         latents = inputs[C.PORT_LATENTS]
-        timestep = inputs[C.PORT_TIMESTEP]
+        timestep_in = inputs[C.PORT_TIMESTEP]
         prompt_embeds = inputs[C.PORT_PROMPT_EMBEDS]
         neg_embeds = inputs.get(C.PORT_NEGATIVE_PROMPT_EMBEDS)
         add_text_embeds = inputs[C.PORT_ADD_TEXT_EMBEDS]
         add_time_ids = inputs[C.PORT_ADD_TIME_IDS]
         neg_time_ids = inputs.get(C.PORT_NEGATIVE_ADD_TIME_IDS, add_time_ids)
+
+        dtype = next(self._unet.parameters()).dtype
+        device = next(self._unet.parameters()).device
+        latents = latents.to(device=device, dtype=dtype)
+
+        sched_state = inputs.get(C.PORT_SCHEDULER_STATE)
+        sched = sched_state.get("scheduler") if isinstance(sched_state, dict) else None
+        use_float_t = scheduler_uses_float_timestep_in_step(sched)
+
+        if isinstance(timestep_in, torch.Tensor):
+            timestep = timestep_in.to(device=device)
+            if timestep.ndim > 0:
+                timestep = timestep.reshape(-1)[0]
+            if not use_float_t and timestep.dtype in (
+                torch.float16, torch.bfloat16, torch.float32, torch.float64,
+            ):
+                timestep = timestep.long()
+            elif use_float_t:
+                timestep = timestep.to(dtype=dtype)
+        else:
+            if hasattr(timestep_in, "item") and callable(getattr(timestep_in, "item")):
+                try:
+                    t_val = timestep_in.item()
+                except (TypeError, ValueError):
+                    t_val = timestep_in
+            else:
+                t_val = timestep_in
+            if use_float_t:
+                timestep = torch.tensor(float(t_val), device=device, dtype=dtype)
+            else:
+                timestep = torch.tensor(int(t_val), device=device, dtype=torch.long)
 
         guidance_scale = self._config.get("guidance_scale", 7.5)
         guidance_rescale = self._config.get("guidance_rescale", 0.0)
@@ -63,37 +116,52 @@ class SDXLUNetNode(AbstractBackbone):
 
         if do_cfg:
             latent_input = torch.cat([latents] * 2)
-            encoder_states = torch.cat([neg_embeds, prompt_embeds])
-            neg_add_text_embeds = inputs.get("negative_add_text_embeds", torch.zeros_like(add_text_embeds))
-            text_embeds_cat = torch.cat([neg_add_text_embeds, add_text_embeds])
-            time_ids_cat = torch.cat([neg_time_ids, add_time_ids])
+            encoder_states = torch.cat([
+                neg_embeds.to(device=device, dtype=dtype),
+                prompt_embeds.to(device=device, dtype=dtype),
+            ])
+            neg_add_text_embeds = inputs.get(C.PORT_NEGATIVE_POOLED_PROMPT_EMBEDS)
+            if neg_add_text_embeds is None:
+                neg_add_text_embeds = torch.zeros_like(add_text_embeds)
+            text_embeds_cat = torch.cat([
+                neg_add_text_embeds.to(device=device, dtype=dtype),
+                add_text_embeds.to(device=device, dtype=dtype),
+            ])
+            time_ids_cat = torch.cat([
+                neg_time_ids.to(device=device, dtype=dtype),
+                add_time_ids.to(device=device, dtype=dtype),
+            ])
         else:
             latent_input = latents
-            encoder_states = prompt_embeds
-            text_embeds_cat = add_text_embeds
-            time_ids_cat = add_time_ids
+            encoder_states = prompt_embeds.to(device=device, dtype=dtype)
+            text_embeds_cat = add_text_embeds.to(device=device, dtype=dtype)
+            time_ids_cat = add_time_ids.to(device=device, dtype=dtype)
 
         added_cond_kwargs: Dict[str, Any] = {
             "text_embeds": text_embeds_cat,
             "time_ids": time_ids_cat,
         }
 
-        dtype = next(self._unet.parameters()).dtype
-        device = next(self._unet.parameters()).device
+        if sched is not None and hasattr(sched, "scale_model_input"):
+            latent_input = sched.scale_model_input(latent_input, timestep)
 
-        if isinstance(timestep, torch.Tensor):
-            timestep = timestep.to(device=device)
-            if timestep.ndim > 0:
-                timestep = timestep.reshape(-1)[0]
-            if timestep.dtype in (torch.float16, torch.bfloat16, torch.float32, torch.float64):
-                timestep = timestep.to(dtype=dtype)
-            else:
-                timestep = timestep.long()
-        else:
-            if isinstance(timestep, float):
-                timestep = torch.tensor(timestep, device=device, dtype=dtype)
-            else:
-                timestep = torch.tensor(int(timestep), device=device, dtype=torch.long)
+        mask_latents = inputs.get(C.PORT_MASK_LATENTS)
+        masked_latents = inputs.get(C.PORT_MASKED_IMAGE_LATENTS)
+        in_ch = getattr(getattr(self._unet, "config", None), "in_channels", 4)
+        if (
+            mask_latents is not None
+            and masked_latents is not None
+            and in_ch == 9
+        ):
+            mask_latents = mask_latents.to(device=device, dtype=dtype)
+            masked_latents = masked_latents.to(device=device, dtype=dtype)
+            if do_cfg:
+                mask_latents = torch.cat([mask_latents, mask_latents], dim=0)
+                masked_latents = torch.cat([masked_latents, masked_latents], dim=0)
+            latent_input = torch.cat(
+                [latent_input, mask_latents, masked_latents],
+                dim=1,
+            )
 
         b_cond = latent_input.shape[0] // 2 if do_cfg else latent_input.shape[0]
         image_embeds = inputs.get(C.PORT_IMAGE_EMBEDS)
@@ -134,10 +202,8 @@ class SDXLUNetNode(AbstractBackbone):
         if mid_residual is not None:
             unet_kwargs["mid_block_additional_residual"] = merge_residuals(mid_residual)
 
-        timestep_cond = None
         if hasattr(self._unet, "config") and getattr(self._unet.config, "time_cond_proj_dim", None):
-            timestep_cond = self._get_guidance_scale_embedding(guidance_scale)
-            unet_kwargs["timestep_cond"] = timestep_cond
+            unet_kwargs["timestep_cond"] = self._get_guidance_scale_embedding(guidance_scale)
 
         noise_pred = self._unet(latent_input, timestep, **unet_kwargs).sample
 
@@ -162,6 +228,9 @@ class SDXLUNetNode(AbstractBackbone):
         return emb.to(device=self._unet.device, dtype=self._unet.dtype)
 
     def to(self, device: Any) -> "SDXLUNetNode":
-        if self._unet is not None:
+        from yggdrasill.integrations.diffusers.lazy_component import resolve_if_lazy
+
+        self._unet = resolve_if_lazy(self._unet)
+        if self._unet is not None and hasattr(self._unet, "to"):
             self._unet.to(device)
         return self

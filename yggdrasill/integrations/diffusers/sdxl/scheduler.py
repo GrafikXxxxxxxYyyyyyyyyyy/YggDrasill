@@ -66,6 +66,7 @@ class SDXLSchedulerSetupNode(AbstractOuterModule):
                 "init_noise_sigma": getattr(self._scheduler, "init_noise_sigma", 1.0),
                 "order": getattr(self._scheduler, "order", 1),
                 "num_loop_steps": len(timesteps) if timesteps is not None else num_steps,
+                "_inpaint_blend_i": 0,
             },
         }
 

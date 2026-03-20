@@ -51,8 +51,17 @@ class BlockRegistry:
         # Ensures ControlNetNode, IPAdapterNode, etc. receive their modules even when
         # nested inside config.
         _component_pass_through = (
-            "controlnet", "unet", "vae", "scheduler", "tokenizer", "text_encoder",
-            "image_encoder", "feature_extractor", "transformer",
+            "controlnet",
+            "unet",
+            "vae",
+            "scheduler",
+            "tokenizer",
+            "tokenizer_2",
+            "text_encoder",
+            "text_encoder_2",
+            "image_encoder",
+            "feature_extractor",
+            "transformer",
         )
         rest = {k: v for k, v in config.items() if k not in _meta_keys}
         node_id = rest.pop("node_id", None)

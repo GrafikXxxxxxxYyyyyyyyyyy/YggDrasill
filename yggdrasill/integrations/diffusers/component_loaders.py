@@ -44,10 +44,11 @@ def _init_sd15() -> None:
 
 
 def _init_sdxl() -> None:
-    from diffusers import AutoencoderKL, EulerDiscreteScheduler, UNet2DConditionModel
+    from diffusers import AutoencoderKL, ControlNetModel, EulerDiscreteScheduler, UNet2DConditionModel
     from transformers import CLIPTextModel, CLIPTextModelWithProjection, CLIPTokenizer
 
     _register("sdxl", "unet", UNet2DConditionModel, "unet")
+    _register("sdxl", "controlnet", ControlNetModel, "")
     _register("sdxl", "vae", AutoencoderKL, "vae")
     _register("sdxl", "text_encoder", CLIPTextModel, "text_encoder")
     _register("sdxl", "text_encoder_2", CLIPTextModelWithProjection, "text_encoder_2")

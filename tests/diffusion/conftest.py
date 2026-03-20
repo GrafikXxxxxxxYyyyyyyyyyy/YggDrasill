@@ -182,7 +182,10 @@ class FakeUNet:
             yield self._param
 
     def __call__(self, latents, timestep, **kwargs):
-        return SimpleNamespace(sample=FakeTensor(latents.shape))
+        shape = latents.shape
+        if len(shape) == 4 and shape[1] == 9:
+            shape = (shape[0], 4, shape[2], shape[3])
+        return SimpleNamespace(sample=FakeTensor(shape))
 
     def to(self, *args, **kwargs):
         return self

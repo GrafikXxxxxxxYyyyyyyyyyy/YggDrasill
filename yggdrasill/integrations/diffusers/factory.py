@@ -32,6 +32,9 @@ from yggdrasill.workflow.workflow import Workflow
 _SD15_DEFAULT_REPO = "runwayml/stable-diffusion-v1-5"
 _SD15_INPAINT_DEFAULT_REPO = "runwayml/stable-diffusion-inpainting"
 
+_SDXL_DEFAULT_REPO = "stabilityai/stable-diffusion-xl-base-1.0"
+_SDXL_INPAINT_DEFAULT_REPO = "diffusers/stable-diffusion-xl-1.0-inpainting-0.1"
+
 
 def build_sd15_pipeline(
     repo_id: Optional[str] = None,
@@ -117,7 +120,7 @@ def build_sd15_pipeline(
 
 
 def build_sdxl_pipeline(
-    repo_id: str = "stabilityai/stable-diffusion-xl-base-1.0",
+    repo_id: Optional[str] = None,
     *,
     task: str = "text2img",
     variant: str = "fp16",
@@ -127,15 +130,26 @@ def build_sdxl_pipeline(
     config: Optional[Dict[str, Any]] = None,
     **kwargs: Any,
 ) -> Hypergraph:
-    """Build a complete SDXL pipeline graph from a HF repo."""
+    """Build a complete SDXL pipeline graph from a HF repo.
+
+    If ``repo_id`` is omitted, ``task="inpaint"`` defaults to
+    ``diffusers/stable-diffusion-xl-1.0-inpainting-0.1``; other tasks default to
+    ``stabilityai/stable-diffusion-xl-base-1.0``.
+    """
     import torch
     dtype_map = {"float16": torch.float16, "float32": torch.float32, "bfloat16": torch.bfloat16}
     dtype = dtype_map.get(torch_dtype, torch.float16)
 
+    resolved_repo = (
+        repo_id
+        if repo_id is not None
+        else (_SDXL_INPAINT_DEFAULT_REPO if task == "inpaint" else _SDXL_DEFAULT_REPO)
+    )
+
     ms = store or ModelStore.default()
     sdxl_keys = ["tokenizer", "tokenizer_2", "text_encoder", "text_encoder_2", "unet", "vae", "scheduler"]
     components = ms.load_components_by_keys(
-        "sdxl", sdxl_keys, repo_id,
+        "sdxl", sdxl_keys, resolved_repo,
         variant=variant, torch_dtype=dtype,
     )
 

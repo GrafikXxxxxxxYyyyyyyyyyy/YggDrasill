@@ -27,6 +27,19 @@ class SDXLTokenizerNode(AbstractConverter):
         self._tokenizer = tokenizer
         self._tokenizer_2 = tokenizer_2
 
+    def update_from_components(self, kwargs: Dict[str, Any]) -> None:
+        """Merge components from a follow-up ``add_component`` (grouped ``sdxl.tokenizer_*``)."""
+        t = kwargs.get("tokenizer")
+        if t is not None:
+            self._tokenizer = t
+        t2 = kwargs.get("tokenizer_2")
+        if t2 is not None:
+            self._tokenizer_2 = t2
+        cfg = kwargs.get("config")
+        if cfg:
+            self._config = dict(self._config or {})
+            self._config.update(cfg)
+
     @property
     def block_type(self) -> str:
         return "sdxl/tokenizer"

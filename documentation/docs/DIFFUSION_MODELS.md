@@ -767,7 +767,15 @@ workflow = Workflow.from_template(
 )
 ```
 
-Важно: на текущем этапе эти примеры ориентированы на **сборку, инспекцию, валидацию и сериализацию SDXL-графов**. Они уже полезны как стартовые шаблоны для интеграции, но перед публикацией финального inference API нужно завершить полное loop-wiring для `timestep`/`scheduler-step` в реальном `run()`-сценарии.
+**Inpaint по умолчанию.** Вызов `build_sdxl_pipeline(task="inpaint")` без `repo_id` подставляет чекпоинт
+`diffusers/stable-diffusion-xl-1.0-inpainting-0.1` (9-канальный UNet с concat маски в Diffusers).
+Для остальных задач по-прежнему используется `stabilityai/stable-diffusion-xl-base-1.0`.
+
+**Паритет с SD1.5.** Префикс `build_sdxl_*` и ручной `DiffusionGraphBuilder` для стека SDXL (включая
+`try_complete_sdxl_universal_diffusion`) повторяют топологию цикла `latent_init → scheduler_step ↔ unet`,
+img2img с `strength`, inpaint: 9 ch — маска на UNet; 4 ch — узел `common/inpaint_latent_blend` после шага
+планировщика. При `run(width=…, height=…)` обновляются и поля `original_size` / `target_size` у
+`sdxl/added_conditioning`.
 
 ---
 
