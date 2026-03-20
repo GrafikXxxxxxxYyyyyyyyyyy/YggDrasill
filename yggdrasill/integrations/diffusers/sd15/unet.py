@@ -152,7 +152,7 @@ class SD15UNetNode(AbstractBackbone):
                 "image_embeds": format_ip_adapter_image_embeds(
                     image_embeds,
                     device=device,
-                    dtype=dtype,
+                    dtype=None,
                     do_classifier_free_guidance=do_cfg,
                 )
             }
@@ -162,10 +162,10 @@ class SD15UNetNode(AbstractBackbone):
             kwargs["added_cond_kwargs"] = {
                 "image_embeds": format_ip_adapter_image_embeds(
                     raw_zero_ip_adapter_image_embeds_for_unet(
-                        self._unet, b_cond, device=device, dtype=dtype
+                        self._unet, b_cond, device=device,
                     ),
                     device=device,
-                    dtype=dtype,
+                    dtype=None,
                     do_classifier_free_guidance=do_cfg,
                 )
             }

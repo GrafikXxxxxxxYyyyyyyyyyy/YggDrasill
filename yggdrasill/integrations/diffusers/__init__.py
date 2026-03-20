@@ -84,6 +84,8 @@ def _wrap_hypergraph_run_for_diffusion():
             _inject_ip_adapter_scale(self, ip_adapter_conditioning_scale, merged)
         elif ip_adapter_conditioning_scale is not None:
             _inject_ip_adapter_scale(self, {"default": float(ip_adapter_conditioning_scale)}, merged)
+        else:
+            _inject_ip_adapter_scale(self, {"default": 1.0}, merged)
         # Same as run_diffusion(): sync device, width/height onto latent_init + ControlNet
         # (structure._resolve_run_kwargs only patches keys already present in node._config).
         _prepare_diffusion_run(self, kwargs, merged_inputs=merged)

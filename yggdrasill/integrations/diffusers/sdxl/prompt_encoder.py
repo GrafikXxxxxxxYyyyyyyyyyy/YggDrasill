@@ -59,13 +59,28 @@ class SDXLPromptEncoderNode(AbstractConjector):
     def _encode_from_ids_single(
         self, input_ids: Any, encoder: Any, clip_skip: Optional[int] = None,
     ) -> Tuple[Any, Any]:
+        """Match diffusers ``StableDiffusionXLPipeline.encode_prompt`` layer indexing and pooling."""
         input_ids = input_ids.to(encoder.device)
         output = encoder(input_ids, output_hidden_states=True)
+        # Diffusers: default ``hidden_states[-2]``; with clip_skip, ``-(clip_skip + 2)`` (not ``+ 1``).
         if clip_skip is not None and clip_skip > 0:
-            hidden = output.hidden_states[-(clip_skip + 1)]
+            hidden = output.hidden_states[-(clip_skip + 2)]
         else:
             hidden = output.hidden_states[-2]
-        pooled = output[0]
+
+        pooled = None
+        te = getattr(output, "text_embeds", None)
+        if te is not None:
+            pooled = te
+        if pooled is None:
+            po = getattr(output, "pooler_output", None)
+            if po is not None:
+                pooled = po
+        if pooled is None and hasattr(output, "__getitem__"):
+            z = output[0]
+            if hasattr(z, "ndim") and z.ndim == 2:
+                pooled = z
+
         return hidden, pooled
 
     def forward(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
@@ -83,6 +98,11 @@ class SDXLPromptEncoderNode(AbstractConjector):
         hidden_2, pooled = self._encode_from_ids_single(
             input_ids_2, self._text_encoder_2, clip_skip
         )
+        if pooled is None:
+            raise RuntimeError(
+                "SDXL text_encoder_2 returned no pooled embeddings: expected `text_embeds`, "
+                "`pooler_output`, or a 2D `output[0]` (see diffusers encode_prompt)."
+            )
         prompt_embeds = torch.cat([hidden_1, hidden_2], dim=-1)
 
         if neg_ids is not None and neg_ids_2 is not None:
@@ -93,6 +113,8 @@ class SDXLPromptEncoderNode(AbstractConjector):
                 neg_ids_2, self._text_encoder_2, clip_skip
             )
             neg_embeds = torch.cat([n1, n2], dim=-1)
+            if neg_pooled is None:
+                neg_pooled = torch.zeros_like(pooled)
         else:
             neg_embeds = torch.zeros_like(prompt_embeds)
             neg_pooled = torch.zeros_like(pooled)

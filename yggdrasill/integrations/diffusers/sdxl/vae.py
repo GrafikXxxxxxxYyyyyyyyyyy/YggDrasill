@@ -112,11 +112,35 @@ class SDXLVAEDecodeNode(AbstractConverter):
             latents = latents / scaling
 
         p = next(self._vae.parameters(), None)
-        if p is not None:
-            latents = latents.to(device=p.device, dtype=p.dtype)
+        device = p.device if p is not None else latents.device
+        vae_dtype = getattr(self._vae, "dtype", None)
+        if p is not None and vae_dtype is None:
+            vae_dtype = p.dtype
+        orig_vae_dtype = vae_dtype
+        needs_fp32_decode = (
+            p is not None
+            and vae_dtype == torch.float16
+            and bool(getattr(self._vae.config, "force_upcast", False))
+        )
+        if needs_fp32_decode:
+            self._vae.to(dtype=torch.float32)
+            try:
+                pq = next(iter(self._vae.post_quant_conv.parameters()))
+                decode_dtype = pq.dtype
+            except (StopIteration, AttributeError):
+                decode_dtype = torch.float32
+            latents = latents.to(device=device, dtype=decode_dtype)
+        elif p is not None:
+            latents = latents.to(device=device, dtype=p.dtype)
+        else:
+            latents = latents.to(device=device)
 
-        with torch.no_grad():
-            image = self._vae.decode(latents, return_dict=False)[0]
+        try:
+            with torch.no_grad():
+                image = self._vae.decode(latents, return_dict=False)[0]
+        finally:
+            if needs_fp32_decode and orig_vae_dtype is not None:
+                self._vae.to(dtype=orig_vae_dtype)
 
         image = (image / 2 + 0.5).clamp(0, 1)
         return {C.PORT_DECODED_IMAGE: postprocess_image(image, output_type=output_type)}

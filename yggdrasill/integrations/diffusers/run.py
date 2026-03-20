@@ -29,7 +29,10 @@ def run(
         **kwargs: Passed through to graph.run(). ``controlnet_image`` /
             ``ip_adapter_image`` may be dicts ``{node_id: image}``; omit a node id (or pass
             ``None``) to disable that ControlNet / IP-Adapter for this run while leaving
-            it on the graph.
+            it on the graph. Nodes without an image for this run are skipped automatically
+            so stale residual buffers cannot corrupt the UNet. IP-Adapter strengths default
+            to 0 for slots with no reference image on this run (so the loaded IP weights do
+            not keep diffusers' default scale 1.0).
 
     Returns:
         DiffusionOutput when wrap_output=True, else raw executor dict.
@@ -71,6 +74,10 @@ def run(
         _inject_ip_adapter_scale(graph, ip_adapter_conditioning_scale, merged)
     elif ip_adapter_conditioning_scale is not None:
         _inject_ip_adapter_scale(graph, {"default": float(ip_adapter_conditioning_scale)}, merged)
+    else:
+        # Without this, diffusers' default processor scale (often 1.0) stays on the UNet while
+        # the skipped IP node passes zero image_embeds — unlike a graph with no IP weights.
+        _inject_ip_adapter_scale(graph, {"default": 1.0}, merged)
 
     if "image" in run_kw:
         _img2img = run_kw.pop("image")
@@ -120,20 +127,23 @@ def _inject_ip_adapter_scale(
         node = graph.get_node(nid) if hasattr(graph, "get_node") else None
         if node is not None and getattr(node, "block_type", "") == "adapter/ip_adapter":
             ip_nodes.append(nid)
+    if not ip_nodes:
+        return
+
+    get_spec = getattr(graph, "get_input_spec", None)
+    input_spec: List[Dict[str, Any]] = list(get_spec() or []) if callable(get_spec) else []
     default_scale = float(scale_map.get("default", 1.0))
-    if ip_nodes:
-        scales: List[float] = []
-        for nid in ip_nodes:
-            key = f"{nid}:{C.PORT_IP_ADAPTER_IMAGE}"
-            active = key in merged_inputs and merged_inputs.get(key) is not None
-            if active:
-                v = scale_map.get(nid, default_scale)
-                scales.append(float(v))
-            else:
-                scales.append(0.0)
-        scale_payload: Any = scales[0] if len(scales) == 1 else scales
-    else:
-        scale_payload = float(next(iter(scale_map.values())))
+    scales: List[float] = []
+    for nid in ip_nodes:
+        active = _merged_provides_input_for_node_port(
+            merged_inputs, nid, C.PORT_IP_ADAPTER_IMAGE, input_spec,
+        )
+        if active:
+            v = scale_map.get(nid, default_scale)
+            scales.append(float(v))
+        else:
+            scales.append(0.0)
+    scale_payload: Any = scales[0] if len(scales) == 1 else scales
 
     for nid in node_ids:
         node = graph.get_node(nid) if hasattr(graph, "get_node") else None
@@ -199,6 +209,62 @@ def _latent_init_accepts_missing_encoded_latents(graph: Any) -> bool:
     return False
 
 
+def _merged_provides_input_for_node_port(
+    merged: Dict[str, Any],
+    nid: str,
+    pname: str,
+    input_spec: List[Dict[str, Any]],
+) -> bool:
+    """True if *merged* seeds this port the same way :meth:`EdgeBuffers.init_from_inputs` would."""
+    for entry in input_spec:
+        enid = entry.get("node_id") or entry.get("graph_id")
+        if enid != nid or entry.get("port_name") != pname:
+            continue
+        name = entry.get("name")
+        candidates: List[str] = []
+        if name is not None:
+            candidates.append(name)
+        candidates.append(pname)
+        candidates.append(f"{nid}:{pname}")
+        for k in candidates:
+            if k in merged and merged[k] is not None:
+                return True
+        if merged.get((nid, pname)) is not None:  # type: ignore[arg-type]
+            return True
+    return merged.get(f"{nid}:{pname}") is not None
+
+
+def _diffusion_skip_inactive_adapters(graph: Any, merged: Dict[str, Any]) -> Set[str]:
+    """Skip ControlNet / IP-Adapter nodes when this run supplies no conditioning image for them.
+
+    If those nodes still execute with ``control_image is None``, they write **no** outputs; with a
+    **single** incoming edge the executor then leaves the UNet residual port unset, but the buffer
+    can retain **stale tensors from a previous run** → corrupted denoising. Skipping matches the
+    intent of "adapters on the graph but disabled for this call".
+    """
+    get_spec = getattr(graph, "get_input_spec", None)
+    input_spec: List[Dict[str, Any]] = list(get_spec() or []) if callable(get_spec) else []
+
+    skip: Set[str] = set()
+    nids = list(getattr(graph, "node_ids", ()) or ())
+    for nid in nids:
+        node = graph.get_node(nid) if hasattr(graph, "get_node") else None
+        if node is None:
+            continue
+        bt = getattr(node, "block_type", "") or ""
+        if bt == "adapter/controlnet":
+            if not _merged_provides_input_for_node_port(
+                merged, nid, C.PORT_CONTROL_IMAGE, input_spec,
+            ):
+                skip.add(nid)
+        elif bt == "adapter/ip_adapter":
+            if not _merged_provides_input_for_node_port(
+                merged, nid, C.PORT_IP_ADAPTER_IMAGE, input_spec,
+            ):
+                skip.add(nid)
+    return skip
+
+
 def _diffusion_universal_skip_nodes(
     graph: Any, merged: Dict[str, Any], run_kw: Dict[str, Any],
 ) -> Set[str]:
@@ -251,6 +317,7 @@ def _prepare_diffusion_run(
     """
     merged = dict(merged_inputs or {})
     extra_skip = _diffusion_universal_skip_nodes(graph, merged, run_kwargs)
+    extra_skip |= _diffusion_skip_inactive_adapters(graph, merged)
     if extra_skip:
         prev = set(run_kwargs.get("skip_node_ids") or ())
         run_kwargs["skip_node_ids"] = prev | extra_skip

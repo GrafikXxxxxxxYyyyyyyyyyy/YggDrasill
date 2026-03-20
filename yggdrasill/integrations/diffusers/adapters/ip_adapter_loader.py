@@ -93,11 +93,16 @@ def _set_ip_adapter_scale_on_unet(unet: Any, scale: Any) -> None:
             (IPAdapterAttnProcessor, IPAdapterAttnProcessor2_0, IPAdapterXFormersAttnProcessor),
         ):
             continue
-        if len(scale_configs) != len(attn_processor.scale):
-            continue
+        # One float per loaded IP-Adapter slot; each processor's ``scale`` list length follows
+        # ``num_tokens`` (e.g. two groups → two scales). Diffusers pipelines broadcast a single
+        # config across ``attn_processor.scale``; we used to ``continue`` on length mismatch and
+        # left default scale 1.0 → different denoising vs a graph without IP weights.
         sc = list(scale_configs)
-        if len(sc) == 1:
-            sc = sc * len(attn_processor.scale)
+        n_proc = len(attn_processor.scale)
+        if len(sc) == 1 and n_proc >= 1:
+            sc = sc * n_proc
+        elif len(sc) != n_proc:
+            continue
         for i, scale_config in enumerate(sc):
             if isinstance(scale_config, dict):
                 for k, s in scale_config.items():

@@ -47,6 +47,18 @@ class ControlNetNode(AbstractInnerModule):
             ),
             Port(C.PORT_ADD_TEXT_EMBEDS, PortDirection.IN, PortType.TENSOR, optional=True),
             Port(C.PORT_ADD_TIME_IDS, PortDirection.IN, PortType.TENSOR, optional=True),
+            Port(
+                C.PORT_NEGATIVE_POOLED_PROMPT_EMBEDS,
+                PortDirection.IN,
+                PortType.TENSOR,
+                optional=True,
+            ),
+            Port(
+                C.PORT_NEGATIVE_ADD_TIME_IDS,
+                PortDirection.IN,
+                PortType.TENSOR,
+                optional=True,
+            ),
             Port(C.PORT_SCHEDULER_STATE, PortDirection.IN, PortType.ANY, optional=True),
             Port(C.PORT_DOWN_BLOCK_RESIDUALS, PortDirection.OUT, PortType.ANY),
             Port(C.PORT_MID_BLOCK_RESIDUAL, PortDirection.OUT, PortType.ANY),
@@ -212,17 +224,54 @@ class ControlNetNode(AbstractInnerModule):
             "guess_mode": guess_mode,
         }
 
-        added_cond = {}
-        if C.PORT_ADD_TEXT_EMBEDS in inputs:
-            te = inputs[C.PORT_ADD_TEXT_EMBEDS]
-            if isinstance(te, torch.Tensor):
-                te = te.to(device=model_device, dtype=model_dtype)
-            added_cond["text_embeds"] = te
-        if C.PORT_ADD_TIME_IDS in inputs:
-            tid = inputs[C.PORT_ADD_TIME_IDS]
-            if isinstance(tid, torch.Tensor):
-                tid = tid.to(device=model_device)
-            added_cond["time_ids"] = tid
+        # SDXL ControlNet must receive the same ``added_cond_kwargs`` layout as the UNet under CFG:
+        # ``torch.cat([negative, positive], dim=0)`` for ``text_embeds`` and ``time_ids``
+        # (see diffusers ``pipeline_controlnet_sd_xl``). Passing only the positive tensors
+        # with doubled latents / encoder states breaks residuals (often black output).
+        added_cond: Dict[str, Any] = {}
+        te_pos = inputs.get(C.PORT_ADD_TEXT_EMBEDS)
+        tid_pos = inputs.get(C.PORT_ADD_TIME_IDS)
+        te_neg = inputs.get(C.PORT_NEGATIVE_POOLED_PROMPT_EMBEDS)
+        tid_neg = inputs.get(C.PORT_NEGATIVE_ADD_TIME_IDS)
+
+        if isinstance(te_pos, torch.Tensor):
+            te_p = te_pos.to(device=model_device, dtype=model_dtype)
+            tid_p = (
+                tid_pos.to(device=model_device, dtype=model_dtype)
+                if isinstance(tid_pos, torch.Tensor)
+                else None
+            )
+            if guess_mode and do_cfg:
+                added_cond["text_embeds"] = te_p
+                if tid_p is not None:
+                    added_cond["time_ids"] = tid_p
+            elif do_cfg:
+                if isinstance(te_neg, torch.Tensor):
+                    te_n = te_neg.to(device=model_device, dtype=model_dtype)
+                else:
+                    te_n = torch.zeros_like(te_p)
+                added_cond["text_embeds"] = torch.cat([te_n, te_p], dim=0)
+                if tid_p is not None:
+                    if isinstance(tid_neg, torch.Tensor):
+                        tid_n = tid_neg.to(device=model_device, dtype=model_dtype)
+                    else:
+                        tid_n = torch.zeros_like(tid_p)
+                    added_cond["time_ids"] = torch.cat([tid_n, tid_p], dim=0)
+            else:
+                added_cond["text_embeds"] = te_p
+                if tid_p is not None:
+                    added_cond["time_ids"] = tid_p
+        elif isinstance(tid_pos, torch.Tensor):
+            tid_p = tid_pos.to(device=model_device, dtype=model_dtype)
+            if do_cfg and not guess_mode:
+                if isinstance(tid_neg, torch.Tensor):
+                    tid_n = tid_neg.to(device=model_device, dtype=model_dtype)
+                else:
+                    tid_n = torch.zeros_like(tid_p)
+                added_cond["time_ids"] = torch.cat([tid_n, tid_p], dim=0)
+            else:
+                added_cond["time_ids"] = tid_p
+
         if added_cond:
             kwargs["added_cond_kwargs"] = added_cond
 

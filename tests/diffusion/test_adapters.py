@@ -24,6 +24,8 @@ class TestControlNetNode:
         out_names = {p.name for p in ports if p.direction == PortDirection.OUT}
         assert C.PORT_LATENTS in in_names
         assert C.PORT_CONTROL_IMAGE in in_names
+        assert C.PORT_NEGATIVE_POOLED_PROMPT_EMBEDS in in_names
+        assert C.PORT_NEGATIVE_ADD_TIME_IDS in in_names
         assert C.PORT_DOWN_BLOCK_RESIDUALS in out_names
         assert C.PORT_MID_BLOCK_RESIDUAL in out_names
 
@@ -62,6 +64,49 @@ class TestControlNetNode:
             C.PORT_PROMPT_EMBEDS: FakeTensor((1, 77, 768)),
         })
         assert out == {}
+
+    @requires_torch
+    def test_sdxl_cfg_concatenates_added_cond_like_diffusers_pipeline(self):
+        """Under CFG, SDXL ControlNet must get [neg, pos] stacked text_embeds / time_ids."""
+        import torch
+        from unittest.mock import MagicMock
+
+        from yggdrasill.integrations.diffusers.adapters.controlnet import ControlNetNode
+
+        captured: dict = {}
+
+        def fake_cn(latents, timestep, **kwargs):
+            captured["added_cond_kwargs"] = kwargs.get("added_cond_kwargs")
+            down = [torch.zeros(latents.shape[0], 1, 4, 4) for _ in range(2)]
+            mid = torch.zeros(latents.shape[0], 1, 2, 2)
+            return down, mid
+
+        mock_cn = MagicMock(side_effect=fake_cn)
+        mock_cn.config = type("C", (), {"global_pool_conditions": False})()
+        mock_cn.parameters = lambda: iter([torch.zeros(1)])
+
+        node = ControlNetNode(
+            "cn",
+            controlnet=mock_cn,
+            config={"guidance_scale": 7.5, "height": 64, "width": 64},
+        )
+        node.forward({
+            C.PORT_LATENTS: torch.zeros(1, 4, 8, 8),
+            C.PORT_TIMESTEP: torch.tensor(999, dtype=torch.long),
+            C.PORT_PROMPT_EMBEDS: torch.zeros(1, 77, 2048),
+            C.PORT_NEGATIVE_PROMPT_EMBEDS: torch.zeros(1, 77, 2048),
+            C.PORT_CONTROL_IMAGE: torch.zeros(1, 3, 64, 64),
+            C.PORT_ADD_TEXT_EMBEDS: torch.zeros(1, 1280),
+            C.PORT_ADD_TIME_IDS: torch.zeros(1, 6),
+            C.PORT_NEGATIVE_POOLED_PROMPT_EMBEDS: torch.ones(1, 1280),
+            C.PORT_NEGATIVE_ADD_TIME_IDS: torch.ones(1, 6),
+        })
+        ac = captured.get("added_cond_kwargs") or {}
+        assert "text_embeds" in ac and "time_ids" in ac
+        assert ac["text_embeds"].shape[0] == 2
+        assert ac["time_ids"].shape[0] == 2
+        assert torch.allclose(ac["text_embeds"][0], torch.ones(1, 1280))
+        assert torch.allclose(ac["text_embeds"][1], torch.zeros(1, 1280))
 
 
 class TestIPAdapterNode:
