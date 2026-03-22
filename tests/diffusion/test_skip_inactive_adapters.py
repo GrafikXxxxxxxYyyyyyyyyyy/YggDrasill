@@ -62,6 +62,17 @@ def test_skip_inactive_adapters_empty_merged() -> None:
     assert _diffusion_skip_inactive_adapters(g, {}) == {"a", "b"}
 
 
+def test_skip_inactive_adapters_ip_not_skipped_when_embeds_only() -> None:
+    g = _MockGraph(
+        {"ip": _Node("adapter/ip_adapter")},
+        input_spec=[
+            {"node_id": "ip", "port_name": C.PORT_IP_ADAPTER_IMAGE, "name": "ip_img"},
+        ],
+    )
+    merged = {f"ip:{C.PORT_IP_ADAPTER_IMAGE_EMBEDS}": object()}
+    assert _diffusion_skip_inactive_adapters(g, merged) == set()
+
+
 def test_skip_inactive_adapters_partial_images() -> None:
     g = _MockGraph(
         {

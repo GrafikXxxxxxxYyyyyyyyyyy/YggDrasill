@@ -13,6 +13,12 @@ class IPAdapterNode(AbstractInjector):
 
     Produces image embeddings that are injected into the UNet via
     ``added_cond_kwargs["image_embeds"]``.
+
+    When ``ip_adapter_image_embeds`` is wired (or passed via ``run(..., ip_adapter_image_embeds=...)``),
+    the node forwards those tensors and **does not** run the image encoder — use for cached /
+    pipeline-``prepare_ip_adapter_image_embeds`` workflows. Tensors should be **conditional-only**
+    (see :func:`~yggdrasill.integrations.diffusers.common.ip_adapter_embeds.pipeline_ip_adapter_embeds_cond_only`
+    if you saved Diffusers CFG-packed tensors).
     """
 
     def __init__(
@@ -39,8 +45,61 @@ class IPAdapterNode(AbstractInjector):
     def declare_ports(self) -> List[Port]:
         return [
             Port(C.PORT_IP_ADAPTER_IMAGE, PortDirection.IN, PortType.IMAGE, optional=True),
+            Port(C.PORT_IP_ADAPTER_IMAGE_EMBEDS, PortDirection.IN, PortType.TENSOR, optional=True),
             Port(C.PORT_IMAGE_EMBEDS, PortDirection.OUT, PortType.TENSOR),
         ]
+
+    def encode_ip_adapter_image(
+        self,
+        ip_adapter_image: Any,
+        *,
+        device: Optional[Any] = None,
+    ) -> Any:
+        """Run CLIP preprocessor + ``image_encoder`` (same as the image branch of :meth:`forward`).
+
+        Returns **conditional** image embeddings (no classifier-free doubling). Suitable for caching
+        and for :func:`~yggdrasill.integrations.diffusers.common.ip_adapter_embeds.prepare_ip_adapter_image_embeds`.
+
+        Args:
+            ip_adapter_image: URL, path, PIL image, or tensor (tensor path only when encoder is absent).
+            device: Optional device for the image encoder and output tensors (mutates encoder placement).
+        """
+        import torch
+
+        from yggdrasill.integrations.diffusers.common.image_utils import load_image as _load_image
+        from yggdrasill.integrations.diffusers.lazy_component import resolve_if_lazy
+
+        self._image_encoder = resolve_if_lazy(self._image_encoder)
+        fe_raw = self._feature_extractor
+        fe = resolve_if_lazy(fe_raw) if fe_raw is not None else None
+
+        ip_image = _load_image(ip_adapter_image)
+
+        if fe is not None:
+            enc = self._image_encoder
+            if enc is None:
+                raise ValueError("IP-Adapter node has feature_extractor but no image_encoder")
+            if device is not None and hasattr(enc, "to"):
+                self._image_encoder = enc.to(device)
+                enc = self._image_encoder
+            pixel_values = fe(
+                images=ip_image if isinstance(ip_image, list) else [ip_image],
+                return_tensors="pt",
+            ).pixel_values
+            pixel_values = pixel_values.to(device=enc.device, dtype=enc.dtype)
+            with torch.no_grad():
+                return enc(pixel_values).image_embeds
+
+        if isinstance(ip_image, torch.Tensor):
+            t = ip_image
+            if device is not None:
+                t = t.to(device=device)
+            return t
+
+        raise ValueError(
+            "IP-Adapter encode_ip_adapter_image requires feature_extractor+image_encoder "
+            "or a pre-computed torch.Tensor."
+        )
 
     def _inactive_image_embeds(self) -> Any:
         """Zeros with the same shape as a real encoding so multi-IP-Adapter UNets stay aligned."""
@@ -67,36 +126,22 @@ class IPAdapterNode(AbstractInjector):
     def forward(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         import torch
 
+        precomputed = inputs.get(C.PORT_IP_ADAPTER_IMAGE_EMBEDS)
+        if precomputed is not None:
+            if isinstance(precomputed, (list, tuple)):
+                tensors = [x for x in precomputed if x is not None]
+                if not tensors:
+                    return {C.PORT_IMAGE_EMBEDS: self._inactive_image_embeds()}
+                if len(tensors) == 1:
+                    return {C.PORT_IMAGE_EMBEDS: tensors[0]}
+                return {C.PORT_IMAGE_EMBEDS: list(tensors)}
+            return {C.PORT_IMAGE_EMBEDS: precomputed}
+
         ip_image = inputs.get(C.PORT_IP_ADAPTER_IMAGE)
         if ip_image is None:
             return {C.PORT_IMAGE_EMBEDS: self._inactive_image_embeds()}
 
-        from yggdrasill.integrations.diffusers.common.image_utils import load_image as _load_image
-        ip_image = _load_image(ip_image)
-
-        if self._feature_extractor is not None:
-            pixel_values = self._feature_extractor(
-                images=ip_image if isinstance(ip_image, list) else [ip_image],
-                return_tensors="pt",
-            ).pixel_values
-
-            if self._image_encoder is not None:
-                pixel_values = pixel_values.to(
-                    device=self._image_encoder.device,
-                    dtype=self._image_encoder.dtype,
-                )
-                with torch.no_grad():
-                    image_embeds = self._image_encoder(pixel_values).image_embeds
-            else:
-                image_embeds = pixel_values
-        elif isinstance(ip_image, torch.Tensor):
-            image_embeds = ip_image
-        else:
-            raise ValueError(
-                "IP-Adapter requires either a feature_extractor+image_encoder "
-                "or pre-computed tensor embeddings."
-            )
-
+        image_embeds = self.encode_ip_adapter_image(ip_image, device=None)
         return {C.PORT_IMAGE_EMBEDS: image_embeds}
 
     def to(self, device: Any) -> "IPAdapterNode":

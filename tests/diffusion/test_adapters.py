@@ -118,6 +118,7 @@ class TestIPAdapterNode:
         in_names = {p.name for p in ports if p.direction == PortDirection.IN}
         out_names = {p.name for p in ports if p.direction == PortDirection.OUT}
         assert C.PORT_IP_ADAPTER_IMAGE in in_names
+        assert C.PORT_IP_ADAPTER_IMAGE_EMBEDS in in_names
         assert C.PORT_IMAGE_EMBEDS in out_names
 
     def test_block_type(self):
@@ -144,6 +145,35 @@ class TestIPAdapterNode:
         out = node.forward({C.PORT_IP_ADAPTER_IMAGE: embeds})
         assert C.PORT_IMAGE_EMBEDS in out
         assert out[C.PORT_IMAGE_EMBEDS] is embeds
+
+    @requires_torch
+    def test_forward_precomputed_embeds_port_skips_image_encoder(self):
+        import torch
+        from unittest.mock import MagicMock
+
+        from yggdrasill.integrations.diffusers.adapters.ip_adapter import IPAdapterNode
+
+        bad_enc = MagicMock()
+        bad_enc.side_effect = AssertionError("encoder should not run when embeds port is set")
+
+        node = IPAdapterNode(
+            "ip",
+            image_encoder=bad_enc,
+            feature_extractor=MagicMock(),
+        )
+        emb = torch.ones(1, 512)
+        out = node.forward({C.PORT_IP_ADAPTER_IMAGE_EMBEDS: emb})
+        assert torch.equal(out[C.PORT_IMAGE_EMBEDS], emb)
+
+    @requires_torch
+    def test_forward_precomputed_list_multi_slot(self):
+        import torch
+        from yggdrasill.integrations.diffusers.adapters.ip_adapter import IPAdapterNode
+
+        node = IPAdapterNode("ip")
+        a, b = torch.zeros(1, 128), torch.ones(1, 128)
+        out = node.forward({C.PORT_IP_ADAPTER_IMAGE_EMBEDS: [a, b]})
+        assert out[C.PORT_IMAGE_EMBEDS] == [a, b]
 
     @requires_torch
     def test_forward_inactive_returns_zero_embeds(self):

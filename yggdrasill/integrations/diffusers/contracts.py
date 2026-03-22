@@ -86,6 +86,8 @@ PORT_NEGATIVE_ADD_TIME_IDS = "negative_add_time_ids"
 PORT_CONTROL_IMAGE = "control_image"
 PORT_CONTROL_RESIDUALS = "control_residuals"
 PORT_IP_ADAPTER_IMAGE = "ip_adapter_image"
+# Precomputed IP-Adapter embeddings (encoder output or cond-only slice of pipeline-prepared tensors).
+PORT_IP_ADAPTER_IMAGE_EMBEDS = "ip_adapter_image_embeds"
 PORT_LORA_SCALE = "lora_scale"
 
 # ---------------------------------------------------------------------------

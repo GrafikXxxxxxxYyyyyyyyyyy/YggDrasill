@@ -45,6 +45,7 @@ def _wrap_hypergraph_run_for_diffusion():
         PORT_OUTPUT_IMAGE,
         PORT_CONTROL_IMAGE,
         PORT_IP_ADAPTER_IMAGE,
+        PORT_IP_ADAPTER_IMAGE_EMBEDS,
     )
 
     _original_run = Hypergraph.run
@@ -76,6 +77,15 @@ def _wrap_hypergraph_run_for_diffusion():
                     merged[f"{nid}:{PORT_IP_ADAPTER_IMAGE}"] = img
         elif ip_adapter_image is not None:
             _assign_to_single_exposed(merged, self, PORT_IP_ADAPTER_IMAGE, ip_adapter_image)
+        ip_adapter_image_embeds = kwargs.pop("ip_adapter_image_embeds", None)
+        if isinstance(ip_adapter_image_embeds, dict):
+            for nid, emb in ip_adapter_image_embeds.items():
+                if emb is not None:
+                    merged[f"{nid}:{PORT_IP_ADAPTER_IMAGE_EMBEDS}"] = emb
+        elif ip_adapter_image_embeds is not None:
+            _assign_to_single_exposed(
+                merged, self, PORT_IP_ADAPTER_IMAGE_EMBEDS, ip_adapter_image_embeds,
+            )
         controlnet_conditioning_scale = kwargs.pop("controlnet_conditioning_scale", None)
         if isinstance(controlnet_conditioning_scale, dict):
             _inject_node_config(self, controlnet_conditioning_scale, "conditioning_scale")
@@ -117,12 +127,16 @@ from yggdrasill.integrations.diffusers.factory import (
     build_sdxl_base_refiner,
     build_flux_pipeline,
 )
+from yggdrasill.integrations.diffusers.common.ip_adapter_embeds import (
+    prepare_ip_adapter_image_embeds,
+)
 
 __all__ = [
     "DiffusionOutput",
     "verify_devices",
     "DiffusionGraphBuilder",
     "run_diffusion",
+    "prepare_ip_adapter_image_embeds",
     "build_template",
     "from_template",
     "list_templates",

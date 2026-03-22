@@ -43,3 +43,15 @@ def test_inject_ip_adapter_scale_single_slot_active_uses_default() -> None:
     set_scale.assert_called_once()
     args, _kw = set_scale.call_args
     assert args[1] == 1.0
+
+
+def test_inject_ip_adapter_scale_active_when_only_precomputed_embeds() -> None:
+    g = _Graph()
+    merged = {"IP:ip_adapter_image_embeds": object()}
+    with patch(
+        "yggdrasill.integrations.diffusers.adapters.ip_adapter_loader._set_ip_adapter_scale_on_unet",
+    ) as set_scale:
+        _inject_ip_adapter_scale(g, {"default": 0.7}, merged)
+    set_scale.assert_called_once()
+    args, _kw = set_scale.call_args
+    assert args[1] == 0.7

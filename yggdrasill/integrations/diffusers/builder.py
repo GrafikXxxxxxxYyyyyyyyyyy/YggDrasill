@@ -216,7 +216,8 @@ class DiffusionGraphBuilder:
     ) -> Any:
         """Run the diffusion graph. Accepts prompt, negative_prompt, num_inference_steps,
         guidance_scale, seed, width, height, device, controlnet_image, ip_adapter_image,
-        controlnet_conditioning_scale, ip_adapter_conditioning_scale, etc. Returns DiffusionOutput."""
+        ip_adapter_image_embeds, controlnet_conditioning_scale, ip_adapter_conditioning_scale,
+        etc. Returns DiffusionOutput."""
         from yggdrasill.integrations.diffusers.run import run as run_diffusion
         return run_diffusion(self.graph, inputs, wrap_output=True, **kwargs)
 
@@ -545,6 +546,12 @@ class DiffusionGraphBuilder:
             if "adapter/ip_adapter" in bt and C.PORT_IP_ADAPTER_IMAGE in in_names:
                 # Use node-scoped key so multi-IPAdapter graphs work with ip_adapter_image={node_id: img}
                 self._graph.expose_input(nid, C.PORT_IP_ADAPTER_IMAGE, f"{nid}:{C.PORT_IP_ADAPTER_IMAGE}")
+            if "adapter/ip_adapter" in bt and C.PORT_IP_ADAPTER_IMAGE_EMBEDS in in_names:
+                self._graph.expose_input(
+                    nid,
+                    C.PORT_IP_ADAPTER_IMAGE_EMBEDS,
+                    f"{nid}:{C.PORT_IP_ADAPTER_IMAGE_EMBEDS}",
+                )
             if "adapter/controlnet" in bt and C.PORT_CONTROL_IMAGE in in_names:
                 # Use node-scoped key so multi-ControlNet graphs work with controlnet_image={node_id: img}
                 self._graph.expose_input(nid, C.PORT_CONTROL_IMAGE, f"{nid}:{C.PORT_CONTROL_IMAGE}")

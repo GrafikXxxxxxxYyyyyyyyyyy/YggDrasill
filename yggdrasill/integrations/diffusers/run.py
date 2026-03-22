@@ -27,9 +27,12 @@ def run(
         device: Target device.
         wrap_output: If True, return DiffusionOutput; otherwise raw dict.
         **kwargs: Passed through to graph.run(). ``controlnet_image`` /
-            ``ip_adapter_image`` may be dicts ``{node_id: image}``; omit a node id (or pass
+            ``ip_adapter_image`` / ``ip_adapter_image_embeds`` may be dicts ``{node_id: ...}``;
+            omit a node id (or pass
             ``None``) to disable that ControlNet / IP-Adapter for this run while leaving
-            it on the graph. Nodes without an image for this run are skipped automatically
+            it on the graph. For IP-Adapter, supplying only ``ip_adapter_image_embeds`` counts
+            as active (encoder can stay unloaded). Nodes without reference conditioning for this
+            run are skipped automatically
             so stale residual buffers cannot corrupt the UNet. IP-Adapter strengths default
             to 0 for slots with no reference image on this run (so the loaded IP weights do
             not keep diffusers' default scale 1.0).
@@ -64,6 +67,16 @@ def run(
                 merged[f"{nid}:{C.PORT_IP_ADAPTER_IMAGE}"] = img
     elif ip_adapter_image is not None:
         _assign_to_single_exposed(merged, graph, C.PORT_IP_ADAPTER_IMAGE, ip_adapter_image)
+
+    ip_adapter_image_embeds = run_kw.pop("ip_adapter_image_embeds", None)
+    if isinstance(ip_adapter_image_embeds, dict):
+        for nid, emb in ip_adapter_image_embeds.items():
+            if emb is not None:
+                merged[f"{nid}:{C.PORT_IP_ADAPTER_IMAGE_EMBEDS}"] = emb
+    elif ip_adapter_image_embeds is not None:
+        _assign_to_single_exposed(
+            merged, graph, C.PORT_IP_ADAPTER_IMAGE_EMBEDS, ip_adapter_image_embeds,
+        )
 
     # Do not pop or apply controlnet_conditioning_scale / ip_adapter_conditioning_scale here.
     # Hypergraph.run is patched to merge those kwargs and call _inject_*; if we popped them
@@ -125,8 +138,8 @@ def _inject_ip_adapter_scale(
     default_scale = float(scale_map.get("default", 1.0))
     scales: List[float] = []
     for nid in ip_nodes:
-        active = _merged_provides_input_for_node_port(
-            merged_inputs, nid, C.PORT_IP_ADAPTER_IMAGE, input_spec,
+        active = _ip_adapter_node_has_conditioning(
+            merged_inputs, nid, input_spec,
         )
         if active:
             v = scale_map.get(nid, default_scale)
@@ -248,11 +261,25 @@ def _diffusion_skip_inactive_adapters(graph: Any, merged: Dict[str, Any]) -> Set
             ):
                 skip.add(nid)
         elif bt == "adapter/ip_adapter":
-            if not _merged_provides_input_for_node_port(
-                merged, nid, C.PORT_IP_ADAPTER_IMAGE, input_spec,
-            ):
+            if not _ip_adapter_node_has_conditioning(merged, nid, input_spec):
                 skip.add(nid)
     return skip
+
+
+def _ip_adapter_node_has_conditioning(
+    merged: Dict[str, Any],
+    nid: str,
+    input_spec: List[Dict[str, Any]],
+) -> bool:
+    """True if this run supplies ``ip_adapter_image`` and/or ``ip_adapter_image_embeds``."""
+    return (
+        _merged_provides_input_for_node_port(
+            merged, nid, C.PORT_IP_ADAPTER_IMAGE, input_spec,
+        )
+        or _merged_provides_input_for_node_port(
+            merged, nid, C.PORT_IP_ADAPTER_IMAGE_EMBEDS, input_spec,
+        )
+    )
 
 
 def _diffusion_universal_skip_nodes(

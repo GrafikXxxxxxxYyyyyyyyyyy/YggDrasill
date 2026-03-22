@@ -51,6 +51,7 @@ class TestContractConstants:
     def test_adapter_ports_exist(self):
         assert C.PORT_CONTROL_IMAGE == "control_image"
         assert C.PORT_IP_ADAPTER_IMAGE == "ip_adapter_image"
+        assert C.PORT_IP_ADAPTER_IMAGE_EMBEDS == "ip_adapter_image_embeds"
         assert C.PORT_LORA_SCALE == "lora_scale"
 
     def test_config_keys_exist(self):

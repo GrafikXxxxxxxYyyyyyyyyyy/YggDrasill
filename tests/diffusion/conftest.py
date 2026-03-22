@@ -83,6 +83,17 @@ class FakeTensor:
     def expand(self, *args):
         return FakeTensor(args if len(args) > 1 else args[0], self._value)
 
+    def repeat_interleave(self, repeats, dim=0):
+        r = int(repeats)
+        shape = list(self._shape)
+        if not shape:
+            return self
+        dim = int(dim)
+        if dim < 0:
+            dim += len(shape)
+        shape[dim] = shape[dim] * r
+        return FakeTensor(tuple(shape), self._value)
+
     def __mul__(self, other):
         return self
 
