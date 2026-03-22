@@ -418,3 +418,49 @@ class TestHypergraphPretrainedPath:
         h.add_node_from_config("A", "test/add_task", registry=reg, pretrained=str(ckpt))
         node = h.get_node("A")
         assert node.offset == 99
+
+
+class _IpImageInOnly(AbstractBaseBlock, AbstractGraphNode):
+    """Minimal node exposing ``ip_adapter_image`` for routing tests."""
+
+    def __init__(self, node_id: str) -> None:
+        AbstractBaseBlock.__init__(self)
+        AbstractGraphNode.__init__(self, node_id=node_id)
+
+    @property
+    def block_type(self) -> str:
+        return "test/ip_image_in"
+
+    def declare_ports(self) -> List[Port]:
+        return [
+            Port("ip_adapter_image", PortDirection.IN, PortType.IMAGE, optional=True),
+        ]
+
+    def forward(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        return {}
+
+
+class TestResolveRunKwargsMultiExposeSamePort:
+    """Bare port names must not route kwargs when several nodes share that port (multi IP-Adapter)."""
+
+    def test_bare_ip_adapter_image_not_in_resolved_when_two_nodes_expose_it(self):
+        h = Hypergraph()
+        h.add_node("style_ip", _IpImageInOnly("style_ip"))
+        h.add_node("face_ip", _IpImageInOnly("face_ip"))
+        h.expose_input("style_ip", "ip_adapter_image", "style_ip:ip_adapter_image")
+        h.expose_input("face_ip", "ip_adapter_image", "face_ip:ip_adapter_image")
+
+        resolved, _ = h._resolve_run_kwargs(
+            {"style_ip:ip_adapter_image": "S", "face_ip:ip_adapter_image": "F"},
+            {"ip_adapter_image": "WRONG"},
+        )
+        assert resolved["style_ip:ip_adapter_image"] == "S"
+        assert resolved["face_ip:ip_adapter_image"] == "F"
+        assert "ip_adapter_image" not in resolved
+
+    def test_bare_ip_adapter_image_routed_when_single_node_exposes_it(self):
+        h = Hypergraph()
+        h.add_node("ip", _IpImageInOnly("ip"))
+        h.expose_input("ip", "ip_adapter_image", "custom_name")
+        resolved, _ = h._resolve_run_kwargs({}, {"ip_adapter_image": "Z"})
+        assert resolved["ip_adapter_image"] == "Z"

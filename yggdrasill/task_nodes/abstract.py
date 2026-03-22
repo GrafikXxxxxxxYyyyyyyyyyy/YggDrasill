@@ -65,7 +65,11 @@ class AbstractBackbone(_TaskNodeBase):
 # ---------------------------------------------------------------------------
 
 class AbstractInjector(_TaskNodeBase):
-    """Injects conditioning signal into the backbone stream (e.g., LoRA)."""
+    """Adapts the backbone's computation (e.g. LoRA): tied to weights / internal behavior.
+
+    Use :class:`AbstractConjector` for **standalone conditioning encoders** (text, reference
+    image, etc.) that do not alter backbone weights or architecture the way LoRA does.
+    """
 
     _role = Role.INJECTOR
 
@@ -89,7 +93,7 @@ class AbstractInjector(_TaskNodeBase):
 # ---------------------------------------------------------------------------
 
 class AbstractConjector(_TaskNodeBase):
-    """Supplies condition to the backbone (e.g., CLIP encoder)."""
+    """Supplies conditioning beside the backbone (text encoder, IP-Adapter image encoder, …)."""
 
     _role = Role.CONJECTOR
 

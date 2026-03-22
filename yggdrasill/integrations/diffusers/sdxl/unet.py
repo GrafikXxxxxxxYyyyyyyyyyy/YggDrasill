@@ -57,6 +57,7 @@ class SDXLUNetNode(AbstractBackbone):
             Port(C.PORT_SCHEDULER_STATE, PortDirection.IN, PortType.ANY, optional=True),
             Port(C.PORT_DOWN_BLOCK_RESIDUALS, PortDirection.IN, PortType.ANY, optional=True, aggregation=PortAggregation.CONCAT),
             Port(C.PORT_MID_BLOCK_RESIDUAL, PortDirection.IN, PortType.ANY, optional=True, aggregation=PortAggregation.CONCAT),
+            Port(C.PORT_IP_ADAPTER_MASKS, PortDirection.IN, PortType.TENSOR, optional=True),
             Port(C.PORT_NOISE_PRED, PortDirection.OUT, PortType.TENSOR),
         ]
 
@@ -175,16 +176,16 @@ class SDXLUNetNode(AbstractBackbone):
             added_cond_kwargs["image_embeds"] = format_ip_adapter_image_embeds(
                 image_embeds,
                 device=device,
-                dtype=None,
+                dtype=dtype,
                 do_classifier_free_guidance=do_cfg,
             )
         elif unet_requires_image_embeds_in_added_cond(self._unet):
             added_cond_kwargs["image_embeds"] = format_ip_adapter_image_embeds(
                 raw_zero_ip_adapter_image_embeds_for_unet(
-                    self._unet, b_cond, device=device,
+                    self._unet, b_cond, device=device, dtype=dtype,
                 ),
                 device=device,
-                dtype=None,
+                dtype=dtype,
                 do_classifier_free_guidance=do_cfg,
             )
 
@@ -204,6 +205,24 @@ class SDXLUNetNode(AbstractBackbone):
 
         if hasattr(self._unet, "config") and getattr(self._unet.config, "time_cond_proj_dim", None):
             unet_kwargs["timestep_cond"] = self._get_guidance_scale_embedding(guidance_scale)
+
+        ip_masks = inputs.get(C.PORT_IP_ADAPTER_MASKS)
+        if ip_masks is not None:
+            cross_kw: Dict[str, Any] = {}
+            if isinstance(ip_masks, (list, tuple)):
+                cast_masks: List[Any] = []
+                for t in ip_masks:
+                    if hasattr(t, "to"):
+                        cast_masks.append(t.to(device=device, dtype=dtype))
+                    else:
+                        cast_masks.append(t)
+                cross_kw["ip_adapter_masks"] = cast_masks
+            else:
+                m = ip_masks
+                if hasattr(m, "to"):
+                    m = m.to(device=device, dtype=dtype)
+                cross_kw["ip_adapter_masks"] = [m]
+            unet_kwargs["cross_attention_kwargs"] = cross_kw
 
         noise_pred = self._unet(latent_input, timestep, **unet_kwargs).sample
 

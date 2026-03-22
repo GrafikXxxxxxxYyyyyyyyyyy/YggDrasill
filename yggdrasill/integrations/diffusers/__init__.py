@@ -46,6 +46,7 @@ def _wrap_hypergraph_run_for_diffusion():
         PORT_CONTROL_IMAGE,
         PORT_IP_ADAPTER_IMAGE,
         PORT_IP_ADAPTER_IMAGE_EMBEDS,
+        PORT_IP_ADAPTER_MASK_IMAGES,
     )
 
     _original_run = Hypergraph.run
@@ -53,11 +54,15 @@ def _wrap_hypergraph_run_for_diffusion():
     def _run_with_diffusion_output(self, inputs=None, **kwargs):
         from yggdrasill.integrations.diffusers.run import (
             _assign_to_single_exposed,
+            _route_ip_adapter_masks,
             _inject_ip_adapter_scale,
             _inject_node_config,
             _prepare_diffusion_run,
+            merge_ip_adapter_image_kwarg,
+            normalize_merged_adapter_inputs,
         )
         merged = dict(inputs or {})
+        normalize_merged_adapter_inputs(merged, self)
         if "image" in merged and PORT_INIT_IMAGE not in merged:
             merged[PORT_INIT_IMAGE] = merged.pop("image")
         if "image" in kwargs:
@@ -71,12 +76,7 @@ def _wrap_hypergraph_run_for_diffusion():
         elif controlnet_image is not None:
             _assign_to_single_exposed(merged, self, PORT_CONTROL_IMAGE, controlnet_image)
         ip_adapter_image = kwargs.pop("ip_adapter_image", None)
-        if isinstance(ip_adapter_image, dict):
-            for nid, img in ip_adapter_image.items():
-                if img is not None:
-                    merged[f"{nid}:{PORT_IP_ADAPTER_IMAGE}"] = img
-        elif ip_adapter_image is not None:
-            _assign_to_single_exposed(merged, self, PORT_IP_ADAPTER_IMAGE, ip_adapter_image)
+        merge_ip_adapter_image_kwarg(merged, self, ip_adapter_image)
         ip_adapter_image_embeds = kwargs.pop("ip_adapter_image_embeds", None)
         if isinstance(ip_adapter_image_embeds, dict):
             for nid, emb in ip_adapter_image_embeds.items():
@@ -86,11 +86,28 @@ def _wrap_hypergraph_run_for_diffusion():
             _assign_to_single_exposed(
                 merged, self, PORT_IP_ADAPTER_IMAGE_EMBEDS, ip_adapter_image_embeds,
             )
+        ip_adapter_mask_images = kwargs.pop("ip_adapter_mask_images", None)
+        if isinstance(ip_adapter_mask_images, dict):
+            for nid, imgs in ip_adapter_mask_images.items():
+                if imgs is not None:
+                    merged[f"{nid}:{PORT_IP_ADAPTER_MASK_IMAGES}"] = imgs
+        elif ip_adapter_mask_images is not None:
+            _assign_to_single_exposed(
+                merged, self, PORT_IP_ADAPTER_MASK_IMAGES, ip_adapter_mask_images,
+            )
+        ip_adapter_masks = kwargs.pop("ip_adapter_masks", None)
+        if ip_adapter_masks is not None:
+            _route_ip_adapter_masks(
+                merged, self, ip_adapter_masks,
+                pin_data=kwargs.setdefault("pin_data", {}),
+            )
         controlnet_conditioning_scale = kwargs.pop("controlnet_conditioning_scale", None)
         if isinstance(controlnet_conditioning_scale, dict):
             _inject_node_config(self, controlnet_conditioning_scale, "conditioning_scale")
         ip_adapter_conditioning_scale = kwargs.pop("ip_adapter_conditioning_scale", None)
-        if isinstance(ip_adapter_conditioning_scale, dict):
+        if isinstance(ip_adapter_conditioning_scale, list):
+            _inject_ip_adapter_scale(self, ip_adapter_conditioning_scale, merged)
+        elif isinstance(ip_adapter_conditioning_scale, dict):
             _inject_ip_adapter_scale(self, ip_adapter_conditioning_scale, merged)
         elif ip_adapter_conditioning_scale is not None:
             _inject_ip_adapter_scale(self, {"default": float(ip_adapter_conditioning_scale)}, merged)
@@ -130,6 +147,10 @@ from yggdrasill.integrations.diffusers.factory import (
 from yggdrasill.integrations.diffusers.common.ip_adapter_embeds import (
     prepare_ip_adapter_image_embeds,
 )
+from yggdrasill.integrations.diffusers.common.ip_adapter_mask_prep import (
+    IPAdapterMaskPrepNode,
+    prepare_ip_adapter_masks_tensor,
+)
 
 __all__ = [
     "DiffusionOutput",
@@ -137,6 +158,8 @@ __all__ = [
     "DiffusionGraphBuilder",
     "run_diffusion",
     "prepare_ip_adapter_image_embeds",
+    "IPAdapterMaskPrepNode",
+    "prepare_ip_adapter_masks_tensor",
     "build_template",
     "from_template",
     "list_templates",

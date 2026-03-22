@@ -276,8 +276,15 @@ class FakeImageEncoder:
     device = "cpu"
     dtype = "float32"
 
-    def __call__(self, pixel_values):
+    def __call__(self, pixel_values, output_hidden_states=False, **kwargs):
         b = pixel_values.shape[0] if hasattr(pixel_values, 'shape') else 1
+        if output_hidden_states:
+            seq, dim = 16, 1024
+            h = FakeTensor((b, seq, dim))
+            return SimpleNamespace(
+                image_embeds=FakeTensor((b, dim)),
+                hidden_states=[h, FakeTensor((b, seq, dim))],
+            )
         return SimpleNamespace(image_embeds=FakeTensor((b, 1024)))
 
     def to(self, *args, **kwargs):

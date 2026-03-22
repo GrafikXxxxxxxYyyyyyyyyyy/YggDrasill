@@ -47,6 +47,9 @@ class TestRoleFromBlockType:
     def test_inner_module_slash(self):
         assert role_from_block_type("inner_module/identity") == "inner_module"
 
+    def test_ip_adapter_is_conjector(self):
+        assert role_from_block_type("adapter/ip_adapter") == "conjector"
+
     def test_returns_string_not_enum(self):
         result = role_from_block_type("backbone")
         assert isinstance(result, str)

@@ -59,7 +59,8 @@ def test_skip_inactive_adapters_empty_merged() -> None:
             {"node_id": "b", "port_name": C.PORT_IP_ADAPTER_IMAGE, "name": "ip_img"},
         ],
     )
-    assert _diffusion_skip_inactive_adapters(g, {}) == {"a", "b"}
+    # IP-Adapter always runs (inactive zeros when no image) so multi-IP CONCAT stays aligned.
+    assert _diffusion_skip_inactive_adapters(g, {}) == {"a"}
 
 
 def test_skip_inactive_adapters_ip_not_skipped_when_embeds_only() -> None:
@@ -87,7 +88,22 @@ def test_skip_inactive_adapters_partial_images() -> None:
         ],
     )
     merged = {f"cn1:{C.PORT_CONTROL_IMAGE}": object()}
-    assert _diffusion_skip_inactive_adapters(g, merged) == {"cn2", "ip"}
+    assert _diffusion_skip_inactive_adapters(g, merged) == {"cn2"}
+
+
+def test_skip_inactive_adapters_never_skips_ip_even_with_two_ip_nodes() -> None:
+    g = _MockGraph(
+        {
+            "style_ip": _Node("adapter/ip_adapter"),
+            "face_ip": _Node("adapter/ip_adapter"),
+        },
+        input_spec=[
+            {"node_id": "style_ip", "port_name": C.PORT_IP_ADAPTER_IMAGE, "name": "s"},
+            {"node_id": "face_ip", "port_name": C.PORT_IP_ADAPTER_IMAGE, "name": "f"},
+        ],
+    )
+    merged = {f"style_ip:{C.PORT_IP_ADAPTER_IMAGE}": object()}
+    assert _diffusion_skip_inactive_adapters(g, merged) == set()
 
 
 def test_prepare_merges_skip_into_run_kw() -> None:

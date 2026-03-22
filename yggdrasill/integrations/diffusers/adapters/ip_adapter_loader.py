@@ -70,8 +70,11 @@ def _load_ip_adapter_state_dict(
 def _set_ip_adapter_scale_on_unet(unet: Any, scale: Any) -> None:
     """Set IP-Adapter scale(s) on UNet (aligned with diffusers ``IPAdapterMixin.set_ip_adapter_scale``).
 
-    *scale* may be a float (one strength for all loaded IP-Adapters) or a list of floats
-    (one per loaded adapter, e.g. ``[0.6, 0.0]`` when the second adapter has no image).
+    *scale* may be a float; a list of per-adapter values (float, nested list, or InstantStyle dict); nested
+    lists such as ``[[0.7, 0.7]]`` for **one** loaded adapter with **two** reference images under spatial
+    masks (see HF IP-Adapter masking docs); or an InstantStyle dict
+    ``{"down": {"block_2": [...]}, "up": {"block_0": [...]}}`` which is expanded via
+    ``diffusers.loaders.unet_loader_utils._maybe_expand_lora_scales`` like the pipeline API.
     """
     from yggdrasill.integrations.diffusers.lazy_component import resolve_if_lazy
 
@@ -173,3 +176,51 @@ def load_ip_adapter_into_unet(
 
     if ip_adapter_scale is not None:
         _set_ip_adapter_scale_on_unet(unet, ip_adapter_scale)
+
+
+def reload_ip_adapter_weights_on_unet(
+    unet: Any,
+    state_dicts: Any,
+    *,
+    low_cpu_mem_usage: bool = True,
+) -> None:
+    """Apply several IP-Adapter checkpoints in one call (same as diffusers ``load_ip_adapter`` with a list).
+
+    Each ``state_dict`` must match :func:`_load_ip_adapter_state_dict` output. Calling
+    ``_load_ip_adapter_weights`` replaces all IP-Adapter processors; pass **all** loaded adapters
+    every time the list grows (see graph metadata accumulation in the diffusion builder).
+    """
+    from yggdrasill.integrations.diffusers.lazy_component import resolve_if_lazy
+
+    unet = resolve_if_lazy(unet)
+    if unet is None:
+        return
+    sds = list(state_dicts) if isinstance(state_dicts, (list, tuple)) else [state_dicts]
+    if not sds or not hasattr(unet, "_load_ip_adapter_weights"):
+        return
+    unet._load_ip_adapter_weights(sds, low_cpu_mem_usage=low_cpu_mem_usage)
+
+
+def infer_ip_adapter_plus_token_embed_dim(unet: Any) -> Optional[int]:
+    """Return per-token width expected by the first IP-Adapter Plus ``proj_in`` (``in_features``).
+
+    Standard (non-Plus) IP-Adapter uses :class:`~diffusers.models.embeddings.ImageProjection`
+    without ``proj_in`` — returns ``None``. Used to align CLIP vision ``hidden_states[-2]`` with
+    loaded weights (e.g. h94 SDXL ViT width 1664 → contrastive 1280 via ``visual_projection``).
+    """
+    from yggdrasill.integrations.diffusers.lazy_component import resolve_if_lazy
+
+    unet = resolve_if_lazy(unet)
+    if unet is None:
+        return None
+    wrap = getattr(unet, "encoder_hid_proj", None)
+    if wrap is None:
+        return None
+    layers = getattr(wrap, "image_projection_layers", None)
+    if not layers or len(layers) == 0:
+        return None
+    pin = getattr(layers[0], "proj_in", None)
+    if pin is None or not hasattr(pin, "in_features"):
+        return None
+    n = int(getattr(pin, "in_features", 0) or 0)
+    return n if n > 0 else None

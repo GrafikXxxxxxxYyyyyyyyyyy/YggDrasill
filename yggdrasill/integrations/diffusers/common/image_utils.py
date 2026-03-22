@@ -1,7 +1,76 @@
 """Image pre/post-processing utilities matching Diffusers conventions."""
 from __future__ import annotations
 
+import os
 from typing import Any, List, Optional
+
+import numpy as np
+from PIL import Image, ImageOps
+
+
+def load_mask_image(image: Any) -> Any:
+    """Load a spatial IP-Adapter mask (URL, path, or PIL).
+
+    Unlike :func:`load_image`, this does **not** force ``RGB``. Palette images with transparency
+    and RGBA masks are reduced to a single ``L`` channel so :class:`diffusers.image_processor.
+    IPAdapterMaskProcessor` sees correct soft/hard edges (Diffusers ``load_image`` drops palette
+    transparency when converting to RGB, which corrupts common mask PNGs).
+    """
+    if hasattr(image, "save") and not isinstance(image, str):
+        return _pil_to_mask_luminance(image)
+
+    if not isinstance(image, str):
+        return image
+
+    if image.startswith("http://") or image.startswith("https://"):
+        try:
+            from diffusers.utils import DIFFUSERS_REQUEST_TIMEOUT
+            import requests
+
+            img = Image.open(
+                requests.get(image, stream=True, timeout=DIFFUSERS_REQUEST_TIMEOUT).raw
+            )
+        except ImportError:
+            import requests
+            from io import BytesIO
+
+            r = requests.get(image, timeout=60)
+            if not r.ok:
+                raise RuntimeError(
+                    f"Failed to load mask URL (HTTP {r.status_code}): {image!r}"
+                ) from None
+            img = Image.open(BytesIO(r.content))
+    elif os.path.isfile(image):
+        img = Image.open(image)
+    else:
+        raise ValueError(
+            f"Incorrect path or URL for mask: {image!r}. "
+            "URLs must start with http:// or https://."
+        )
+
+    img = ImageOps.exif_transpose(img)
+    return _pil_to_mask_luminance(img)
+
+
+def _pil_to_mask_luminance(img: Any) -> Any:
+    """Return PIL ``L`` image: luma, respecting alpha when present."""
+    if not hasattr(img, "convert"):
+        return img
+
+    if img.mode == "P" and "transparency" in img.info:
+        img = img.convert("RGBA")
+    if img.mode == "LA":
+        l_ch, a_ch = img.split()
+        img = Image.merge("RGBA", (l_ch, l_ch, l_ch, a_ch))
+    if img.mode == "RGBA":
+        arr = np.asarray(img, dtype=np.float32) / 255.0
+        r, g, b, a = arr[..., 0], arr[..., 1], arr[..., 2], arr[..., 3]
+        luma = 0.299 * r + 0.587 * g + 0.114 * b
+        out = np.clip(luma * a, 0.0, 1.0)
+        return Image.fromarray((out * 255.0).round().astype(np.uint8), mode="L")
+    if img.mode != "L":
+        img = img.convert("L")
+    return img
 
 
 def load_image(image: Any) -> Any:

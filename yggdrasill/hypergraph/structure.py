@@ -833,11 +833,20 @@ class Hypergraph:
 
         input_spec = self.get_input_spec()
         exposed_names = set()
+        port_name_counts: Dict[str, int] = {}
+        for spec_entry in input_spec:
+            pname = spec_entry["port_name"]
+            port_name_counts[pname] = port_name_counts.get(pname, 0) + 1
         for spec_entry in input_spec:
             key = self._spec_key(spec_entry)
             exposed_names.add(key)
             port_name = spec_entry["port_name"]
-            exposed_names.add(port_name)
+            # Only treat bare port_name as a run keyword when a single node exposes it.
+            # Otherwise e.g. two IP-Adapters both use ``ip_adapter_image``; routing ``kwargs``
+            # into ``resolved["ip_adapter_image"]`` would shadow per-node ``{id}:ip_adapter_image``
+            # keys and seed every IP node with the same payload (broken multi-IP).
+            if port_name_counts.get(port_name, 0) == 1:
+                exposed_names.add(port_name)
 
         for key, val in list(kwargs.items()):
             if key in exposed_names:

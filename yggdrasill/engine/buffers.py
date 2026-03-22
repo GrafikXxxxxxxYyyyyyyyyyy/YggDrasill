@@ -100,11 +100,20 @@ class EdgeBuffers:
             candidates.append(pname)
             candidates.append(f"{nid}:{pname}")
             written = False
+            # Prefer a non-None value so a stale ``{node}:{port}=None`` (e.g. from a prior run or
+            # template) does not shadow a valid bare port name like ``ip_adapter_image``. This
+            # matches :func:`yggdrasill.integrations.diffusers.run._merged_provides_input_for_node_port`.
             for k in candidates:
-                if k in inputs:
+                if k in inputs and inputs[k] is not None:
                     buf.write(nid, pname, inputs[k])
                     written = True
                     break
+            if not written:
+                for k in candidates:
+                    if k in inputs:
+                        buf.write(nid, pname, inputs[k])
+                        written = True
+                        break
             if not written and (nid, pname) in inputs:
                 buf.write(nid, pname, inputs[(nid, pname)])
         return buf

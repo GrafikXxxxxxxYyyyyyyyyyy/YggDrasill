@@ -10,7 +10,10 @@ from typing import Any, Dict, Optional
 import torch
 
 from yggdrasill.engine.edge import Edge
-from yggdrasill.integrations.diffusers.adapters.ip_adapter_loader import load_ip_adapter_into_unet
+from yggdrasill.integrations.diffusers.adapters.ip_adapter_loader import (
+    _load_ip_adapter_state_dict,
+    reload_ip_adapter_weights_on_unet,
+)
 from yggdrasill.engine.structure import Hypergraph
 
 from yggdrasill.integrations.diffusers import contracts as C
@@ -133,6 +136,50 @@ def _infer_hypergraph_device(graph: Any) -> Any:
     return None
 
 
+_META_IP_ADAPTER_SDS = "ip_adapter_accumulated_state_dicts"
+_META_IP_ADAPTER_ORDER = "ip_adapter_weight_node_ids"
+
+
+def _sync_ip_adapter_plus_token_embed_dims_from_unet(graph: Any, unet: Any) -> None:
+    """Set each IP-Adapter node's Plus token width from the matching ``encoder_hid_proj`` layer."""
+    from yggdrasill.integrations.diffusers.lazy_component import resolve_if_lazy
+
+    unet = resolve_if_lazy(unet)
+    if unet is None:
+        return
+    wrap = getattr(unet, "encoder_hid_proj", None)
+    layers = getattr(wrap, "image_projection_layers", None) if wrap is not None else None
+    if not layers:
+        return
+    key = C.CFG_IP_ADAPTER_PLUS_TOKEN_EMBED_DIM
+    order = list(graph.metadata.get(_META_IP_ADAPTER_ORDER) or [])
+    if len(order) != len(layers):
+        ip_sorted = [
+            n
+            for n in sorted(graph.node_ids)
+            if (graph.get_node(n) is not None)
+            and getattr(graph.get_node(n), "block_type", "") == "adapter/ip_adapter"
+        ]
+        if len(ip_sorted) == len(layers):
+            order = ip_sorted
+    for idx, layer in enumerate(layers):
+        pin = getattr(layer, "proj_in", None)
+        if pin is None or not hasattr(pin, "in_features"):
+            continue
+        dim = int(getattr(pin, "in_features", 0) or 0)
+        if dim <= 0:
+            continue
+        nid = order[idx] if idx < len(order) else None
+        if nid is None:
+            continue
+        node = graph.get_node(nid)
+        if node is None or getattr(node, "block_type", "") != "adapter/ip_adapter":
+            continue
+        if not hasattr(node, "_config"):
+            node._config = {}
+        node._config[key] = dim
+
+
 def _load_ip_adapter_weights_into_graph(
     graph: Any,
     *,
@@ -140,8 +187,27 @@ def _load_ip_adapter_weights_into_graph(
     subfolder: str = "models",
     weight_name: str = "ip-adapter_sd15.bin",
     ip_adapter_scale: Optional[float] = None,
+    adapter_node_id: str,
 ) -> None:
-    """Find UNet/transformer node and load IP-Adapter weights into it."""
+    """Append one IP-Adapter checkpoint and reload **all** accumulated weights on the UNet (diffusers API).
+
+    Diffusers ``_load_ip_adapter_weights`` always rebuilds processors for the full ``state_dicts`` list,
+    so each new ``add_component(..., sdxl.ipadapter, ...)`` must merge with previous checkpoints.
+    Scales are applied at run time via ``ip_adapter_conditioning_scale``; *ip_adapter_scale* here is
+    only forwarded when this is the **first** adapter on the graph (single-adapter backward compat).
+    """
+    from yggdrasill.integrations.diffusers.lazy_component import resolve_if_lazy
+
+    sd = _load_ip_adapter_state_dict(
+        pretrained,
+        subfolder=subfolder,
+        weight_name=weight_name,
+    )
+    acc = graph.metadata.setdefault(_META_IP_ADAPTER_SDS, [])
+    order = graph.metadata.setdefault(_META_IP_ADAPTER_ORDER, [])
+    acc.append(sd)
+    order.append(adapter_node_id)
+
     for nid in graph.node_ids:
         node = graph.get_node(nid)
         bt = getattr(node, "block_type", "") or ""
@@ -150,19 +216,69 @@ def _load_ip_adapter_weights_into_graph(
         unet = getattr(node, "_unet", None)
         if unet is None:
             continue
-        load_ip_adapter_into_unet(
-            unet,
-            pretrained,
-            subfolder=subfolder,
-            weight_name=weight_name,
-            ip_adapter_scale=ip_adapter_scale,
-        )
+        resolved = resolve_if_lazy(unet)
+        if resolved is not unet:
+            node._unet = resolved
+        reload_ip_adapter_weights_on_unet(resolved, acc, low_cpu_mem_usage=True)
+        _sync_ip_adapter_plus_token_embed_dims_from_unet(graph, resolved)
+        if ip_adapter_scale is not None and len(acc) == 1:
+            from yggdrasill.integrations.diffusers.adapters.ip_adapter_loader import (
+                _set_ip_adapter_scale_on_unet,
+            )
+
+            _set_ip_adapter_scale_on_unet(resolved, ip_adapter_scale)
         return
     import logging
+
     logging.getLogger(__name__).warning(
         "IP-Adapter weights not loaded: no UNet/transformer node in graph. "
         "Add sd15.unet (or sdxl.unet / flux.transformer) before sd15.ipadapter / sdxl.ipadapter."
     )
+
+
+_IP_ADAPTER_MASK_PREP_NODE_ID = "ip_mask_prep"
+
+
+def _graph_has_block_type(graph: Any, block_type: str) -> bool:
+    for nid in graph.node_ids:
+        node = graph.get_node(nid)
+        if getattr(node, "block_type", "") == block_type:
+            return True
+    return False
+
+
+def _find_backbone_node_id(graph: Any) -> Optional[str]:
+    for nid in graph.node_ids:
+        node = graph.get_node(nid)
+        bt = getattr(node, "block_type", "") or ""
+        if bt.endswith("/unet") or bt.endswith("/transformer"):
+            return nid
+    return None
+
+
+def _ensure_ip_adapter_mask_prep(graph: Any) -> None:
+    """Add ``ip_mask_prep`` → UNet when IP-Adapter is present; run.py pins ``None`` if no masks."""
+    if _graph_has_block_type(graph, "common/ip_adapter_mask_prep"):
+        return
+    if not _graph_has_block_type(graph, "adapter/ip_adapter"):
+        return
+    unet_nid = _find_backbone_node_id(graph)
+    if unet_nid is None:
+        return
+    if _IP_ADAPTER_MASK_PREP_NODE_ID in graph.node_ids:
+        return
+    from yggdrasill.foundation.registry import BlockRegistry
+    from yggdrasill.hypergraph.auto_connect import apply_port_name_auto_connect
+
+    reg = BlockRegistry.global_registry()
+    mask_node = reg.build({
+        "type": "common/ip_adapter_mask_prep",
+        "node_id": _IP_ADAPTER_MASK_PREP_NODE_ID,
+        "config": {},
+    })
+    graph.add_node(_IP_ADAPTER_MASK_PREP_NODE_ID, mask_node)
+    apply_port_name_auto_connect(graph, _IP_ADAPTER_MASK_PREP_NODE_ID, mask_node)
+    getattr(graph, "metadata", {}).setdefault("ip_mask_prep_auto", True)
 
 
 class DiffusionGraphBuilder:
@@ -217,6 +333,10 @@ class DiffusionGraphBuilder:
         """Run the diffusion graph. Accepts prompt, negative_prompt, num_inference_steps,
         guidance_scale, seed, width, height, device, controlnet_image, ip_adapter_image,
         ip_adapter_image_embeds, controlnet_conditioning_scale, ip_adapter_conditioning_scale,
+        (InstantStyle / per-layer scales: pass a dict with only ``down`` / ``up`` / ``mid`` keys, or a list
+        of per–IP-Adapter configs as in diffusers ``set_ip_adapter_scale``). For **multiple** IP-Adapter
+        nodes, ``ip_adapter_image`` may be a **list** in the same order as ``add_component`` calls that
+        loaded weights (stored in graph metadata; falls back to sorted node ids if missing),
         etc. Returns DiffusionOutput."""
         from yggdrasill.integrations.diffusers.run import run as run_diffusion
         return run_diffusion(self.graph, inputs, wrap_output=True, **kwargs)
@@ -391,6 +511,15 @@ class DiffusionGraphBuilder:
                 cfg.setdefault("subfolder", "models")
                 cfg.setdefault("weight_name", "ip-adapter_sd15.bin")
         cfg.update(kwargs)
+        # IP-Adapter Plus / Plus-Face: UNet projection expects CLIP vision hidden states, not pooled
+        # image_embeds (see diffusers SDXL prepare_ip_adapter_image_embeds / encode_image).
+        wn = cfg.get("weight_name")
+        if wn is not None and spec.block_types and any(
+            "ip_adapter" in str(bt) for bt in spec.block_types
+        ):
+            wn_blob = " ".join(str(x).lower() for x in wn) if isinstance(wn, (list, tuple)) else str(wn).lower()
+            if "plus" in wn_blob:
+                cfg.setdefault("ip_adapter_use_hidden_states", True)
         if pretrained is not None:
             cfg.setdefault("pretrained", str(pretrained))
         if "controlnet" in component_type:
@@ -485,7 +614,11 @@ class DiffusionGraphBuilder:
                 subfolder=cfg.get("subfolder", "models"),
                 weight_name=cfg.get("weight_name", "ip-adapter_sd15.bin"),
                 ip_adapter_scale=cfg.get(C.CFG_IP_ADAPTER_SCALE),
+                adapter_node_id=nid,
             )
+
+        if "ip_adapter" in str(spec.block_types):
+            _ensure_ip_adapter_mask_prep(self._graph)
 
         # After first .graph / .run, _ensure_text2img_complete() sets _completed and will
         # not call expose_default_io again; new ControlNet / IP-Adapter nodes must expose
@@ -555,6 +688,10 @@ class DiffusionGraphBuilder:
             if "adapter/controlnet" in bt and C.PORT_CONTROL_IMAGE in in_names:
                 # Use node-scoped key so multi-ControlNet graphs work with controlnet_image={node_id: img}
                 self._graph.expose_input(nid, C.PORT_CONTROL_IMAGE, f"{nid}:{C.PORT_CONTROL_IMAGE}")
+            if "ip_adapter_mask_prep" in bt and C.PORT_IP_ADAPTER_MASK_IMAGES in in_names:
+                self._graph.expose_input(
+                    nid, C.PORT_IP_ADAPTER_MASK_IMAGES, C.PORT_IP_ADAPTER_MASK_IMAGES,
+                )
 
         return self
 
@@ -785,6 +922,9 @@ class DiffusionGraphBuilder:
 
         if component_type in _BACKBONE_REPLACE_COMPONENT_TYPES and replaced_ids:
             _reclaim_cuda_after_backbone_replace()
+
+        if "ip_adapter" in str(spec.block_types):
+            _ensure_ip_adapter_mask_prep(self._graph)
 
         self.expose_default_io()
         self._apply_graph_device()

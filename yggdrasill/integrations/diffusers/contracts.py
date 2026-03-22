@@ -88,6 +88,10 @@ PORT_CONTROL_RESIDUALS = "control_residuals"
 PORT_IP_ADAPTER_IMAGE = "ip_adapter_image"
 # Precomputed IP-Adapter embeddings (encoder output or cond-only slice of pipeline-prepared tensors).
 PORT_IP_ADAPTER_IMAGE_EMBEDS = "ip_adapter_image_embeds"
+# Binary mask images (one per IP-Adapter reference); preprocessed for cross_attention_kwargs.
+PORT_IP_ADAPTER_MASK_IMAGES = "ip_adapter_mask_images"
+# Packed mask tensor [1, num_images, height, width] for UNet (see IPAdapterMaskProcessor + diffusers docs).
+PORT_IP_ADAPTER_MASKS = "ip_adapter_masks"
 PORT_LORA_SCALE = "lora_scale"
 
 # ---------------------------------------------------------------------------
@@ -118,3 +122,5 @@ CFG_SCHEDULER_CLASS = "scheduler_class"
 CFG_SAFETY_CHECKER = "safety_checker"
 CFG_CLIP_SKIP = "clip_skip"
 CFG_IP_ADAPTER_SCALE = "ip_adapter_scale"
+# Set automatically when IP-Adapter Plus weights are loaded (proj_in.in_features).
+CFG_IP_ADAPTER_PLUS_TOKEN_EMBED_DIM = "ip_adapter_plus_token_embed_dim"

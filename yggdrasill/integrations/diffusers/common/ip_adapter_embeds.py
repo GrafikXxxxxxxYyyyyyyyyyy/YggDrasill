@@ -49,10 +49,19 @@ def prepare_ip_adapter_image_embeds(
     CLIP preprocessor + ``image_encoder`` stack as :class:`~yggdrasill.integrations.diffusers.adapters.ip_adapter.IPAdapterNode`
     — no ``AutoPipeline*`` instance is required.
 
-    Returns a **list** of tensors (one per IP-Adapter slot), each in **conditional** form only
-    (batch matches ``num_images_per_prompt``). Classifier-free guidance doubling is applied later
-    inside the UNet via :func:`format_ip_adapter_image_embeds`; the *do_classifier_free_guidance*
-    flag is accepted for API parity with Diffusers and is **not** used to change tensor shapes here.
+    Returns a **list** of tensors (one per IP-Adapter slot). **Pooled** IP-Adapter outputs are
+    **conditional-only** (batch matches ``num_images_per_prompt``); the UNet doubles them with
+    literal zero embeddings via :func:`format_ip_adapter_image_embeds` (same as Diffusers).
+
+    **IP-Adapter Plus / Plus-Face** (hidden-state tensors) are returned **already CFG-packed** as
+    ``[2, num_images, seq, dim]`` with dim 0 ordered ``[encoder(zeros_like(pixel_values)), encoder(image)]``
+    — same as :meth:`~yggdrasill.integrations.diffusers.adapters.ip_adapter.IPAdapterNode.encode_ip_adapter_image`
+    and Diffusers ``encode_image(..., output_hidden_states=True)``. Do **not** strip the first row:
+    :func:`format_ip_adapter_image_embeds` must see ``shape[0] == 2`` so it does not replace the true
+    uncond features with ``zeros_like`` (which destroys Plus / spatial masks).
+
+    The *do_classifier_free_guidance* flag is accepted for API parity with Diffusers and is **not**
+    used to change tensor shapes here.
 
     Args:
         graph: :class:`~yggdrasill.hypergraph.structure.Hypergraph` (or compatible) that contains
@@ -110,7 +119,13 @@ def prepare_ip_adapter_image_embeds(
     out: List[Any] = []
     for (_, node), img in zip(target, imgs):
         emb = node.encode_ip_adapter_image(img, device=device)
-        if num_images_per_prompt > 1:
+        if torch.is_tensor(emb) and emb.ndim == 4 and emb.shape[0] == 2:
+            if num_images_per_prompt != 1:
+                raise ValueError(
+                    "prepare_ip_adapter_image_embeds: num_images_per_prompt > 1 is not supported "
+                    "for IP-Adapter Plus (hidden-state) outputs; use 1."
+                )
+        elif num_images_per_prompt > 1:
             r = int(num_images_per_prompt)
             if hasattr(emb, "repeat_interleave"):
                 emb = emb.repeat_interleave(r, dim=0)
@@ -128,11 +143,15 @@ def prepare_ip_adapter_image_embeds(
 def pipeline_ip_adapter_embeds_cond_only(
     ip_adapter_image_embeds: Sequence[torch.Tensor],
 ) -> List[torch.Tensor]:
-    """Strip unconditional half from Diffusers ``prepare_ip_adapter_image_embeds`` output.
+    """Strip unconditional half from Diffusers **pooled** IP-Adapter ``prepare_*`` output.
 
     When ``do_classifier_free_guidance=True``, each tensor is ``cat([neg, pos], dim=0)``.
-    Yggdrasill applies CFG doubling in :func:`format_ip_adapter_image_embeds`, so feed **cond-only**
-    tensors with batch size matching the **conditional** latent batch (typically the encoder batch).
+    For **pooled** embeddings, Yggdrasill can rebuild the neg half with ``zeros_like`` in
+    :func:`format_ip_adapter_image_embeds`.
+
+    Do **not** use this for **IP-Adapter Plus / Plus-Face** (4D hidden-state tensors): the negative
+    half must stay the vision encoder on ``zeros_like(pixel_values)``, not literal zeros in embedding
+    space. Pass those tensors through unchanged so ``shape[0] == 2`` is preserved.
     """
     out: List[torch.Tensor] = []
     for t in ip_adapter_image_embeds:
@@ -165,6 +184,17 @@ def _first_linear_in_features(module: Any) -> int | None:
     return None
 
 
+def _layer_expects_clip_token_embeds(layer: Any) -> bool:
+    """True for diffusers :class:`IPAdapterPlusImageProjection` (ViT hidden states), not pooled / Face-ID."""
+    import torch.nn as nn
+
+    lat = getattr(layer, "latents", None)
+    pi = getattr(layer, "proj_in", None)
+    if not isinstance(lat, nn.Parameter) or not isinstance(pi, nn.Linear):
+        return False
+    return int(pi.out_features) == int(lat.shape[-1])
+
+
 def raw_zero_ip_adapter_image_embeds_for_unet(
     unet: Any,
     cond_batch_size: int,
@@ -172,27 +202,48 @@ def raw_zero_ip_adapter_image_embeds_for_unet(
     device: torch.device,
     dtype: Optional[torch.dtype] = None,
 ) -> List[torch.Tensor]:
-    """Raw (B, D) zeros per IP-Adapter slot; pass through :func:`format_ip_adapter_image_embeds`.
+    """Zeros per IP-Adapter slot for :func:`format_ip_adapter_image_embeds`.
 
-    Zeros use **float32** by default so they match typical CLIP vision ``image_embeds``;
-    diffusers ``prepare_ip_adapter_image_embeds`` ends with ``.to(device)`` and does not
-    cast IP tensors to the UNet weight dtype.
+    **Pooled** IP-Adapter: each tensor is ``[cond_batch, embed_dim]``.
+
+    **IP-Adapter Plus** (CLIP/ViT token embeddings): each tensor is
+    ``[cond_batch, 1, 1, embed_dim]`` so after CFG packing and
+    ``MultiIPAdapterImageProjection`` reshape, ``proj_in`` sees 3D activations
+    (avoids 2D vs 3D ``torch.cat`` in ``IPAdapterPlusImageProjectionBlock``).
+
+    When *dtype* is ``None``, uses the first parameter dtype of *unet* so placeholders match
+    fp16/bf16 weights (avoids Float vs Half matmul).
     """
     proj = getattr(unet, "encoder_hid_proj", None)
     if proj is None:
         return []
+    zdt = dtype
+    if zdt is None:
+        try:
+            zdt = next(unet.parameters()).dtype
+        except (StopIteration, TypeError):
+            zdt = torch.float32
+
     layers = getattr(proj, "image_projection_layers", None)
     if layers is not None and len(layers) > 0:
-        n_adapters = len(layers)
-        dim = _first_linear_in_features(layers[0]) or 1024
-    else:
-        n_adapters = 1
-        dim = _first_linear_in_features(proj) or 1024
-    zdt = dtype if dtype is not None else torch.float32
-    return [
-        torch.zeros(cond_batch_size, dim, device=device, dtype=zdt)
-        for _ in range(n_adapters)
-    ]
+        out: List[torch.Tensor] = []
+        for layer in layers:
+            if _layer_expects_clip_token_embeds(layer):
+                emb_in = int(layer.proj_in.in_features)
+                out.append(
+                    torch.zeros(
+                        cond_batch_size, 1, 1, emb_in, device=device, dtype=zdt
+                    )
+                )
+            else:
+                dim = _first_linear_in_features(layer) or 1024
+                out.append(
+                    torch.zeros(cond_batch_size, dim, device=device, dtype=zdt)
+                )
+        return out
+
+    dim = _first_linear_in_features(proj) or 1024
+    return [torch.zeros(cond_batch_size, dim, device=device, dtype=zdt)]
 
 
 def format_ip_adapter_image_embeds(
@@ -204,17 +255,28 @@ def format_ip_adapter_image_embeds(
 ) -> List[torch.Tensor]:
     """Return ``image_embeds`` as a list (one entry per IP-Adapter projection layer).
 
-    If *dtype* is ``None`` (default), tensors are moved with ``.to(device)`` only — same
-    idea as diffusers ``prepare_ip_adapter_image_embeds`` (vision outputs often stay
-    float32 while the UNet runs in fp16). Forcing fp16 here can destabilize IP-Adapter.
+    If *dtype* is ``None`` (default), tensors are moved with ``.to(device)`` only.
+    SDXL/SD1.5 :class:`~yggdrasill.integrations.diffusers.sdxl.unet.SDXLUNetNode` passes
+    the UNet parameter *dtype* so IP-Adapter Plus ``proj_in`` (fp16 weights) does not see
+    float32 activations.
     """
 
     def _one(single: torch.Tensor) -> torch.Tensor:
         e = single.to(device=device)
         if dtype is not None:
             e = e.to(dtype=dtype)
+        # [2, N, seq, dim]: already packed [uncond, cond] from :meth:`IPAdapterNode.encode_ip_adapter_image`
+        # when ``ip_adapter_use_hidden_states`` (matches Diffusers SDXL ``prepare_ip_adapter_image_embeds``).
+        if e.ndim == 4 and e.shape[0] == 2:
+            if not do_classifier_free_guidance:
+                e = e[1:2]
+            return e
         if e.ndim == 2:
-            e = e.unsqueeze(1)
+            # Encoder returns [num_images, embed_dim] for N references in one IP-Adapter slot.
+            # Diffusers does single_image_embeds[None, :] → [1, N, D] before CFG (see SDXL
+            # prepare_ip_adapter_image_embeds). Using unsqueeze(1) wrongly yields [N, 1, D]
+            # and breaks IPAdapterPlusImageProjection (2D vs 3D in the resampler block).
+            e = e.unsqueeze(0)
         elif e.ndim not in (3, 4):
             raise ValueError(
                 f"IP-Adapter image_embeds must be 2D–4D, got shape {tuple(e.shape)}"

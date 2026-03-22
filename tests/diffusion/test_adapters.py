@@ -125,6 +125,12 @@ class TestIPAdapterNode:
         from yggdrasill.integrations.diffusers.adapters.ip_adapter import IPAdapterNode
         assert IPAdapterNode("ip").block_type == "adapter/ip_adapter"
 
+    def test_role_is_conjector(self):
+        from yggdrasill.integrations.diffusers.adapters.ip_adapter import IPAdapterNode
+        from yggdrasill.task_nodes.roles import Role
+
+        assert IPAdapterNode("ip").role == Role.CONJECTOR
+
     @requires_torch
     def test_forward_with_encoder(self):
         from yggdrasill.integrations.diffusers.adapters.ip_adapter import IPAdapterNode
@@ -248,3 +254,12 @@ class TestTextualInversionNode:
         node = TextualInversionNode("ti", pipe=pipe, config={"embeddings": []})
         out = node.forward({})
         assert out["result"]["loaded_tokens"] == []
+
+
+def test_unwrap_ip_adapter_loaded_image_nested_singleton() -> None:
+    from yggdrasill.integrations.diffusers.adapters.ip_adapter import _unwrap_ip_adapter_loaded_image
+
+    assert _unwrap_ip_adapter_loaded_image([["a"]]) == ["a"]
+    assert _unwrap_ip_adapter_loaded_image([[["b"]]]) == ["b"]
+    assert _unwrap_ip_adapter_loaded_image(["x", "y"]) == ["x", "y"]
+    assert _unwrap_ip_adapter_loaded_image("z") == "z"

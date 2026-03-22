@@ -36,6 +36,26 @@ class TestEdgeBuffersDirect:
         buf = EdgeBuffers.init_from_inputs(spec, {"init_image": "url"})
         assert buf.read("enc", "init_image") == "url"
 
+    def test_init_from_inputs_prefers_non_none_over_stale_node_scoped_key(self):
+        """Stale ``{node}:{port}=None`` must not hide a valid bare port alias (IP-Adapter, etc.)."""
+        from yggdrasill.engine.buffers import EdgeBuffers
+
+        spec = [
+            {
+                "node_id": "ip_ref",
+                "port_name": "ip_adapter_image",
+                "name": "ip_ref:ip_adapter_image",
+            },
+        ]
+        buf = EdgeBuffers.init_from_inputs(
+            spec,
+            {
+                "ip_ref:ip_adapter_image": None,
+                "ip_adapter_image": "face.png",
+            },
+        )
+        assert buf.read("ip_ref", "ip_adapter_image") == "face.png"
+
 
 class TestExecutorChain:
     def test_chain_three(self):
@@ -401,6 +421,79 @@ class TestExecutorDiamondDAG:
         h.expose_output("M", "out", "result")
         out = run(h, {}, validate_before=False)
         assert sorted(out["result"]) == [10, 20]
+
+
+class _ConstEmbedOut(AbstractBaseBlock, AbstractGraphNode):
+    """Emits a constant on ``image_embeds`` (no inputs)."""
+
+    def __init__(self, node_id: str, value: Any) -> None:
+        AbstractBaseBlock.__init__(self)
+        AbstractGraphNode.__init__(self, node_id=node_id)
+        self._value = value
+
+    @property
+    def block_type(self) -> str:
+        return "test/const_embed"
+
+    def declare_ports(self) -> List[Port]:
+        return [Port("image_embeds", PortDirection.OUT, PortType.TENSOR)]
+
+    def forward(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        return {"image_embeds": self._value}
+
+
+class _ConcatImageEmbIn(AbstractBaseBlock, AbstractGraphNode):
+    """Consumes ``image_embeds`` with CONCAT aggregation (like SDXL UNet)."""
+
+    def __init__(self, node_id: str) -> None:
+        AbstractBaseBlock.__init__(self)
+        AbstractGraphNode.__init__(self, node_id=node_id)
+
+    @property
+    def block_type(self) -> str:
+        return "test/concat_img"
+
+    def declare_ports(self) -> List[Port]:
+        return [
+            Port(
+                "image_embeds",
+                PortDirection.IN,
+                PortType.TENSOR,
+                optional=True,
+                aggregation=PortAggregation.CONCAT,
+            ),
+            Port("out", PortDirection.OUT, PortType.ANY),
+        ]
+
+    def forward(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        return {"out": inputs.get("image_embeds")}
+
+
+class TestExecutorImageEmbedsConcatOrder:
+    """Multi IP-Adapter: ``image_embeds`` order must match UNet projection layers."""
+
+    def test_metadata_order_beats_lexicographic_source_node_ids(self):
+        clear_plan_cache()
+        h = Hypergraph()
+        h.metadata["ip_adapter_weight_node_ids"] = ["style_ip", "face_ip"]
+        h.add_node("style_ip", _ConstEmbedOut("style_ip", "S"))
+        h.add_node("face_ip", _ConstEmbedOut("face_ip", "F"))
+        h.add_node("U", _ConcatImageEmbIn("U"))
+        h.add_edge(Edge("style_ip", "image_embeds", "U", "image_embeds"))
+        h.add_edge(Edge("face_ip", "image_embeds", "U", "image_embeds"))
+        h.expose_output("U", "out", "y")
+        assert run(h, {}, validate_before=False)["y"] == ["S", "F"]
+
+    def test_without_metadata_falls_back_to_lexicographic(self):
+        clear_plan_cache()
+        h = Hypergraph()
+        h.add_node("style_ip", _ConstEmbedOut("style_ip", "S"))
+        h.add_node("face_ip", _ConstEmbedOut("face_ip", "F"))
+        h.add_node("U", _ConcatImageEmbIn("U"))
+        h.add_edge(Edge("style_ip", "image_embeds", "U", "image_embeds"))
+        h.add_edge(Edge("face_ip", "image_embeds", "U", "image_embeds"))
+        h.expose_output("U", "out", "y")
+        assert run(h, {}, validate_before=False)["y"] == ["F", "S"]
 
 
 class TestExecutorDictAggregation:
