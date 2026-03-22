@@ -6,6 +6,7 @@ import pytest
 from yggdrasill.engine.structure import Hypergraph
 from yggdrasill.integrations.diffusers import build_template, list_templates
 import yggdrasill.integrations.diffusers.templates as templates
+from yggdrasill.integrations.diffusers.builder import DiffusionGraphBuilder
 from yggdrasill.workflow.workflow import Workflow
 
 
@@ -56,6 +57,36 @@ class TestHypergraphFromTemplate:
 
         with pytest.raises(TypeError):
             Hypergraph.from_template("stub_workflow")
+
+
+class TestDiffusionGraphBuilderFromTemplate:
+    def test_from_template_wraps_graph(self, monkeypatch):
+        graph = Hypergraph(graph_id="stub_graph")
+
+        def _stub_builder(**kwargs):
+            assert kwargs["device"] == "cpu"
+            return graph
+
+        monkeypatch.setitem(
+            templates._TEMPLATE_BUILDERS,
+            "stub_graph",
+            _stub_builder,
+        )
+
+        builder = DiffusionGraphBuilder.from_template("stub_graph", device="cpu")
+        assert builder.graph is graph
+
+    def test_from_template_rejects_workflow(self, monkeypatch):
+        workflow = Workflow(workflow_id="stub_workflow")
+
+        monkeypatch.setitem(
+            templates._TEMPLATE_BUILDERS,
+            "stub_workflow",
+            lambda **kwargs: workflow,
+        )
+
+        with pytest.raises(TypeError):
+            DiffusionGraphBuilder.from_template("stub_workflow")
 
 
 class TestWorkflowFromTemplate:

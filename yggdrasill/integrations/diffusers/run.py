@@ -65,19 +65,9 @@ def run(
     elif ip_adapter_image is not None:
         _assign_to_single_exposed(merged, graph, C.PORT_IP_ADAPTER_IMAGE, ip_adapter_image)
 
-    controlnet_conditioning_scale = run_kw.pop("controlnet_conditioning_scale", None)
-    if isinstance(controlnet_conditioning_scale, dict):
-        _inject_node_config(graph, controlnet_conditioning_scale, "conditioning_scale")
-
-    ip_adapter_conditioning_scale = run_kw.pop("ip_adapter_conditioning_scale", None)
-    if isinstance(ip_adapter_conditioning_scale, dict):
-        _inject_ip_adapter_scale(graph, ip_adapter_conditioning_scale, merged)
-    elif ip_adapter_conditioning_scale is not None:
-        _inject_ip_adapter_scale(graph, {"default": float(ip_adapter_conditioning_scale)}, merged)
-    else:
-        # Without this, diffusers' default processor scale (often 1.0) stays on the UNet while
-        # the skipped IP node passes zero image_embeds — unlike a graph with no IP weights.
-        _inject_ip_adapter_scale(graph, {"default": 1.0}, merged)
+    # Do not pop or apply controlnet_conditioning_scale / ip_adapter_conditioning_scale here.
+    # Hypergraph.run is patched to merge those kwargs and call _inject_*; if we popped them
+    # above, the patch would see None and re-apply IP defaults (scale 1.0), wiping user scale.
 
     if "image" in run_kw:
         _img2img = run_kw.pop("image")

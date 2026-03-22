@@ -187,6 +187,12 @@ class DiffusionGraphBuilder:
         self._added_groups: Dict[str, str] = {}  # group -> node_id
         self._completed: bool = False
 
+    @classmethod
+    def from_template(cls, template_name: str, **kwargs: Any) -> "DiffusionGraphBuilder":
+        """Wrap a graph built from a diffusion template (same kwargs as :meth:`Hypergraph.from_template`)."""
+        graph = Hypergraph.from_template(template_name, **kwargs)
+        return cls(graph)
+
     def _apply_graph_device(self) -> None:
         """Move all nodes (and schedulers) to the graph's inferred device."""
         dev = _infer_hypergraph_device(self._graph)

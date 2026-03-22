@@ -73,6 +73,12 @@ def _set_ip_adapter_scale_on_unet(unet: Any, scale: Any) -> None:
     *scale* may be a float (one strength for all loaded IP-Adapters) or a list of floats
     (one per loaded adapter, e.g. ``[0.6, 0.0]`` when the second adapter has no image).
     """
+    from yggdrasill.integrations.diffusers.lazy_component import resolve_if_lazy
+
+    unet = resolve_if_lazy(unet)
+    if unet is None:
+        return
+
     try:
         from diffusers.loaders.unet_loader_utils import _maybe_expand_lora_scales
         from diffusers.models.attention_processor import (
