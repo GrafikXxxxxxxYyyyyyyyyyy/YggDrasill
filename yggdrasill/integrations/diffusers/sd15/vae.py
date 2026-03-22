@@ -47,22 +47,43 @@ class SD15VAEEncodeNode(AbstractConverter):
                 "for text2img (universal SD1.5 graph)."
             )
         device = self._config.get("device", "cpu")
-        dtype = getattr(self._vae, "dtype", None)
+        p = next(self._vae.parameters(), None)
+        vae_dtype = getattr(self._vae, "dtype", None)
+        if p is not None and vae_dtype is None:
+            vae_dtype = p.dtype
+
+        force_upcast = bool(getattr(self._vae.config, "force_upcast", False))
+        prep_dtype = torch.float32 if force_upcast else vae_dtype
 
         pixel_values = preprocess_image(
             image,
             height=self._config.get("height", 512),
             width=self._config.get("width", 512),
-            dtype=dtype,
+            dtype=prep_dtype,
             device=device,
         )
+
+        orig_vae_dtype = vae_dtype
+        did_fp32_encode = False
+        if force_upcast and p is not None and vae_dtype == torch.float16:
+            self._vae.to(dtype=torch.float32)
+            pixel_values = pixel_values.float()
+            did_fp32_encode = True
+        elif force_upcast:
+            pixel_values = pixel_values.float()
 
         with torch.no_grad():
             latent_dist = self._vae.encode(pixel_values).latent_dist
             latents = latent_dist.sample()
 
+        if did_fp32_encode and orig_vae_dtype is not None:
+            self._vae.to(dtype=orig_vae_dtype)
+
         scaling_factor = getattr(self._vae.config, "scaling_factor", 0.18215)
         latents = latents * scaling_factor
+
+        if orig_vae_dtype is not None:
+            latents = latents.to(dtype=orig_vae_dtype)
 
         return {C.PORT_LATENTS: latents}
 

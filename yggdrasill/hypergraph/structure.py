@@ -80,6 +80,50 @@ def _resolve_config_ref(
     return config
 
 
+def _release_node_gpu_backing(node: Any) -> None:
+    """Drop references to large nn.Module fields so CUDA memory can be freed.
+
+    Removing a node from the graph only deletes the dict entry; without clearing
+    ``_unet`` / ``_vae`` / … the old weights may stay allocated until a late GC.
+    Nodes may implement ``release_gpu_memory()`` for custom teardown.
+    """
+    if node is None:
+        return
+    rel = getattr(node, "release_gpu_memory", None)
+    if callable(rel):
+        try:
+            rel()
+            return
+        except Exception:
+            pass
+    for attr in (
+        "_unet",
+        "_vae",
+        "_text_encoder",
+        "_text_encoder_2",
+        "_transformer",
+        "_controlnet",
+        "_scheduler",
+        "_tokenizer",
+        "_tokenizer_2",
+        "_image_encoder",
+        "_feature_extractor",
+        "_safety_checker",
+    ):
+        if hasattr(node, attr):
+            try:
+                setattr(node, attr, None)
+            except Exception:
+                pass
+    gb = getattr(node, "get_sub_blocks", None)
+    if callable(gb):
+        try:
+            for sub in gb().values():
+                _release_node_gpu_backing(sub)
+        except Exception:
+            pass
+
+
 class Hypergraph:
     """Stores nodes, edges, and exposed inputs/outputs.
 
@@ -250,6 +294,9 @@ class Hypergraph:
     def remove_node(self, node_id: str) -> None:
         if node_id not in self._nodes:
             return
+        old = self._nodes.get(node_id)
+        if old is not None:
+            _release_node_gpu_backing(old)
         del self._nodes[node_id]
         self._edges = [
             e for e in self._edges

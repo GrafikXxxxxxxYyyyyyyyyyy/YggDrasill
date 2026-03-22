@@ -90,7 +90,7 @@ def _bootstrap_families() -> None:
         canonical_required={"prompt", "decoded_image"},
     )
 
-    # SDXL
+    # SDXL (default Hub precision: float16 + variant fp16 — see ModelStore.load_components_by_keys)
     register_family(
         "sdxl",
         component_specs=dict(_SDXL_COMPONENTS),
@@ -107,6 +107,7 @@ def _bootstrap_families() -> None:
         ],
         block_defaults={},
         canonical_required={"prompt", "prompt_2", "decoded_image"},
+        torch_dtype_default="float16",
     )
 
     _FLUX_ADAPTERS = {k: v for k, v in _ADAPTER_COMPONENTS.items() if k.startswith("flux.")}

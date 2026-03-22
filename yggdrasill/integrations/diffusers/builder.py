@@ -28,6 +28,25 @@ _FALLBACK_SCHEDULER_REPO: Dict[str, str] = {
     "flux": "black-forest-labs/FLUX.1-dev",
 }
 
+# After replace_component swaps UNet/transformer, encourage immediate CUDA reclaim
+# (old weights are dropped in Hypergraph.remove_node via _release_node_gpu_backing).
+_BACKBONE_REPLACE_COMPONENT_TYPES = frozenset({
+    "sd15.unet",
+    "sd15.backbone",
+    "sdxl.unet",
+    "sdxl.backbone",
+    "flux.transformer",
+    "flux.backbone",
+})
+
+
+def _reclaim_cuda_after_backbone_replace() -> None:
+    import gc
+
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
 
 def _instantiate_scheduler_by_type(
     scheduler_type: str,
@@ -592,6 +611,9 @@ class DiffusionGraphBuilder:
             repos like Lykon/DreamShaper that have only diffusion_pytorch_model.bin).
         **kwargs: Merged into node config; use ``scheduler_type="euler"`` (etc.) to swap
             the Diffusers scheduler class without reloading the whole repo (SD/SDXL/FLUX).
+            Note: ``stabilityai/stable-diffusion-xl-base-1.0`` already ships an Euler scheduler;
+            replacing with ``scheduler_type="euler"`` only re-instantiates Euler (no visual change).
+            Try ``"dpm_solver"``, ``"ddim"``, ``"unipc"``, etc. to see a different sampler.
 
         Returns:
             self for chaining.
@@ -650,14 +672,15 @@ class DiffusionGraphBuilder:
         from yggdrasill.foundation.registry import BlockRegistry
         reg = BlockRegistry.global_registry()
 
+        replaced_ids: list[str] = []
+
         for block_type in spec.block_types:
             const_map = spec.constructor_map.get(block_type, {})
-            kwargs: Dict[str, Any] = {}
+            ctor_kwargs: Dict[str, Any] = {}
             for ctor_kwarg, load_key in const_map.items():
                 val = components_loaded.get(load_key)
                 if val is not None:
-                    kwargs[ctor_kwarg] = val
-            kwargs["config"] = dict(cfg)
+                    ctor_kwargs[ctor_kwarg] = val
 
             if len(spec.block_types) == 1:
                 nid = node_id
@@ -668,17 +691,45 @@ class DiffusionGraphBuilder:
             if nid not in self._graph.node_ids:
                 continue
 
+            # Preserve node config from the replaced node (device, num_inference_steps,
+            # denoising_*, etc.). Otherwise replace_component(..., scheduler_type=...) alone
+            # wipes _config and scheduler defaults to cpu / wrong schedule vs latents.
+            old_node = self._graph.get_node(nid)
+            merged_cfg = dict(cfg)
+            if old_node is not None:
+                prev = getattr(old_node, "_config", None) or {}
+                merged_cfg = {**dict(prev), **merged_cfg}
+            ctor_kwargs["config"] = merged_cfg
+
             build_cfg: Dict[str, Any] = {
                 "block_type": block_type,
                 "node_id": nid,
-                "config": kwargs.get("config", cfg),
+                "config": ctor_kwargs.get("config", merged_cfg),
             }
-            for k, v in kwargs.items():
+            for k, v in ctor_kwargs.items():
                 if k not in ("config", "block_type", "node_id"):
                     build_cfg[k] = v
 
             new_node = reg.build(build_cfg)
             self._graph.replace_node(nid, node=new_node)
+            replaced_ids.append(nid)
+
+        if len(spec.block_types) > 1 and not replaced_ids:
+            expected = [
+                f"{node_id}_" + bt.split("/")[-1].split("_", 1)[-1]
+                for bt in spec.block_types
+            ]
+            raise ValueError(
+                f"replace_component: no scheduler nodes matched base id {node_id!r}. "
+                f"Expected graph node ids like {expected!r} (from add_component(\"sched\", ...) "
+                f"→ sched_setup / sched_step), or pass that base explicitly. "
+                f"Role name 'Scheduler' only resolves if a *scheduler_setup* node id ends with '_setup'."
+            )
+        if len(spec.block_types) > 1 and len(replaced_ids) != len(spec.block_types):
+            raise ValueError(
+                f"replace_component: partial scheduler replace — matched {replaced_ids!r}, "
+                f"expected {len(spec.block_types)} nodes for {component_type!r}."
+            )
 
         _meta = getattr(self._graph, "metadata", None) or {}
         if (
@@ -718,6 +769,9 @@ class DiffusionGraphBuilder:
             uc = getattr(inner, "config", None) if inner is not None else None
             in_ch = int(getattr(uc, "in_channels", 4)) if uc is not None else 4
             reconfigure_sdxl_inpaint_for_unet_in_channels(self._graph, in_channels=in_ch)
+
+        if component_type in _BACKBONE_REPLACE_COMPONENT_TYPES and replaced_ids:
+            _reclaim_cuda_after_backbone_replace()
 
         self.expose_default_io()
         self._apply_graph_device()

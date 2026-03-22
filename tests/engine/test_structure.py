@@ -28,6 +28,21 @@ class TestHypergraphNodes:
         assert h.get_edges() == []
         assert all(e.get("node_id") != "A" for e in h.get_input_spec())
 
+    def test_remove_node_clears_diffusion_module_refs(self):
+        """Heavy modules on removed nodes must be dropped so CUDA memory can be freed."""
+
+        class Dummy:
+            pass
+
+        h = Hypergraph()
+        d = Dummy()
+        d._unet = object()
+        d._vae = object()
+        h.add_node("d", d)
+        h.remove_node("d")
+        assert d._unet is None
+        assert d._vae is None
+
     def test_empty_node_id_raises(self):
         h = Hypergraph()
         with pytest.raises(ValueError):

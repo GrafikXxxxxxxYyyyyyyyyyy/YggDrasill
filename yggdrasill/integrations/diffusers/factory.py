@@ -74,7 +74,7 @@ def build_sd15_pipeline(
         else (_SD15_INPAINT_DEFAULT_REPO if task == "inpaint" else _SD15_DEFAULT_REPO)
     )
 
-    ms = store or ModelStore.default()
+    ms = store if store is not None else ModelStore.default()
     sd15_keys = ["tokenizer", "text_encoder", "unet", "vae", "scheduler"]
     components = ms.load_components_by_keys(
         "sd15", sd15_keys, resolved_repo,
@@ -146,7 +146,7 @@ def build_sdxl_pipeline(
         else (_SDXL_INPAINT_DEFAULT_REPO if task == "inpaint" else _SDXL_DEFAULT_REPO)
     )
 
-    ms = store or ModelStore.default()
+    ms = store if store is not None else ModelStore.default()
     sdxl_keys = ["tokenizer", "tokenizer_2", "text_encoder", "text_encoder_2", "unet", "vae", "scheduler"]
     components = ms.load_components_by_keys(
         "sdxl", sdxl_keys, resolved_repo,
@@ -202,7 +202,7 @@ def build_sdxl_base_refiner(
     dtype_map = {"float16": torch.float16, "float32": torch.float32, "bfloat16": torch.bfloat16}
     dtype = dtype_map.get(torch_dtype, torch.float16)
 
-    ms = store or ModelStore.default()
+    ms = store if store is not None else ModelStore.default()
     sdxl_keys = ["tokenizer", "tokenizer_2", "text_encoder", "text_encoder_2", "unet", "vae", "scheduler"]
 
     base_components = ms.load_components_by_keys(
@@ -279,7 +279,7 @@ def build_flux_pipeline(
     dtype_map = {"float16": torch.float16, "float32": torch.float32, "bfloat16": torch.bfloat16}
     dtype = dtype_map.get(torch_dtype, torch.bfloat16)
 
-    ms = store or ModelStore.default()
+    ms = store if store is not None else ModelStore.default()
     flux_keys = ["tokenizer", "tokenizer_2", "text_encoder", "text_encoder_2", "transformer", "vae", "scheduler"]
     components = ms.load_components_by_keys(
         "flux", flux_keys, repo_id,

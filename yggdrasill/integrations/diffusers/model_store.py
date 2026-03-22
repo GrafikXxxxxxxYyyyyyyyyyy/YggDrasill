@@ -12,6 +12,10 @@ from typing import Any, Dict, Optional, Tuple, Type
 
 logger = logging.getLogger(__name__)
 
+# Hub weight layout: fp16 checkpoints live under variant ``fp16`` for SD1.5/SDXL.
+_DTYPE_DEFAULT_FAMILIES = frozenset({"sd15", "sdxl", "flux"})
+
+
 def _ensure_logging_handler() -> None:
     """Ensure loading progress is visible when root logger has no INFO handler."""
     if logger.handlers:
@@ -171,8 +175,23 @@ class ModelStore:
             if not is_file_not_found:
                 raise
             fallback_path = f"{source}/{subfolder}" if subfolder else source
-            # Try variant="fp16" (e.g. diffusion_pytorch_model.fp16.safetensors)
-            if not variant and use_safetensors:
+
+            # Community ControlNet / single-file repos often ship only
+            # ``diffusion_pytorch_model.safetensors`` (no ``.fp16.`` variant).
+            if variant == "fp16" and use_safetensors:
+                logger.info(
+                    "Trying safetensors without variant for %s "
+                    "(repo may only publish diffusion_pytorch_model.safetensors) ...",
+                    fallback_path,
+                )
+                kwargs_nv = {k: v for k, v in kwargs.items() if k != "variant"}
+                try:
+                    component = cls.from_pretrained(source, **kwargs_nv)
+                except Exception as nv_err:
+                    logger.info("Safetensors without variant failed: %s", nv_err)
+
+            # Try variant="fp16" when first attempt had no variant
+            if component is None and not variant and use_safetensors:
                 logger.info("Trying variant=fp16 for %s ...", fallback_path)
                 kwargs_fp16 = dict(kwargs)
                 kwargs_fp16["variant"] = "fp16"
@@ -182,17 +201,18 @@ class ModelStore:
                     logger.info("Variant fp16 failed: %s", fp16_err)
             # Try .bin if still no component
             if component is None:
+                kwargs_bin = {k: v for k, v in kwargs.items() if k != "variant"}
                 if use_safetensors:
                     logger.info("Loading .bin from %s (download may take a while) ...", fallback_path)
-                    kwargs["use_safetensors"] = False
-                    kwargs.pop("variant", None)
+                    kwargs_bin["use_safetensors"] = False
                 try:
-                    component = cls.from_pretrained(source, **kwargs)
+                    component = cls.from_pretrained(source, **kwargs_bin)
                 except Exception as retry_err:
                     logger.error("Fallback failed: %s", retry_err)
                     raise RuntimeError(
                         f"Failed to load {cls.__name__} from {fallback_path}. "
-                        "Tried default safetensors, variant=fp16, and .bin."
+                        "Tried safetensors (requested variant), safetensors without variant, "
+                        "variant=fp16 when applicable, and .bin."
                     ) from retry_err
         self.put(key, component)
         path = f"{source}/{subfolder}" if subfolder else source
@@ -277,8 +297,28 @@ class ModelStore:
         pretrained_map: optional {load_key: repo_id} to load each key from a different repo.
         subfolder_map: optional {load_key: subfolder} to override subfolder per key.
         variant_map: optional {load_key: variant} to override variant per key.
+
+        For families ``sd15``, ``sdxl``, and ``flux``, if *torch_dtype* is omitted it
+        follows :class:`~yggdrasill.integrations.diffusers.family_registry.FamilySpec`
+        (SDXL/SD15 → ``float16``, FLUX → ``bfloat16``). If *variant* is omitted and
+        the resolved dtype is ``float16``, *variant* defaults to ``fp16`` so Hub fp16
+        weights are used (matches :func:`~yggdrasill.integrations.diffusers.factory.build_sdxl_pipeline`).
         """
         _ensure_logging_handler()
+        if family in _DTYPE_DEFAULT_FAMILIES:
+            from yggdrasill.integrations.diffusers.family_registry import get_family_spec
+
+            fspec = get_family_spec(family)
+            torch_mod = _import_torch()
+            dm = {
+                "float16": torch_mod.float16,
+                "float32": torch_mod.float32,
+                "bfloat16": torch_mod.bfloat16,
+            }
+            if torch_dtype is None:
+                torch_dtype = dm.get(fspec.torch_dtype_default, torch_mod.float16)
+            if not variant and torch_dtype == torch_mod.float16:
+                variant = "fp16"
         result: Dict[str, Any] = {}
         for key in load_keys:
             key_repo = (pretrained_map or {}).get(key, repo_id)

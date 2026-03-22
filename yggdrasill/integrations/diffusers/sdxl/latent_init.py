@@ -153,7 +153,18 @@ class SDXLLatentInitNode(AbstractOuterModule):
         if seed is not None:
             generator = torch.Generator(device=device).manual_seed(int(seed))
 
-        first_t = scheduler.timesteps[0]
+        # EulerDiscreteScheduler.add_noise reads timesteps.shape[0]; indexing
+        # scheduler.timesteps[0] yields a 0-d tensor, and shape[0] raises IndexError.
+        ts_line = scheduler.timesteps
+        first_t = ts_line[0]
+        batch = int(existing_latents.shape[0])
+        if isinstance(ts_line, torch.Tensor):
+            timesteps_for_noise = ts_line[0].expand(batch).to(device=device)
+        else:
+            v0 = ts_line[0]
+            tdtype = torch.float32 if isinstance(v0, float) else torch.long
+            timesteps_for_noise = torch.full((batch,), v0, device=device, dtype=tdtype)
+
         if strength >= 1.0:
             noise = torch.randn(
                 existing_latents.shape,
@@ -177,7 +188,7 @@ class SDXLLatentInitNode(AbstractOuterModule):
             device=device,
             dtype=dtype,
         )
-        latents = scheduler.add_noise(existing_latents, noise, first_t)
+        latents = scheduler.add_noise(existing_latents, noise, timesteps_for_noise)
         timestep = self._clamp_timestep(first_t)
         if self._config.get("inpaint_4ch_composite"):
             sched_state["_inpaint_blend_noise"] = noise

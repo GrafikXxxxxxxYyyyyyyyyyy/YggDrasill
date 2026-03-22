@@ -65,3 +65,5 @@ def test_replace_scheduler_with_euler_type():
     assert setup is not None and step is not None
     assert isinstance(setup._scheduler, EulerDiscreteScheduler)
     assert setup._scheduler is step._scheduler
+    # replace_component must not wipe scheduler_setup config (device, steps, …).
+    assert setup._config.get("device") == "cpu"

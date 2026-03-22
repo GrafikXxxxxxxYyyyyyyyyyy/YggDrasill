@@ -1,6 +1,9 @@
 """Tests for the Diffusers model store."""
 from __future__ import annotations
 
+from unittest.mock import MagicMock, patch
+
+import torch
 
 from yggdrasill.integrations.diffusers.model_store import ModelStore
 from yggdrasill.integrations.diffusers.types import ModelDType
@@ -63,6 +66,76 @@ class TestModelStoreBasics:
     def test_get_torch_dtype_none(self):
         store = ModelStore()
         assert store.get_torch_dtype() is None
+
+    def test_load_components_by_keys_sdxl_defaults_fp16_variant(self):
+        """SDXL loads with torch.float16 and variant fp16 when args omitted (Hub parity)."""
+        store = ModelStore()
+        with patch.object(store, "load_component_by_key", return_value=object()) as m:
+            store.load_components_by_keys(
+                "sdxl",
+                ["unet"],
+                "stabilityai/stable-diffusion-xl-base-1.0",
+            )
+        kw = m.call_args.kwargs
+        assert kw["variant"] == "fp16"
+        assert kw["torch_dtype"] == torch.float16
+
+    def test_build_sdxl_pipeline_uses_explicit_store_when_cache_empty(self):
+        """``ModelStore`` defines ``__len__`` → empty store is falsy; factory must not replace it."""
+        from yggdrasill.integrations.diffusers.factory import build_sdxl_pipeline
+
+        store = ModelStore()
+        assert len(store) == 0
+
+        def fake_comp():
+            m = MagicMock()
+            m.to = MagicMock(return_value=m)
+            return m
+
+        with patch.object(store, "load_component_by_key", side_effect=lambda *a, **k: fake_comp()) as m:
+            build_sdxl_pipeline(task="img2img", device="cpu", store=store)
+
+        assert len(m.call_args_list) == 7
+        for call in m.call_args_list:
+            assert call.kwargs.get("torch_dtype") == torch.float16
+            assert call.kwargs.get("variant") == "fp16"
+
+    def test_load_components_by_keys_flux_defaults_bfloat16(self):
+        store = ModelStore()
+        with patch.object(store, "load_component_by_key", return_value=object()) as m:
+            store.load_components_by_keys(
+                "flux",
+                ["transformer"],
+                "black-forest-labs/FLUX.1-dev",
+            )
+        kw = m.call_args.kwargs
+        assert kw["variant"] == ""
+        assert kw["torch_dtype"] == torch.bfloat16
+
+    def test_load_component_retries_without_variant_when_fp16_weights_missing(self):
+        """Hub repos that only ship diffusion_pytorch_model.safetensors (no .fp16.)."""
+        store = ModelStore()
+        calls: list = []
+
+        class FakeModel:
+            @classmethod
+            def from_pretrained(cls, source, **kwargs):
+                calls.append(dict(kwargs))
+                if kwargs.get("variant") == "fp16":
+                    raise OSError(
+                        "x does not appear to have a file named diffusion_pytorch_model.fp16.safetensors."
+                    )
+                return "ok"
+
+        out = store.load_component(
+            FakeModel,
+            "xinsir/controlnet-scribble-sdxl-1.0",
+            variant="fp16",
+            torch_dtype=torch.float16,
+        )
+        assert out == "ok"
+        assert len(calls) >= 2
+        assert "variant" not in calls[-1]
 
     def test_move_to_device_with_to(self):
         store = ModelStore()

@@ -1,6 +1,7 @@
 """Tests for SDXL core nodes: dual prompt encoder, added conditioning, UNet."""
 from __future__ import annotations
 
+import pytest
 
 from yggdrasill.integrations.diffusers import contracts as C
 from yggdrasill.foundation.port import PortDirection
@@ -190,3 +191,39 @@ class TestSDXLLatentInit:
     def test_block_type(self):
         from yggdrasill.integrations.diffusers.sdxl.latent_init import SDXLLatentInitNode
         assert SDXLLatentInitNode("li").block_type == "sdxl/latent_init"
+
+    @requires_torch
+    def test_img2img_euler_add_noise_uses_batch_timesteps(self):
+        """EulerDiscreteScheduler.add_noise requires 1-D timesteps (0-d raises IndexError)."""
+        import torch
+        pytest.importorskip("diffusers")
+        from diffusers import EulerDiscreteScheduler
+
+        from yggdrasill.integrations.diffusers.sdxl.latent_init import SDXLLatentInitNode
+
+        sched = EulerDiscreteScheduler(
+            beta_start=0.00085,
+            beta_end=0.012,
+            beta_schedule="scaled_linear",
+            num_train_timesteps=1000,
+            prediction_type="epsilon",
+            timestep_spacing="leading",
+            steps_offset=1,
+        )
+        sched.set_timesteps(50, device="cpu")
+        state = {
+            "scheduler": sched,
+            "init_noise_sigma": float(getattr(sched, "init_noise_sigma", 1.0)),
+            "num_loop_steps": 50,
+        }
+        node = SDXLLatentInitNode(
+            "li",
+            config={"strength": 0.9, "device": "cpu", "seed": 42},
+        )
+        enc = torch.randn(1, 4, 128, 128)
+        out = node.forward({
+            C.PORT_INIT_LATENTS: enc,
+            C.PORT_SCHEDULER_STATE: state,
+        })
+        assert C.PORT_LATENTS in out
+        assert not torch.allclose(out[C.PORT_LATENTS], enc)

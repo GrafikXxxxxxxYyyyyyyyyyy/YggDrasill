@@ -37,19 +37,39 @@ class SDXLVAEEncodeNode(AbstractConverter):
         from yggdrasill.integrations.diffusers.common.image_utils import preprocess_image
 
         image = inputs[C.PORT_INIT_IMAGE]
-        dtype = getattr(self._vae, "dtype", None)
         device = self._config.get("device", "cpu")
+        p = next(self._vae.parameters(), None)
+        vae_dtype = getattr(self._vae, "dtype", None)
+        if p is not None and vae_dtype is None:
+            vae_dtype = p.dtype
+
+        # Match StableDiffusionXLImg2ImgPipeline.prepare_latents: fp16 VAE encode overflows;
+        # temporarily run encoder weights and pixels in float32 when config.force_upcast.
+        force_upcast = bool(getattr(self._vae.config, "force_upcast", False))
+        prep_dtype = torch.float32 if force_upcast else vae_dtype
 
         pixel_values = preprocess_image(
             image,
             height=self._config.get("height", 1024),
             width=self._config.get("width", 1024),
-            dtype=dtype,
+            dtype=prep_dtype,
             device=device,
         )
 
+        orig_vae_dtype = vae_dtype
+        did_fp32_encode = False
+        if force_upcast and p is not None and vae_dtype == torch.float16:
+            self._vae.to(dtype=torch.float32)
+            pixel_values = pixel_values.float()
+            did_fp32_encode = True
+        elif force_upcast:
+            pixel_values = pixel_values.float()
+
         with torch.no_grad():
             latents = self._vae.encode(pixel_values).latent_dist.sample()
+
+        if did_fp32_encode and orig_vae_dtype is not None:
+            self._vae.to(dtype=orig_vae_dtype)
 
         scaling = getattr(self._vae.config, "scaling_factor", 0.13025)
         shift = getattr(self._vae.config, "shift_factor", None)
@@ -57,6 +77,9 @@ class SDXLVAEEncodeNode(AbstractConverter):
             latents = (latents - shift) * scaling
         else:
             latents = latents * scaling
+
+        if orig_vae_dtype is not None:
+            latents = latents.to(dtype=orig_vae_dtype)
 
         return {C.PORT_LATENTS: latents}
 
