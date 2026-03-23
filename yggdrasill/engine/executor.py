@@ -11,6 +11,8 @@ _SCHEDULER_STATE_PORT = "scheduler_state"
 # Set by diffusion builder: order of IP-Adapter nodes matches ``encoder_hid_proj`` layer order.
 _META_IP_ADAPTER_WEIGHT_NODE_ORDER = "ip_adapter_weight_node_ids"
 _UNET_IMAGE_EMBEDS_PORT = "image_embeds"
+# UNet cross_attention_kwargs port for spatial masks (IP-Adapter masking).
+_UNET_IP_ADAPTER_MASKS_PORT = "ip_adapter_masks"
 # Carry ports fed by scheduler ``next_*`` outputs (ignore for cycle topo; see _cycle_node_order).
 _LOOP_CARRY_TARGET_PORTS = frozenset({"latents", "timestep"})
 from yggdrasill.engine.planner import build_plan
@@ -29,7 +31,7 @@ def _multi_in_edge_sort_key(structure: Any, target_port: str, edge: Any) -> Any:
     """Order edges into a multi-source port. IP ``image_embeds`` follow UNet weight load order."""
     carry = 1 if edge.source_port.startswith("next_") else 0
     sid = edge.source_node
-    if target_port != _UNET_IMAGE_EMBEDS_PORT:
+    if target_port not in (_UNET_IMAGE_EMBEDS_PORT, _UNET_IP_ADAPTER_MASKS_PORT):
         return (carry, sid)
     meta = getattr(structure, "metadata", None) or {}
     order = meta.get(_META_IP_ADAPTER_WEIGHT_NODE_ORDER)

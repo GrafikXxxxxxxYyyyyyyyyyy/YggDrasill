@@ -50,7 +50,9 @@ class SD15UNetNode(AbstractBackbone):
             Port(C.PORT_SCHEDULER_STATE, PortDirection.IN, PortType.ANY, optional=True),
             Port(C.PORT_DOWN_BLOCK_RESIDUALS, PortDirection.IN, PortType.ANY, optional=True, aggregation=PortAggregation.CONCAT),
             Port(C.PORT_MID_BLOCK_RESIDUAL, PortDirection.IN, PortType.ANY, optional=True, aggregation=PortAggregation.CONCAT),
-            Port(C.PORT_IP_ADAPTER_MASKS, PortDirection.IN, PortType.TENSOR, optional=True),
+            # Allow multi-edge wiring: one ip_mask_prep per loaded IP-Adapter slot.
+            # Forward already supports list/tuple and packages it into cross_attention_kwargs.
+            Port(C.PORT_IP_ADAPTER_MASKS, PortDirection.IN, PortType.TENSOR, optional=True, aggregation=PortAggregation.CONCAT),
             Port(C.PORT_NOISE_PRED, PortDirection.OUT, PortType.TENSOR),
         ]
 

@@ -340,7 +340,9 @@ _ADAPTER_COMPONENTS: Dict[str, ComponentSpec] = {
             "feature_extractor": "openai/clip-vit-large-patch14",
         },
         load_subfolder_map={
-            "image_encoder": "sdxl_models/image_encoder",
+            # Parity with diffusers docs (SDXL IP-Adapter Plus / Face):
+            # use the shared CLIPVisionModelWithProjection under `models/image_encoder`.
+            "image_encoder": "models/image_encoder",
         },
         load_variant_map={"image_encoder": "", "feature_extractor": ""},
     ),

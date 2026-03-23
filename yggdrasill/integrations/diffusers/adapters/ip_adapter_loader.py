@@ -1,6 +1,6 @@
 """IP-Adapter weight loader: inject IP-Adapter weights into UNet (Injector).
 
-Loads state dict from HF (h94/IP-Adapter/models/ip-adapter_sd15.bin or .safetensors)
+Loads state dict from HF (either repo root or legacy `models/` subfolder)
 and calls unet._load_ip_adapter_weights() per diffusers IPAdapterMixin.
 """
 from __future__ import annotations
@@ -11,7 +11,7 @@ from typing import Any, Dict, Optional
 def _load_ip_adapter_state_dict(
     pretrained: str,
     *,
-    subfolder: str = "models",
+    subfolder: Optional[str] = None,
     weight_name: str = "ip-adapter_sd15.bin",
     cache_dir: Optional[str] = None,
     force_download: bool = False,
@@ -19,19 +19,35 @@ def _load_ip_adapter_state_dict(
     token: Optional[str] = None,
     revision: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Load IP-Adapter state dict from HF repo. Returns {image_proj, ip_adapter} format."""
+    """Load IP-Adapter state dict from HF repo.
+
+    If *subfolder* is ``None`` (or falsy), we first try to resolve the file in repo root.
+    On 404, we retry with ``subfolder="models"`` for backward compatibility.
+    """
     from huggingface_hub import hf_hub_download
 
-    model_file = hf_hub_download(
-        repo_id=pretrained,
-        filename=weight_name,
-        subfolder=subfolder if subfolder else None,
-        cache_dir=cache_dir,
-        force_download=force_download,
-        local_files_only=local_files_only,
-        token=token,
-        revision=revision or "main",
-    )
+    def _try_download(attempt_subfolder: Optional[str]) -> str:
+        return hf_hub_download(
+            repo_id=pretrained,
+            filename=weight_name,
+            subfolder=attempt_subfolder if attempt_subfolder else None,
+            cache_dir=cache_dir,
+            force_download=force_download,
+            local_files_only=local_files_only,
+            token=token,
+            revision=revision or "main",
+        )
+
+    # Prefer repo root when subfolder isn't provided.
+    try:
+        model_file = _try_download(subfolder)
+    except Exception as exc:
+        # Only retry on a likely "file not found" situation.
+        msg = str(exc).lower()
+        if ("404" in msg) or ("not found" in msg):
+            model_file = _try_download("models")
+        else:
+            raise
 
     if weight_name.endswith(".safetensors"):
         from safetensors import safe_open
@@ -102,16 +118,19 @@ def _set_ip_adapter_scale_on_unet(unet: Any, scale: Any) -> None:
             (IPAdapterAttnProcessor, IPAdapterAttnProcessor2_0, IPAdapterXFormersAttnProcessor),
         ):
             continue
-        # One float per loaded IP-Adapter slot; each processor's ``scale`` list length follows
-        # ``num_tokens`` (e.g. two groups → two scales). Diffusers pipelines broadcast a single
-        # config across ``attn_processor.scale``; we used to ``continue`` on length mismatch and
-        # left default scale 1.0 → different denoising vs a graph without IP weights.
+        # Keep behavior aligned with diffusers: either broadcast a single config across all slots
+        # or fail fast on length mismatch. Silent "continue" would effectively disable IP-Adapter.
         sc = list(scale_configs)
         n_proc = len(attn_processor.scale)
-        if len(sc) == 1 and n_proc >= 1:
-            sc = sc * n_proc
-        elif len(sc) != n_proc:
-            continue
+        if len(sc) != n_proc:
+            if len(sc) == 1 and n_proc >= 1:
+                sc = sc * n_proc
+            else:
+                raise ValueError(
+                    f"IP-Adapter scale mismatch: got {len(sc)} scale configs, but UNet attention "
+                    f"processor {attn_name!r} has {n_proc} scale slots."
+                )
+
         for i, scale_config in enumerate(sc):
             if isinstance(scale_config, dict):
                 for k, s in scale_config.items():

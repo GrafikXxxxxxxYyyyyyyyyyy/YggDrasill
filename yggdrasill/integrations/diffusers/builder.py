@@ -184,7 +184,7 @@ def _load_ip_adapter_weights_into_graph(
     graph: Any,
     *,
     pretrained: str,
-    subfolder: str = "models",
+    subfolder: Optional[str] = None,
     weight_name: str = "ip-adapter_sd15.bin",
     ip_adapter_scale: Optional[float] = None,
     adapter_node_id: str,
@@ -611,7 +611,9 @@ class DiffusionGraphBuilder:
             _load_ip_adapter_weights_into_graph(
                 self._graph,
                 pretrained=pretrained,
-                subfolder=cfg.get("subfolder", "models"),
+                # If subfolder wasn't explicitly provided (or was passed as None),
+                # prefer looking in repo root (no /models/). Loader may fall back.
+                subfolder=cfg.get("subfolder"),
                 weight_name=cfg.get("weight_name", "ip-adapter_sd15.bin"),
                 ip_adapter_scale=cfg.get(C.CFG_IP_ADAPTER_SCALE),
                 adapter_node_id=nid,
