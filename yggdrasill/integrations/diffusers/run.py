@@ -8,6 +8,40 @@ from yggdrasill.integrations.diffusers.builder import _META_IP_ADAPTER_ORDER
 from yggdrasill.integrations.diffusers.output import DiffusionOutput
 
 
+def _iter_controlnet_node_ids(graph: Any) -> List[str]:
+    out: List[str] = []
+    for nid in sorted(getattr(graph, "node_ids", ()) or ()):
+        node = graph.get_node(nid) if hasattr(graph, "get_node") else None
+        if node is not None and getattr(node, "block_type", "") == "adapter/controlnet":
+            out.append(nid)
+    return out
+
+
+def _inject_guess_mode(graph: Any, guess_mode: Any) -> None:
+    """Inject guess_mode into ControlNet nodes.
+
+    Accepted forms:
+    - bool/int/float: applied to every ControlNet node
+    - {node_id: bool}: per-node
+    """
+    if guess_mode is None:
+        return
+    if isinstance(guess_mode, dict):
+        _inject_node_config(graph, guess_mode, "guess_mode")
+        return
+    flag = bool(guess_mode)
+    nodes = getattr(graph, "_nodes", None) or {}
+    for nid in _iter_controlnet_node_ids(graph):
+        node = nodes.get(nid) if isinstance(nodes, dict) else None
+        if node is None:
+            node = graph.get_node(nid) if hasattr(graph, "get_node") else None
+        if node is None:
+            continue
+        if not hasattr(node, "_config"):
+            node._config = {}
+        node._config["guess_mode"] = flag
+
+
 def run(
     graph: Any,
     inputs: Optional[Dict[str, Any]] = None,
@@ -732,6 +766,8 @@ def _prepare_diffusion_run(
     merged = dict(merged_inputs or {})
     if run_kwargs.get("pin_data") is None:
         run_kwargs["pin_data"] = {}
+    # Apply guess_mode before node execution (ControlNetNode reads it from _config).
+    _inject_guess_mode(graph, run_kwargs.pop("guess_mode", None))
     _enforce_ip_adapter_multi_ref_with_masks(graph, merged)
     _sync_ip_adapter_mask_prep_pin(graph, run_kwargs, merged)
     extra_skip = _diffusion_universal_skip_nodes(graph, merged, run_kwargs)

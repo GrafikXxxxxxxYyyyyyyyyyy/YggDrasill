@@ -5,7 +5,7 @@ Scheduler for sd15 is loaded from repo config (_class_name) for parity with diff
 """
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, Optional, Tuple, Type
+from typing import Any, Dict, Optional, Tuple, Type
 
 # (cls, subfolder) per (family, load_key). cls=None means use dynamic loader.
 _COMPONENT_REGISTRY: Dict[Tuple[str, str], Tuple[Optional[Type[Any]], str]] = {}

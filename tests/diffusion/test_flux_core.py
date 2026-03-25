@@ -11,9 +11,7 @@ from tests.diffusion.conftest import (
     FakeFluxTransformer,
     FakeFluxVAE,
     FakeT5Encoder,
-    FakeT5Tokenizer,
     FakeTensor,
-    FakeTokenizer,
     requires_torch,
 )
 

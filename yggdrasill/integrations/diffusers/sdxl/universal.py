@@ -6,7 +6,7 @@ when the backbone has 4 input channels — same run-time semantics as SD1.5 univ
 """
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Dict, Optional
 
 from yggdrasill.integrations.diffusers import contracts as C
 from yggdrasill.engine.edge import Edge

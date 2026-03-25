@@ -26,8 +26,6 @@ def test_prepare_raises_when_no_ip_adapter_node() -> None:
 
 @requires_torch
 def test_prepare_uses_graph_node_encoder() -> None:
-    import torch
-
     g = Hypergraph()
     node = IPAdapterNode(
         "IP",

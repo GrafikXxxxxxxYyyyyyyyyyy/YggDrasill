@@ -8,7 +8,7 @@ present but ``mask_image`` is absent, ``mask_prep`` defaults to a full repaint m
 """
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Dict, Optional
 
 from yggdrasill.integrations.diffusers import contracts as C
 from yggdrasill.engine.edge import Edge

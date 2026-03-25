@@ -188,7 +188,6 @@ class SDXLSchedulerStepNode(AbstractInnerModule):
         return timestep
 
     def _clamp_timestep(self, t: Any) -> Any:
-        import torch
         if t is None:
             return None
         if hasattr(t, "clamp"):

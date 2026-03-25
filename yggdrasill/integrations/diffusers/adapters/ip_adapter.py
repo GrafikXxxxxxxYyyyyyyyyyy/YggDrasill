@@ -285,8 +285,6 @@ class IPAdapterNode(AbstractConjector):
         return torch.zeros(1, dim)
 
     def forward(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
-        import torch
-
         precomputed = inputs.get(C.PORT_IP_ADAPTER_IMAGE_EMBEDS)
         if precomputed is not None:
             if isinstance(precomputed, (list, tuple)):

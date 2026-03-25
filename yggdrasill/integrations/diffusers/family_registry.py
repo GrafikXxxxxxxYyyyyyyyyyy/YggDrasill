@@ -6,7 +6,7 @@ Adding a new family (e.g. SD3) = one register_family() call + node implementatio
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Set, Tuple
 
 

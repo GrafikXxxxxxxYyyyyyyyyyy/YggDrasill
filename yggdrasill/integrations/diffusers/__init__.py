@@ -27,9 +27,9 @@ def _suppress_hf_loading_messages() -> None:
 
 _suppress_hf_loading_messages()
 
-from yggdrasill.integrations.diffusers.registry import register_diffusion_nodes
-from yggdrasill.foundation.registry import BlockRegistry
-from yggdrasill.integrations.diffusers.family_registry import _bootstrap_families
+from yggdrasill.integrations.diffusers.registry import register_diffusion_nodes  # noqa: E402
+from yggdrasill.foundation.registry import BlockRegistry  # noqa: E402
+from yggdrasill.integrations.diffusers.family_registry import _bootstrap_families  # noqa: E402
 
 # Register blocks and families on import
 register_diffusion_nodes(BlockRegistry.global_registry())
@@ -44,7 +44,6 @@ def _wrap_hypergraph_run_for_diffusion():
         PORT_INIT_IMAGE,
         PORT_OUTPUT_IMAGE,
         PORT_CONTROL_IMAGE,
-        PORT_IP_ADAPTER_IMAGE,
         PORT_IP_ADAPTER_IMAGE_EMBEDS,
         PORT_IP_ADAPTER_MASK_IMAGES,
     )
@@ -101,6 +100,7 @@ def _wrap_hypergraph_run_for_diffusion():
                 merged, self, ip_adapter_masks,
                 pin_data=kwargs.setdefault("pin_data", {}),
             )
+        # Route guess_mode into ControlNet nodes (handled inside _prepare_diffusion_run).
         controlnet_conditioning_scale = kwargs.pop("controlnet_conditioning_scale", None)
         if isinstance(controlnet_conditioning_scale, dict):
             _inject_node_config(self, controlnet_conditioning_scale, "conditioning_scale")
@@ -129,25 +129,25 @@ def _wrap_hypergraph_run_for_diffusion():
 _wrap_hypergraph_run_for_diffusion()
 
 # Public API
-from yggdrasill.integrations.diffusers.contracts import *  # noqa: F401, F403
-from yggdrasill.integrations.diffusers.output import DiffusionOutput
-from yggdrasill.integrations.diffusers.run import run as run_diffusion, verify_devices
-from yggdrasill.integrations.diffusers.builder import DiffusionGraphBuilder
-from yggdrasill.integrations.diffusers.templates import (
+from yggdrasill.integrations.diffusers.contracts import *  # noqa: E402, F401, F403
+from yggdrasill.integrations.diffusers.output import DiffusionOutput  # noqa: E402
+from yggdrasill.integrations.diffusers.run import run as run_diffusion, verify_devices  # noqa: E402
+from yggdrasill.integrations.diffusers.builder import DiffusionGraphBuilder  # noqa: E402
+from yggdrasill.integrations.diffusers.templates import (  # noqa: E402
     build_template,
     from_template,
     list_templates,
 )
-from yggdrasill.integrations.diffusers.factory import (
+from yggdrasill.integrations.diffusers.factory import (  # noqa: E402
     build_sd15_pipeline,
     build_sdxl_pipeline,
     build_sdxl_base_refiner,
     build_flux_pipeline,
 )
-from yggdrasill.integrations.diffusers.common.ip_adapter_embeds import (
+from yggdrasill.integrations.diffusers.common.ip_adapter_embeds import (  # noqa: E402
     prepare_ip_adapter_image_embeds,
 )
-from yggdrasill.integrations.diffusers.common.ip_adapter_mask_prep import (
+from yggdrasill.integrations.diffusers.common.ip_adapter_mask_prep import (  # noqa: E402
     IPAdapterMaskPrepNode,
     prepare_ip_adapter_masks_tensor,
 )

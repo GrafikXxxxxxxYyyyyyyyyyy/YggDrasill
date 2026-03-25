@@ -188,7 +188,6 @@ class SD15SchedulerStepNode(AbstractInnerModule):
 
     def _clamp_timestep(self, t: Any) -> Any:
         """Clamp timestep to valid range [0, 999] for schedulers with 1000 steps."""
-        import torch
         if t is None:
             return None
         if hasattr(t, "clamp"):  # Tensor-like (incl. FakeTensor)

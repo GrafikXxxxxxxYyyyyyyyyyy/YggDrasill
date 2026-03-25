@@ -66,6 +66,105 @@ class TestControlNetNode:
         assert out == {}
 
     @requires_torch
+    def test_guess_mode_scales_residuals_by_depth(self):
+        import torch
+        from unittest.mock import MagicMock
+
+        from yggdrasill.integrations.diffusers.adapters.controlnet import ControlNetNode
+
+        def fake_cn(latents, timestep, **kwargs):
+            # Emulate diffusers ControlNetModel scaling behavior:
+            # if guess_mode and not global_pool_conditions:
+            #   scales = logspace(-1, 0, len(down)+1) * conditioning_scale
+            #   down[i] *= scales[i]; mid *= scales[-1]
+            b = latents.shape[0]
+            down = [torch.ones(b, 1, 2, 2), torch.ones(b, 1, 2, 2)]
+            mid = torch.ones(b, 1, 1, 1)
+            cs = float(kwargs.get("conditioning_scale", 1.0))
+            if kwargs.get("guess_mode", False):
+                scales = torch.logspace(-1, 0, len(down) + 1, device=latents.device) * cs
+                down = [d * float(s) for d, s in zip(down, scales)]
+                mid = mid * float(scales[-1])
+            else:
+                down = [d * cs for d in down]
+                mid = mid * cs
+            return down, mid
+
+        mock_cn = MagicMock(side_effect=fake_cn)
+        mock_cn.config = type("C", (), {"global_pool_conditions": False})()
+        mock_cn.parameters = lambda: iter([torch.zeros(1)])
+
+        node = ControlNetNode(
+            "cn",
+            controlnet=mock_cn,
+            config={
+                "guidance_scale": 1.0,  # no CFG
+                "height": 64,
+                "width": 64,
+                "guess_mode": True,
+                "conditioning_scale": 2.0,
+            },
+        )
+
+        out = node.forward({
+            C.PORT_LATENTS: torch.zeros(1, 4, 8, 8),
+            C.PORT_TIMESTEP: torch.tensor(999, dtype=torch.long),
+            C.PORT_PROMPT_EMBEDS: torch.zeros(1, 77, 768),
+            C.PORT_CONTROL_IMAGE: torch.zeros(1, 3, 64, 64),
+        })
+
+        down = out[C.PORT_DOWN_BLOCK_RESIDUALS]
+        mid = out[C.PORT_MID_BLOCK_RESIDUAL]
+        assert isinstance(down, tuple) and len(down) == 2
+        # Diffusers profile uses logspace over (down blocks + mid):
+        # scales = [0.1, sqrt(0.1), 1.0] for two down blocks; mid uses last=1.0.
+        assert torch.allclose(down[0], torch.ones_like(down[0]) * 0.2)
+        assert torch.allclose(down[1], torch.ones_like(down[1]) * (2.0 * (10 ** (-0.5))), rtol=1e-5, atol=1e-6)
+        assert torch.allclose(mid, torch.ones_like(mid) * 2.0)
+
+    @requires_torch
+    def test_guess_mode_can_be_set_via_run_kwargs(self):
+        import torch
+        from unittest.mock import MagicMock
+
+        from yggdrasill.engine.structure import Hypergraph
+        from yggdrasill.integrations.diffusers.adapters.controlnet import ControlNetNode
+        from yggdrasill.integrations.diffusers.run import run as run_diffusion
+
+        captured: dict = {}
+
+        def fake_cn(latents, timestep, **kwargs):
+            captured["guess_mode"] = kwargs.get("guess_mode")
+            down = [torch.zeros(latents.shape[0], 1, 2, 2)]
+            mid = torch.zeros(latents.shape[0], 1, 1, 1)
+            return down, mid
+
+        mock_cn = MagicMock(side_effect=fake_cn)
+        mock_cn.config = type("C", (), {"global_pool_conditions": False})()
+        mock_cn.parameters = lambda: iter([torch.zeros(1)])
+
+        g = Hypergraph()
+        g.add_node("cn", ControlNetNode("cn", controlnet=mock_cn, config={"guidance_scale": 1.0, "height": 64, "width": 64}))
+        g.expose_input("cn", C.PORT_CONTROL_IMAGE, f"cn:{C.PORT_CONTROL_IMAGE}")
+        g.expose_input("cn", C.PORT_LATENTS, f"cn:{C.PORT_LATENTS}")
+        g.expose_input("cn", C.PORT_TIMESTEP, f"cn:{C.PORT_TIMESTEP}")
+        g.expose_input("cn", C.PORT_PROMPT_EMBEDS, f"cn:{C.PORT_PROMPT_EMBEDS}")
+        g.expose_output("cn", C.PORT_MID_BLOCK_RESIDUAL, "mid")
+
+        run_diffusion(
+            g,
+            inputs={
+                f"cn:{C.PORT_LATENTS}": torch.zeros(1, 4, 8, 8),
+                f"cn:{C.PORT_TIMESTEP}": torch.tensor(999, dtype=torch.long),
+                f"cn:{C.PORT_PROMPT_EMBEDS}": torch.zeros(1, 77, 768),
+                f"cn:{C.PORT_CONTROL_IMAGE}": torch.zeros(1, 3, 64, 64),
+            },
+            guess_mode=True,
+            wrap_output=False,
+        )
+        assert captured.get("guess_mode") is True
+
+    @requires_torch
     def test_sdxl_cfg_concatenates_added_cond_like_diffusers_pipeline(self):
         """Under CFG, SDXL ControlNet must get [neg, pos] stacked text_embeds / time_ids."""
         import torch

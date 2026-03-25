@@ -10,7 +10,6 @@ from tests.diffusion.conftest import (
     FakeScheduler,
     FakeTensor,
     FakeTextEncoder,
-    FakeTokenizer,
     FakeUNet,
     FakeVAE,
     requires_torch,

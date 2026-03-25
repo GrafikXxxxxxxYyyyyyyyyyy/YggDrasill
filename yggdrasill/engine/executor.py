@@ -5,6 +5,10 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, Generator, List, Optional, Set
 
 from yggdrasill.engine.buffers import EdgeBuffers
+from yggdrasill.engine.planner import build_plan
+from yggdrasill.engine.validator import validate
+from yggdrasill.foundation.node import AbstractGraphNode
+from yggdrasill.foundation.port import PortAggregation
 
 # Port name convention for cycle-based loops (scheduler emits num_loop_steps)
 _SCHEDULER_STATE_PORT = "scheduler_state"
@@ -15,10 +19,6 @@ _UNET_IMAGE_EMBEDS_PORT = "image_embeds"
 _UNET_IP_ADAPTER_MASKS_PORT = "ip_adapter_masks"
 # Carry ports fed by scheduler ``next_*`` outputs (ignore for cycle topo; see _cycle_node_order).
 _LOOP_CARRY_TARGET_PORTS = frozenset({"latents", "timestep"})
-from yggdrasill.engine.planner import build_plan
-from yggdrasill.engine.validator import validate
-from yggdrasill.foundation.node import AbstractGraphNode
-from yggdrasill.foundation.port import PortAggregation
 
 
 class ValidationError(Exception):

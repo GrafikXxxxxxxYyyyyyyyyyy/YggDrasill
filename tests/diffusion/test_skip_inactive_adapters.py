@@ -22,6 +22,8 @@ class _MockGraph:
     ) -> None:
         self.node_ids = tuple(nodes.keys())
         self._nodes_map = nodes
+        # Mirror real Hypergraph/Workflow field name used by _prepare_diffusion_run for config injection.
+        self._nodes = nodes
         self._input_spec = input_spec or []
 
     def get_node(self, nid: str) -> _Node | None:
@@ -118,3 +120,23 @@ def test_prepare_merges_skip_into_run_kw() -> None:
     run_kw: dict = {"skip_node_ids": {"other"}}
     _prepare_diffusion_run(g, run_kw, merged_inputs={})
     assert run_kw["skip_node_ids"] == {"other", "cn"}
+
+
+def test_prepare_guess_mode_does_not_force_guidance_scale() -> None:
+    """Diffusers guess_mode does not require forcing guidance_scale; keep user's/default behavior."""
+    from yggdrasill.integrations.diffusers.run import _prepare_diffusion_run
+
+    class _CfgNode(_Node):
+        def __init__(self, block_type: str) -> None:
+            super().__init__(block_type)
+            self._config = {}
+
+    g = _MockGraph(
+        {"cn": _CfgNode("adapter/controlnet")},
+        input_spec=[
+            {"node_id": "cn", "port_name": C.PORT_CONTROL_IMAGE, "name": "x"},
+        ],
+    )
+    run_kw: dict = {"guess_mode": True}
+    _prepare_diffusion_run(g, run_kw, merged_inputs={})
+    assert "guidance_scale" not in run_kw

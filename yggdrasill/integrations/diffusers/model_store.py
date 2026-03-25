@@ -10,6 +10,8 @@ import sys
 import threading
 from typing import Any, Dict, Optional, Tuple, Type
 
+from yggdrasill.integrations.diffusers.types import ModelDType
+
 logger = logging.getLogger(__name__)
 
 # Hub weight layout: fp16 checkpoints live under variant ``fp16`` for SD1.5/SDXL.
@@ -25,8 +27,6 @@ def _ensure_logging_handler() -> None:
     h.setFormatter(logging.Formatter("[yggdrasill] %(message)s"))
     logger.addHandler(h)
     logger.setLevel(logging.INFO)
-
-from yggdrasill.integrations.diffusers.types import ModelDType
 
 
 def _import_torch() -> Any:

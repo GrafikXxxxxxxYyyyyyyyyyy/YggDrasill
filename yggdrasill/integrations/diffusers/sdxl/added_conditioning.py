@@ -87,8 +87,6 @@ class SDXLAddedConditioningNode(AbstractHelper):
         return torch.tensor(list(original_size) + list(crops_coords_top_left) + [aesthetic_score])
 
     def forward(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
-        import torch
-
         pooled = inputs[C.PORT_POOLED_PROMPT_EMBEDS]
         neg_pooled = inputs.get(C.PORT_NEGATIVE_POOLED_PROMPT_EMBEDS)
         if neg_pooled is None:

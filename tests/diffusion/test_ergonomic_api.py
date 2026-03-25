@@ -3,8 +3,7 @@ replace_node, port-name auto-connect, DiffusionOutput, and multi-adapter wiring.
 """
 from __future__ import annotations
 
-from typing import Any, Dict
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -15,7 +14,6 @@ from yggdrasill.integrations.diffusers.components import (
     resolve_component_type,
     is_component_type,
     is_block_type,
-    ComponentSpec,
 )
 from yggdrasill.engine.edge import Edge
 from yggdrasill.hypergraph.auto_connect import apply_port_name_auto_connect

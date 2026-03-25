@@ -11,7 +11,6 @@ from tests.diffusion.conftest import (
     FakeTensor,
     FakeTextEncoder,
     FakeTextEncoder2,
-    FakeTokenizer,
     FakeUNet,
     FakeVAE,
     requires_torch,
