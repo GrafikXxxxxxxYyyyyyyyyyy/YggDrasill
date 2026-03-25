@@ -199,3 +199,43 @@ def test_sdxl_unet_passes_cross_attention_kwargs(monkeypatch: pytest.MonkeyPatch
     assert "cross_attention_kwargs" in captured
     assert "ip_adapter_masks" in captured["cross_attention_kwargs"]
     assert len(captured["cross_attention_kwargs"]["ip_adapter_masks"]) == 1
+
+
+def test_sdxl_unet_does_not_cast_ip_adapter_masks_dtype_early() -> None:
+    import torch
+    from yggdrasill.integrations.diffusers.sdxl.unet import SDXLUNetNode
+
+    captured: dict = {}
+
+    class DummyUNet(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            # Force UNet dtype to fp16 to catch early mask-casting.
+            self.dummy = torch.nn.Parameter(torch.zeros(1, dtype=torch.float16))
+            self.config = type("C", (), {"in_channels": 4, "time_cond_proj_dim": None})()
+
+        def forward(self, sample, timestep, **kwargs):
+            captured.update(kwargs)
+            return type("O", (), {"sample": torch.zeros_like(sample)})()
+
+    unet = DummyUNet()
+    node = SDXLUNetNode("u", unet=unet, config={"guidance_scale": 1.0})
+    lat = torch.randn(1, 4, 8, 8)
+    ts = torch.tensor([500], dtype=torch.long)
+    pe = torch.randn(1, 77, 2048)
+    ate = torch.randn(1, 1280)
+    ati = torch.randn(1, 6)
+
+    # Masks from IPAdapterMaskProcessor are typically float32.
+    masks = torch.zeros(1, 2, 128, 128, dtype=torch.float32)
+    node.forward({
+        "latents": lat,
+        "timestep": ts,
+        "prompt_embeds": pe,
+        "add_text_embeds": ate,
+        "add_time_ids": ati,
+        "ip_adapter_masks": masks,
+    })
+
+    got = captured["cross_attention_kwargs"]["ip_adapter_masks"][0]
+    assert got.dtype == torch.float32

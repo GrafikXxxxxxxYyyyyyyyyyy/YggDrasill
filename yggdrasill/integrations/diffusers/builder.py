@@ -141,7 +141,14 @@ _META_IP_ADAPTER_ORDER = "ip_adapter_weight_node_ids"
 
 
 def _sync_ip_adapter_plus_token_embed_dims_from_unet(graph: Any, unet: Any) -> None:
-    """Set each IP-Adapter node's Plus token width from the matching ``encoder_hid_proj`` layer."""
+    """Sync IP-Adapter projection dims from the matching UNet layers.
+
+    - For IP-Adapter Plus / Plus-Face: set ``ip_adapter_plus_token_embed_dim`` so the node can align
+      ViT hidden states to ``proj_in.in_features``.
+    - For pooled / FaceID: set the node's fallback ``ip_adapter_embed_dim`` used by
+      :meth:`yggdrasill.integrations.diffusers.adapters.ip_adapter.IPAdapterNode._inactive_image_embeds`
+      when there is no image encoder (e.g. FaceID precomputed embeddings).
+    """
     from yggdrasill.integrations.diffusers.lazy_component import resolve_if_lazy
 
     unet = resolve_if_lazy(unet)
@@ -151,7 +158,8 @@ def _sync_ip_adapter_plus_token_embed_dims_from_unet(graph: Any, unet: Any) -> N
     layers = getattr(wrap, "image_projection_layers", None) if wrap is not None else None
     if not layers:
         return
-    key = C.CFG_IP_ADAPTER_PLUS_TOKEN_EMBED_DIM
+    key_plus = C.CFG_IP_ADAPTER_PLUS_TOKEN_EMBED_DIM
+    key_pooled = "ip_adapter_embed_dim"
     order = list(graph.metadata.get(_META_IP_ADAPTER_ORDER) or [])
     if len(order) != len(layers):
         ip_sorted = [
@@ -163,21 +171,40 @@ def _sync_ip_adapter_plus_token_embed_dims_from_unet(graph: Any, unet: Any) -> N
         if len(ip_sorted) == len(layers):
             order = ip_sorted
     for idx, layer in enumerate(layers):
-        pin = getattr(layer, "proj_in", None)
-        if pin is None or not hasattr(pin, "in_features"):
-            continue
-        dim = int(getattr(pin, "in_features", 0) or 0)
-        if dim <= 0:
-            continue
         nid = order[idx] if idx < len(order) else None
         if nid is None:
             continue
         node = graph.get_node(nid)
         if node is None or getattr(node, "block_type", "") != "adapter/ip_adapter":
             continue
+
         if not hasattr(node, "_config"):
             node._config = {}
-        node._config[key] = dim
+
+        # Plus-Face/Plus: projection expects token embeddings of this width.
+        pin = getattr(layer, "proj_in", None)
+        if pin is not None and hasattr(pin, "in_features"):
+            plus_dim = int(getattr(pin, "in_features", 0) or 0)
+            if plus_dim > 0:
+                node._config[key_plus] = plus_dim
+
+        # Pooled / FaceID: even when image encoder is absent, UNet still uses the image projection
+        # path, so we need inactive zeros with matching input feature width.
+        try:
+            import torch.nn as nn
+
+            pooled_dim: int | None = None
+            for m in getattr(layer, "modules", lambda: [])():
+                if isinstance(m, nn.Linear) and hasattr(m, "in_features"):
+                    d = int(getattr(m, "in_features", 0) or 0)
+                    if d > 0:
+                        pooled_dim = d
+                        break
+            if pooled_dim is not None:
+                node._config[key_pooled] = pooled_dim
+        except Exception:
+            # Best effort: don't fail graph building if module introspection fails.
+            pass
 
 
 def _load_ip_adapter_weights_into_graph(
@@ -507,9 +534,36 @@ class DiffusionGraphBuilder:
             if component_type == "sdxl.ipadapter":
                 cfg.setdefault("subfolder", "sdxl_models")
                 cfg.setdefault("weight_name", "ip-adapter_sdxl.bin")
+            elif component_type in ("sd15.ipadapter_plus",):
+                cfg.setdefault("subfolder", "models")
+                cfg.setdefault("weight_name", "ip-adapter-plus_sd15.safetensors")
+            elif component_type in ("sd15.ipadapter_plus_face",):
+                cfg.setdefault("subfolder", "models")
+                cfg.setdefault("weight_name", "ip-adapter-plus-face_sd15.safetensors")
             elif component_type in ("sd15.ipadapter", "adapter.ip_adapter"):
                 cfg.setdefault("subfolder", "models")
                 cfg.setdefault("weight_name", "ip-adapter_sd15.bin")
+            elif component_type in ("sd15.ipadapter_faceid", "sdxl.ipadapter_faceid"):
+                # FaceID checkpoints store weights in the repo root (subfolder=None) and
+                # consume InsightFace embeddings of dim=512.
+                cfg.setdefault(
+                    "weight_name",
+                    "ip-adapter-faceid_sdxl.bin"
+                    if component_type == "sdxl.ipadapter_faceid"
+                    else "ip-adapter-faceid_sd15.bin",
+                )
+
+        # Default IP-Adapter-FaceID config when adding FaceID weights explicitly.
+        if (
+            pretrained
+            and "h94/IP-Adapter-FaceID" in str(pretrained)
+            and subfolder is None
+            and weight_name is None
+        ):
+            if component_type == "sdxl.ipadapter_faceid":
+                cfg.setdefault("weight_name", "ip-adapter-faceid_sdxl.bin")
+            elif component_type == "sd15.ipadapter_faceid":
+                cfg.setdefault("weight_name", "ip-adapter-faceid_sd15.bin")
         cfg.update(kwargs)
         # IP-Adapter Plus / Plus-Face: UNet projection expects CLIP vision hidden states, not pooled
         # image_embeds (see diffusers SDXL prepare_ip_adapter_image_embeds / encode_image).

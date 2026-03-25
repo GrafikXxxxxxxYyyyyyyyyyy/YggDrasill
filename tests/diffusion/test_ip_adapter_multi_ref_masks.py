@@ -21,7 +21,7 @@ def _fake_graph_with_ip() -> MagicMock:
 def test_two_refs_without_masks_raises() -> None:
     g = _fake_graph_with_ip()
     merged = {f"ip:{C.PORT_IP_ADAPTER_IMAGE}": ["a.png", "b.png"]}
-    with pytest.raises(ValueError, match="spatial masks"):
+    with pytest.warns(UserWarning, match="unstable without spatial masks"):
         _enforce_ip_adapter_multi_ref_with_masks(g, merged)
 
 

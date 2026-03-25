@@ -197,14 +197,16 @@ class SD15UNetNode(AbstractBackbone):
                 cast_masks: List[Any] = []
                 for t in ip_masks:
                     if hasattr(t, "to"):
-                        cast_masks.append(t.to(device=device, dtype=dtype))
+                        # Keep masks dtype (usually float32) to match diffusers preprocessing.
+                        # The attention processor will cast downsampled masks to query dtype later.
+                        cast_masks.append(t.to(device=device))
                     else:
                         cast_masks.append(t)
                 cross_kw["ip_adapter_masks"] = cast_masks
             else:
                 m = ip_masks
                 if hasattr(m, "to"):
-                    m = m.to(device=device, dtype=dtype)
+                    m = m.to(device=device)
                 cross_kw["ip_adapter_masks"] = [m]
             kwargs["cross_attention_kwargs"] = cross_kw
 

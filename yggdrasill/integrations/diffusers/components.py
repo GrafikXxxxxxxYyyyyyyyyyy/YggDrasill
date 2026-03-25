@@ -325,7 +325,9 @@ _ADAPTER_COMPONENTS: Dict[str, ComponentSpec] = {
         },
         load_variant_map={"image_encoder": "", "feature_extractor": ""},
     ),
-    "sdxl.ipadapter": ComponentSpec(
+    # Aliases for SD1.5 Plus / Plus-Face checkpoints (same loader; weight_name differs).
+    # Builder sets defaults and enables `ip_adapter_use_hidden_states` for `plus*` weights.
+    "sd15.ipadapter_plus": ComponentSpec(
         block_types=["adapter/ip_adapter"],
         load_keys=["image_encoder", "feature_extractor"],
         constructor_map={
@@ -339,12 +341,66 @@ _ADAPTER_COMPONENTS: Dict[str, ComponentSpec] = {
             "image_encoder": "h94/IP-Adapter",
             "feature_extractor": "openai/clip-vit-large-patch14",
         },
+        load_subfolder_map={"image_encoder": "models/image_encoder"},
+        load_variant_map={"image_encoder": "", "feature_extractor": ""},
+    ),
+    "sd15.ipadapter_plus_face": ComponentSpec(
+        block_types=["adapter/ip_adapter"],
+        load_keys=["image_encoder", "feature_extractor"],
+        constructor_map={
+            "adapter/ip_adapter": {
+                "image_encoder": "image_encoder",
+                "feature_extractor": "feature_extractor",
+            },
+        },
+        load_family="adapter",
+        load_pretrained_map={
+            "image_encoder": "h94/IP-Adapter",
+            "feature_extractor": "openai/clip-vit-large-patch14",
+        },
+        load_subfolder_map={"image_encoder": "models/image_encoder"},
+        load_variant_map={"image_encoder": "", "feature_extractor": ""},
+    ),
+    "sd15.ipadapter_faceid": ComponentSpec(
+        # FaceID checkpoints operate on pre-computed InsightFace embeddings.
+        # No CLIP vision encoder / feature extractor is required inside the graph.
+        block_types=["adapter/ip_adapter"],
+        load_keys=[],
+        constructor_map={},
+    ),
+    "sdxl.ipadapter": ComponentSpec(
+        block_types=["adapter/ip_adapter"],
+        load_keys=["image_encoder", "feature_extractor"],
+        constructor_map={
+            "adapter/ip_adapter": {
+                "image_encoder": "image_encoder",
+                "feature_extractor": "feature_extractor",
+            },
+        },
+        load_family="adapter",
+        load_pretrained_map={
+            # IMPORTANT: `ip-adapter_sdxl.bin` expects 1280-dim `image_embeds`
+            # (see image_proj `proj.weight` with in_features=1280).
+            #
+            # `h94/IP-Adapter/models/image_encoder` (ViT-H) projects to 1024 and will crash:
+            #   RuntimeError: mat1 and mat2 shapes cannot be multiplied (...x1024 and 1280x8192)
+            #
+            # The correct SDXL encoder lives under `sdxl_models/image_encoder` and has projection_dim=1280.
+            "image_encoder": "h94/IP-Adapter",
+            # Image processor is compatible; keep it stable and lightweight.
+            "feature_extractor": "openai/clip-vit-large-patch14",
+        },
         load_subfolder_map={
-            # Parity with diffusers docs (SDXL IP-Adapter Plus / Face):
-            # use the shared CLIPVisionModelWithProjection under `models/image_encoder`.
-            "image_encoder": "models/image_encoder",
+            "image_encoder": "sdxl_models/image_encoder",
         },
         load_variant_map={"image_encoder": "", "feature_extractor": ""},
+    ),
+    "sdxl.ipadapter_faceid": ComponentSpec(
+        # FaceID checkpoints operate on pre-computed InsightFace embeddings.
+        # No CLIP vision encoder / feature extractor is required inside the graph.
+        block_types=["adapter/ip_adapter"],
+        load_keys=[],
+        constructor_map={},
     ),
     "adapter.controlnet_flux": ComponentSpec(
         block_types=["adapter/controlnet_flux"],

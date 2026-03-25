@@ -164,14 +164,16 @@ def _enforce_ip_adapter_multi_ref_with_masks(graph: Any, merged: Dict[str, Any])
             if isinstance(a0, (list, tuple)) and len(a0) >= 3:
                 continue
         if isinstance(v, (list, tuple)) and len(v) == 2:
-            raise ValueError(
-                "IP-Adapter: two reference images on one adapter require spatial masks "
-                "(pass ip_adapter_mask_images with one mask per image in the same order, "
-                "or prepacked ip_adapter_masks). Without masks, both references are merged into "
-                "one global IP sequence and generation often collapses to noise or broken output. "
-                "Alternatively use a single reference image, three or more batched style images, "
-                "or separate IP-Adapter nodes. "
-                f"(Got {len(v)} images for {k!r}.)"
+            # Match diffusers behavior: do not hard-fail; warn that results can be unstable.
+            # (In diffusers, without masks both references are merged into one global IP sequence.)
+            import warnings
+
+            warnings.warn(
+                "IP-Adapter: two reference images on one adapter are usually unstable without spatial masks. "
+                "Pass `ip_adapter_mask_images` (one mask per image in the same order) or prepacked "
+                "`ip_adapter_masks`. Without masks, both references are merged into one global IP sequence. "
+                f"(Got {len(v)} images for {k!r}.)",
+                UserWarning,
             )
 
 
