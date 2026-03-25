@@ -636,17 +636,15 @@ class DiffusionGraphBuilder:
         cfg.update(kwargs)
         # LoRA weights are loaded at runtime via diffusers loader mixins.
         if component_type.endswith(".lora") and pretrained is not None:
-            cfg.setdefault(
-                "lora_weights",
-                [
-                    {
-                        "name": str(node_id),
-                        "path": str(pretrained),
-                        "weight_name": cfg.get("weight_name"),
-                        "scale": float(cfg.get("scale", 1.0)),
-                    }
-                ],
-            )
+            _lw_entry: Dict[str, Any] = {
+                "name": str(node_id),
+                "path": str(pretrained),
+                "weight_name": cfg.get("weight_name"),
+                "scale": float(cfg.get("scale", 1.0)),
+            }
+            if cfg.get("subfolder") is not None:
+                _lw_entry["subfolder"] = cfg["subfolder"]
+            cfg.setdefault("lora_weights", [_lw_entry])
         # IP-Adapter Plus / Plus-Face: UNet projection expects CLIP vision hidden states, not pooled
         # image_embeds (see diffusers SDXL prepare_ip_adapter_image_embeds / encode_image).
         wn = cfg.get("weight_name")

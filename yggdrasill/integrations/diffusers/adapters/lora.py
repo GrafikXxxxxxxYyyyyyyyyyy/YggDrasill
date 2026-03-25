@@ -63,9 +63,12 @@ def _load_one_lora_entry(pipe: Any, lora: Dict[str, Any], index: int) -> None:
         return
     weight_path = lora.get("path", "")
     weight_name = lora.get("weight_name")
+    subfolder = lora.get("subfolder")
     kwargs: Dict[str, Any] = {"adapter_name": name}
     if weight_name:
         kwargs["weight_name"] = weight_name
+    if subfolder is not None:
+        kwargs["subfolder"] = subfolder
     try:
         pipe.load_lora_weights(weight_path, **kwargs)
     except ValueError as e:

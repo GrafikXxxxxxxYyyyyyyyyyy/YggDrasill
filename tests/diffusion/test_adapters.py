@@ -557,6 +557,56 @@ class TestLoRAInjectorNode:
         pipe.load_lora_weights.assert_not_called()
         pipe.set_adapters.assert_called()
 
+    def test_load_lora_forwards_subfolder_to_load_lora_weights(self):
+        from unittest.mock import MagicMock
+
+        from yggdrasill.integrations.diffusers.adapters.lora import LoRAInjectorNode
+
+        pipe = MagicMock()
+        unet = MagicMock()
+        unet.peft_config = {}
+        pipe.unet = unet
+        pipe.text_encoder = MagicMock()
+        pipe.text_encoder.peft_config = {}
+        pipe.text_encoder_2 = MagicMock()
+        pipe.text_encoder_2.peft_config = {}
+
+        class _G:
+            node_ids = ("L",)
+
+            def get_node(self, nid):
+                return self._node
+
+            def __init__(self, node):
+                self._node = node
+
+        node = LoRAInjectorNode(
+            "L",
+            pipe=pipe,
+            config={
+                "lora_weights": [
+                    {
+                        "name": "L",
+                        "path": "user/repo",
+                        "weight_name": "x.safetensors",
+                        "subfolder": "sd15",
+                        "scale": 1.0,
+                    }
+                ],
+            },
+        )
+        g = _G(node)
+        node._ygg_graph = g
+        g._yggdrasill_lora_merged = {}
+
+        node.forward({})
+        pipe.load_lora_weights.assert_called_once()
+        call_args = pipe.load_lora_weights.call_args
+        assert call_args.args[0] == "user/repo"
+        kw = call_args.kwargs
+        assert kw.get("subfolder") == "sd15"
+        assert kw.get("weight_name") == "x.safetensors"
+
     def test_forward_two_lora_nodes_set_adapters_with_both_names(self):
         from unittest.mock import MagicMock, call
 
