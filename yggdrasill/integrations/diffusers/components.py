@@ -304,6 +304,18 @@ _ADAPTER_COMPONENTS: Dict[str, ComponentSpec] = {
         constructor_map={"adapter/controlnet": {"controlnet": "controlnet"}},
         load_family="sdxl",
     ),
+    "sdxl.t2iadapter": ComponentSpec(
+        block_types=["adapter/t2i_adapter"],
+        load_keys=["t2iadapter"],
+        constructor_map={"adapter/t2i_adapter": {"adapter": "t2iadapter"}},
+        load_family="sdxl",
+    ),
+    "sd15.t2iadapter": ComponentSpec(
+        block_types=["adapter/t2i_adapter"],
+        load_keys=["t2iadapter"],
+        constructor_map={"adapter/t2i_adapter": {"adapter": "t2iadapter"}},
+        load_family="sd15",
+    ),
     "sd15.ipadapter": ComponentSpec(
         block_types=["adapter/ip_adapter"],
         load_keys=["image_encoder", "feature_extractor"],
@@ -482,6 +494,7 @@ def load_components_from_pretrained(
     pretrained_map: Optional[Dict[str, str]] = None,
     subfolder_map: Optional[Dict[str, str]] = None,
     variant_map: Optional[Dict[str, str]] = None,
+    extra_kwargs_map: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Load specific components. Each loads separately; cached in ModelStore.
 
@@ -504,4 +517,5 @@ def load_components_from_pretrained(
         pretrained_map=pretrained_map,
         subfolder_map=subfolder_map,
         variant_map=variant_map,
+        extra_kwargs_map=extra_kwargs_map,
     )

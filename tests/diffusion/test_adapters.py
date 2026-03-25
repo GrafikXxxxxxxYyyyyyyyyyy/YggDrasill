@@ -269,6 +269,148 @@ class TestControlNetNode:
         assert torch.allclose(ac["text_embeds"][1], torch.zeros(1, 1280))
 
 
+class TestT2IAdapterNode:
+
+    def test_ports(self):
+        from yggdrasill.integrations.diffusers.adapters.t2i_adapter import T2IAdapterNode
+
+        node = T2IAdapterNode("a", adapter=object())
+        ports = node.declare_ports()
+        in_names = {p.name for p in ports if p.direction == PortDirection.IN}
+        out_names = {p.name for p in ports if p.direction == PortDirection.OUT}
+        assert C.PORT_T2I_ADAPTER_IMAGE in in_names
+        assert C.PORT_DOWN_INTRABLOCK_RESIDUALS in out_names
+
+    @requires_torch
+    def test_forward_scales_and_cfg_duplicates(self):
+        import torch
+
+        from yggdrasill.integrations.diffusers.adapters.t2i_adapter import T2IAdapterNode
+
+        class _Adapter:
+            dtype = torch.float16
+
+            def parameters(self):
+                yield torch.zeros(1, device="cpu", dtype=torch.float16)
+
+            def __call__(self, x):
+                b = x.shape[0]
+                return [torch.ones(b, 2, 4, 4), torch.ones(b, 4, 2, 2)]
+
+        node = T2IAdapterNode(
+            "a",
+            adapter=_Adapter(),
+            config={
+                "guidance_scale": 7.5,
+                "conditioning_scale": 0.5,
+                "height": 64,
+                "width": 64,
+            },
+        )
+        out = node.forward({
+            C.PORT_LATENTS: torch.zeros(1, 4, 8, 8),
+            C.PORT_TIMESTEP: torch.tensor(1, dtype=torch.long),
+            C.PORT_PROMPT_EMBEDS: torch.zeros(1, 77, 2048),
+            C.PORT_NEGATIVE_PROMPT_EMBEDS: torch.zeros(1, 77, 2048),
+            C.PORT_T2I_ADAPTER_IMAGE: torch.zeros(1, 3, 64, 64),
+        })
+        feats = out[C.PORT_DOWN_INTRABLOCK_RESIDUALS]
+        assert isinstance(feats, tuple) and len(feats) == 2
+        assert feats[0].shape[0] == 2
+        assert feats[1].shape[0] == 2
+        assert torch.allclose(feats[0], torch.ones_like(feats[0]) * 0.5)
+
+    @requires_torch
+    def test_forward_respects_conditioning_factor_keep_window(self):
+        import torch
+
+        from yggdrasill.integrations.diffusers.adapters.t2i_adapter import T2IAdapterNode
+
+        class _Adapter:
+            dtype = torch.float32
+
+            def parameters(self):
+                yield torch.zeros(1, device="cpu", dtype=torch.float32)
+
+            def __call__(self, x):
+                b = x.shape[0]
+                return [torch.ones(b, 1, 2, 2)]
+
+        class _Sched:
+            def __init__(self):
+                self.timesteps = list(range(10))
+                self._yggdrasill_step_idx = 0
+
+        sched = _Sched()
+        node = T2IAdapterNode(
+            "a",
+            adapter=_Adapter(),
+            config={
+                "guidance_scale": 1.0,
+                "conditioning_scale": 1.0,
+                "conditioning_factor": 0.3,
+                "height": 64,
+                "width": 64,
+            },
+        )
+
+        sched._yggdrasill_step_idx = 0
+        out0 = node.forward({
+            C.PORT_LATENTS: torch.zeros(1, 4, 8, 8),
+            C.PORT_TIMESTEP: torch.tensor(1, dtype=torch.long),
+            C.PORT_PROMPT_EMBEDS: torch.zeros(1, 77, 2048),
+            C.PORT_T2I_ADAPTER_IMAGE: torch.zeros(1, 3, 64, 64),
+            C.PORT_SCHEDULER_STATE: {"scheduler": sched},
+        })
+        assert C.PORT_DOWN_INTRABLOCK_RESIDUALS in out0
+
+        sched._yggdrasill_step_idx = 3
+        out3 = node.forward({
+            C.PORT_LATENTS: torch.zeros(1, 4, 8, 8),
+            C.PORT_TIMESTEP: torch.tensor(1, dtype=torch.long),
+            C.PORT_PROMPT_EMBEDS: torch.zeros(1, 77, 2048),
+            C.PORT_T2I_ADAPTER_IMAGE: torch.zeros(1, 3, 64, 64),
+            C.PORT_SCHEDULER_STATE: {"scheduler": sched},
+        })
+        assert out3 == {}
+
+    @requires_torch
+    def test_forward_grayscale_adapter_converts_rgb_to_one_channel(self):
+        import torch
+
+        from yggdrasill.integrations.diffusers.adapters.t2i_adapter import T2IAdapterNode
+
+        captured: dict = {}
+
+        class _Cfg:
+            in_channels = 1
+
+        class _Adapter:
+            dtype = torch.float32
+            config = _Cfg()
+
+            def parameters(self):
+                yield torch.zeros(1, device="cpu", dtype=torch.float32)
+
+            def __call__(self, x):
+                captured["shape"] = tuple(x.shape)
+                b = x.shape[0]
+                return [torch.ones(b, 1, 2, 2)]
+
+        node = T2IAdapterNode(
+            "a",
+            adapter=_Adapter(),
+            config={"guidance_scale": 1.0, "height": 64, "width": 64},
+        )
+        node.forward({
+            C.PORT_LATENTS: torch.zeros(1, 4, 8, 8),
+            C.PORT_TIMESTEP: torch.tensor(1, dtype=torch.long),
+            C.PORT_PROMPT_EMBEDS: torch.zeros(1, 77, 768),
+            C.PORT_T2I_ADAPTER_IMAGE: torch.zeros(1, 3, 64, 64),
+        })
+        assert captured["shape"][1] == 1
+
+
 class TestIPAdapterNode:
 
     def test_ports(self):

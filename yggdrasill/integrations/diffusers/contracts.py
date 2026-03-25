@@ -53,6 +53,7 @@ PORT_ENCODER_HIDDEN_STATES = "encoder_hidden_states"
 PORT_ADDED_COND_KWARGS = "added_cond_kwargs"
 PORT_DOWN_BLOCK_RESIDUALS = "down_block_additional_residuals"
 PORT_MID_BLOCK_RESIDUAL = "mid_block_additional_residual"
+PORT_DOWN_INTRABLOCK_RESIDUALS = "down_intrablock_additional_residuals"
 PORT_IMAGE_EMBEDS = "image_embeds"
 
 # ---------------------------------------------------------------------------
@@ -85,6 +86,7 @@ PORT_NEGATIVE_ADD_TIME_IDS = "negative_add_time_ids"
 
 PORT_CONTROL_IMAGE = "control_image"
 PORT_CONTROL_RESIDUALS = "control_residuals"
+PORT_T2I_ADAPTER_IMAGE = "t2i_adapter_image"
 PORT_IP_ADAPTER_IMAGE = "ip_adapter_image"
 # Precomputed IP-Adapter embeddings (encoder output or cond-only slice of pipeline-prepared tensors).
 PORT_IP_ADAPTER_IMAGE_EMBEDS = "ip_adapter_image_embeds"

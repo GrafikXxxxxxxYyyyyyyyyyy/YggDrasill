@@ -137,6 +137,28 @@ class TestModelStoreBasics:
         assert len(calls) >= 2
         assert "variant" not in calls[-1]
 
+    def test_load_component_retries_without_subfolder_on_404(self):
+        store = ModelStore()
+        calls: list = []
+
+        class FakeModel:
+            @classmethod
+            def from_pretrained(cls, source, **kwargs):
+                calls.append(dict(kwargs))
+                if kwargs.get("subfolder") == "vae":
+                    raise OSError("Entry Not Found for url: https://huggingface.co/x/resolve/main/vae/config.json")
+                return "ok"
+
+        out = store.load_component(
+            FakeModel,
+            "x",
+            subfolder="vae",
+            torch_dtype=torch.float16,
+        )
+        assert out == "ok"
+        assert calls[0].get("subfolder") == "vae"
+        assert "subfolder" not in calls[-1]
+
     def test_move_to_device_with_to(self):
         store = ModelStore()
         store.device = "cuda"

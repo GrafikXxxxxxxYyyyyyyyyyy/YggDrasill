@@ -57,6 +57,7 @@ class SDXLUNetNode(AbstractBackbone):
             Port(C.PORT_SCHEDULER_STATE, PortDirection.IN, PortType.ANY, optional=True),
             Port(C.PORT_DOWN_BLOCK_RESIDUALS, PortDirection.IN, PortType.ANY, optional=True, aggregation=PortAggregation.CONCAT),
             Port(C.PORT_MID_BLOCK_RESIDUAL, PortDirection.IN, PortType.ANY, optional=True, aggregation=PortAggregation.CONCAT),
+            Port(C.PORT_DOWN_INTRABLOCK_RESIDUALS, PortDirection.IN, PortType.ANY, optional=True, aggregation=PortAggregation.CONCAT),
             # Allow multi-edge wiring: one ip_mask_prep per loaded IP-Adapter slot.
             # Diffusers expects cross_attention_kwargs["ip_adapter_masks"] as a list.
             Port(C.PORT_IP_ADAPTER_MASKS, PortDirection.IN, PortType.TENSOR, optional=True, aggregation=PortAggregation.CONCAT),
@@ -204,6 +205,13 @@ class SDXLUNetNode(AbstractBackbone):
             unet_kwargs["down_block_additional_residuals"] = merge_residuals(down_residuals)
         if mid_residual is not None:
             unet_kwargs["mid_block_additional_residual"] = merge_residuals(mid_residual)
+        intrablock = inputs.get(C.PORT_DOWN_INTRABLOCK_RESIDUALS)
+        if intrablock is not None:
+            merged_intra = merge_residuals(intrablock)
+            # Diffusers UNet expects a list of tensors.
+            if isinstance(merged_intra, tuple):
+                merged_intra = list(merged_intra)
+            unet_kwargs["down_intrablock_additional_residuals"] = merged_intra
 
         if hasattr(self._unet, "config") and getattr(self._unet.config, "time_cond_proj_dim", None):
             unet_kwargs["timestep_cond"] = self._get_guidance_scale_embedding(guidance_scale)

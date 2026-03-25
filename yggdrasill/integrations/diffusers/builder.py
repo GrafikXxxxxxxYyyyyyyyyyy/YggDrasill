@@ -598,6 +598,18 @@ class DiffusionGraphBuilder:
             pretrained_map = getattr(spec, "load_pretrained_map", None)
             subfolder_map = getattr(spec, "load_subfolder_map", None)
             variant_map = getattr(spec, "load_variant_map", None)
+            # Allow per-call overrides for Diffusers model weights when the component
+            # is itself a Diffusers model (e.g. T2I-Adapter single-file weights).
+            is_t2i = any(str(bt) == "adapter/t2i_adapter" for bt in (spec.block_types or ()))
+            if is_t2i and cfg.get("subfolder"):
+                subfolder_map = dict(subfolder_map or {})
+                for k in spec.load_keys:
+                    subfolder_map.setdefault(k, cfg.get("subfolder"))
+            extra_kwargs_map: Dict[str, Dict[str, Any]] = {}
+            if is_t2i and cfg.get("weight_name"):
+                for k in spec.load_keys:
+                    if k == "t2iadapter":
+                        extra_kwargs_map.setdefault(k, {})["weight_name"] = cfg.get("weight_name")
             components_loaded = load_components_from_pretrained(
                 spec.load_keys,
                 pretrained,
@@ -608,6 +620,7 @@ class DiffusionGraphBuilder:
                 pretrained_map=pretrained_map,
                 subfolder_map=subfolder_map,
                 variant_map=variant_map,
+                extra_kwargs_map=extra_kwargs_map or None,
             )
 
         # Build constructor kwargs from constructor_map + loaded components
@@ -744,6 +757,11 @@ class DiffusionGraphBuilder:
             if "adapter/controlnet" in bt and C.PORT_CONTROL_IMAGE in in_names:
                 # Use node-scoped key so multi-ControlNet graphs work with controlnet_image={node_id: img}
                 self._graph.expose_input(nid, C.PORT_CONTROL_IMAGE, f"{nid}:{C.PORT_CONTROL_IMAGE}")
+            if "adapter/t2i_adapter" in bt and C.PORT_T2I_ADAPTER_IMAGE in in_names:
+                # Use node-scoped key so multi-adapter graphs work with t2i_adapter_image={node_id: img}
+                self._graph.expose_input(
+                    nid, C.PORT_T2I_ADAPTER_IMAGE, f"{nid}:{C.PORT_T2I_ADAPTER_IMAGE}"
+                )
             if "ip_adapter_mask_prep" in bt and C.PORT_IP_ADAPTER_MASK_IMAGES in in_names:
                 self._graph.expose_input(
                     nid, C.PORT_IP_ADAPTER_MASK_IMAGES, C.PORT_IP_ADAPTER_MASK_IMAGES,

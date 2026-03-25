@@ -39,6 +39,7 @@ def register_diffusion_nodes(registry: Optional[BlockRegistry] = None) -> None:
     from yggdrasill.integrations.diffusers.adapters.lora import LoRALoaderNode
     from yggdrasill.integrations.diffusers.adapters.controlnet import ControlNetNode
     from yggdrasill.integrations.diffusers.adapters.ip_adapter import IPAdapterNode
+    from yggdrasill.integrations.diffusers.adapters.t2i_adapter import T2IAdapterNode
     from yggdrasill.integrations.diffusers.adapters.textual_inversion import TextualInversionNode
 
     from yggdrasill.integrations.diffusers.flux.tokenizer import FluxTokenizerNode
@@ -77,6 +78,7 @@ def register_diffusion_nodes(registry: Optional[BlockRegistry] = None) -> None:
         "adapter/lora_loader": LoRALoaderNode,
         "adapter/controlnet": ControlNetNode,
         "adapter/ip_adapter": IPAdapterNode,
+        "adapter/t2i_adapter": T2IAdapterNode,
         "adapter/textual_inversion": TextualInversionNode,
         "flux/tokenizer": FluxTokenizerNode,
         "flux/prompt_encoder": FluxPromptEncoderNode,

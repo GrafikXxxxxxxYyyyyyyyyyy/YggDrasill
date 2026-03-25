@@ -176,6 +176,20 @@ class ModelStore:
                 raise
             fallback_path = f"{source}/{subfolder}" if subfolder else source
 
+            # Some community repos store components in repo root (no subfolder),
+            # even when the canonical pipeline expects e.g. "vae/".
+            # If we were asked to load from a subfolder and got a 404, retry without it.
+            if component is None and subfolder:
+                logger.info("Retrying %s from repo root (no subfolder) ...", cls.__name__)
+                kwargs_root = {k: v for k, v in kwargs.items() if k != "subfolder"}
+                try:
+                    component = cls.from_pretrained(source, **kwargs_root)
+                    subfolder = ""
+                    fallback_path = source
+                    kwargs = kwargs_root
+                except Exception as root_err:
+                    logger.info("Repo-root retry failed: %s", root_err)
+
             # Community ControlNet / single-file repos often ship only
             # ``diffusion_pytorch_model.safetensors`` (no ``.fp16.`` variant).
             if variant == "fp16" and use_safetensors:
@@ -230,6 +244,7 @@ class ModelStore:
         revision: Optional[str] = None,
         torch_dtype: Optional[Any] = None,
         use_safetensors: Optional[bool] = None,
+        extra_kwargs: Optional[Dict[str, Any]] = None,
         force_reload: bool = False,
     ) -> Optional[Any]:
         """Load a single component by (family, load_key). Cached per (repo_id, subfolder, cls_name).
@@ -274,6 +289,7 @@ class ModelStore:
             variant=variant,
             revision=revision,
             torch_dtype=torch_dtype,
+            extra_kwargs=extra_kwargs,
             force_reload=force_reload,
             **use_safetensors_kw,
         )
@@ -291,6 +307,7 @@ class ModelStore:
         pretrained_map: Optional[Dict[str, str]] = None,
         subfolder_map: Optional[Dict[str, str]] = None,
         variant_map: Optional[Dict[str, str]] = None,
+        extra_kwargs_map: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """Load only the requested components. Each loads separately; results are cached.
 
@@ -324,6 +341,7 @@ class ModelStore:
             key_repo = (pretrained_map or {}).get(key, repo_id)
             key_subfolder = (subfolder_map or {}).get(key) if subfolder_map else None
             key_variant = (variant_map or {}).get(key, variant)
+            key_extra = (extra_kwargs_map or {}).get(key) if extra_kwargs_map else None
             if not result and not pretrained_map:
                 logger.info("Loading components from %s: %s", key_repo, ", ".join(load_keys))
             comp = self.load_component_by_key(
@@ -335,6 +353,7 @@ class ModelStore:
                 revision=revision,
                 torch_dtype=torch_dtype,
                 use_safetensors=use_safetensors,
+                extra_kwargs=key_extra,
             )
             if comp is not None:
                 result[key] = comp

@@ -140,3 +140,23 @@ def test_prepare_guess_mode_does_not_force_guidance_scale() -> None:
     run_kw: dict = {"guess_mode": True}
     _prepare_diffusion_run(g, run_kw, merged_inputs={})
     assert "guidance_scale" not in run_kw
+
+
+def test_run_t2i_adapter_conditioning_scale_reaches_node_config() -> None:
+    from yggdrasill.integrations.diffusers.run import run as run_diffusion
+
+    g = _MockGraph(
+        {"T2IAdapter": _Node("adapter/t2i_adapter")},
+        input_spec=[
+            {"node_id": "T2IAdapter", "port_name": C.PORT_T2I_ADAPTER_IMAGE, "name": "x"},
+        ],
+    )
+    g.run = lambda *_a, **_k: {}  # type: ignore[attr-defined]
+    run_diffusion(
+        g,
+        inputs={},
+        wrap_output=False,
+        t2i_adapter_conditioning_scale={"T2IAdapter": 0.25},
+        pin_data={},
+    )
+    assert g._nodes["T2IAdapter"]._config.get("conditioning_scale") == 0.25

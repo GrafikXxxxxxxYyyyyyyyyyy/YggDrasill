@@ -44,6 +44,7 @@ def _wrap_hypergraph_run_for_diffusion():
         PORT_INIT_IMAGE,
         PORT_OUTPUT_IMAGE,
         PORT_CONTROL_IMAGE,
+        PORT_T2I_ADAPTER_IMAGE,
         PORT_IP_ADAPTER_IMAGE_EMBEDS,
         PORT_IP_ADAPTER_MASK_IMAGES,
     )
@@ -57,6 +58,7 @@ def _wrap_hypergraph_run_for_diffusion():
             _inject_ip_adapter_scale,
             _inject_node_config,
             _prepare_diffusion_run,
+            _iter_t2i_adapter_node_ids,
             merge_ip_adapter_image_kwarg,
             normalize_merged_adapter_inputs,
         )
@@ -74,6 +76,15 @@ def _wrap_hypergraph_run_for_diffusion():
                     merged[f"{nid}:{PORT_CONTROL_IMAGE}"] = img
         elif controlnet_image is not None:
             _assign_to_single_exposed(merged, self, PORT_CONTROL_IMAGE, controlnet_image)
+        t2i_adapter_image = kwargs.pop("t2i_adapter_image", None)
+        if isinstance(t2i_adapter_image, dict):
+            for nid, img in t2i_adapter_image.items():
+                if img is not None:
+                    merged[f"{nid}:{PORT_T2I_ADAPTER_IMAGE}"] = img
+        elif t2i_adapter_image is not None:
+            _assign_to_single_exposed(
+                merged, self, PORT_T2I_ADAPTER_IMAGE, t2i_adapter_image
+            )
         ip_adapter_image = kwargs.pop("ip_adapter_image", None)
         merge_ip_adapter_image_kwarg(merged, self, ip_adapter_image)
         ip_adapter_image_embeds = kwargs.pop("ip_adapter_image_embeds", None)
@@ -104,6 +115,24 @@ def _wrap_hypergraph_run_for_diffusion():
         controlnet_conditioning_scale = kwargs.pop("controlnet_conditioning_scale", None)
         if isinstance(controlnet_conditioning_scale, dict):
             _inject_node_config(self, controlnet_conditioning_scale, "conditioning_scale")
+        t2i_adapter_conditioning_scale = kwargs.pop("t2i_adapter_conditioning_scale", None)
+        if isinstance(t2i_adapter_conditioning_scale, dict):
+            _inject_node_config(self, t2i_adapter_conditioning_scale, "conditioning_scale")
+        elif t2i_adapter_conditioning_scale is not None:
+            _inject_node_config(
+                self,
+                {nid: float(t2i_adapter_conditioning_scale) for nid in _iter_t2i_adapter_node_ids(self)},
+                "conditioning_scale",
+            )
+        t2i_adapter_conditioning_factor = kwargs.pop("t2i_adapter_conditioning_factor", None)
+        if isinstance(t2i_adapter_conditioning_factor, dict):
+            _inject_node_config(self, t2i_adapter_conditioning_factor, "conditioning_factor")
+        elif t2i_adapter_conditioning_factor is not None:
+            _inject_node_config(
+                self,
+                {nid: float(t2i_adapter_conditioning_factor) for nid in _iter_t2i_adapter_node_ids(self)},
+                "conditioning_factor",
+            )
         ip_adapter_conditioning_scale = kwargs.pop("ip_adapter_conditioning_scale", None)
         if isinstance(ip_adapter_conditioning_scale, list):
             _inject_ip_adapter_scale(self, ip_adapter_conditioning_scale, merged)

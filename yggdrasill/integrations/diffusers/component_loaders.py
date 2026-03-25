@@ -32,7 +32,7 @@ def load_scheduler_from_repo(repo_id: str, subfolder: str = "scheduler") -> Any:
 
 
 def _init_sd15() -> None:
-    from diffusers import AutoencoderKL, ControlNetModel, UNet2DConditionModel
+    from diffusers import AutoencoderKL, ControlNetModel, T2IAdapter, UNet2DConditionModel
     from transformers import CLIPTextModel, CLIPTokenizer
 
     _register("sd15", "unet", UNet2DConditionModel, "unet")
@@ -41,14 +41,16 @@ def _init_sd15() -> None:
     _register("sd15", "tokenizer", CLIPTokenizer, "tokenizer")
     _register("sd15", "scheduler", None, "scheduler")
     _register("sd15", "controlnet", ControlNetModel, "")
+    _register("sd15", "t2iadapter", T2IAdapter, "")
 
 
 def _init_sdxl() -> None:
-    from diffusers import AutoencoderKL, ControlNetModel, EulerDiscreteScheduler, UNet2DConditionModel
+    from diffusers import AutoencoderKL, ControlNetModel, EulerDiscreteScheduler, T2IAdapter, UNet2DConditionModel
     from transformers import CLIPTextModel, CLIPTextModelWithProjection, CLIPTokenizer
 
     _register("sdxl", "unet", UNet2DConditionModel, "unet")
     _register("sdxl", "controlnet", ControlNetModel, "")
+    _register("sdxl", "t2iadapter", T2IAdapter, "")
     _register("sdxl", "vae", AutoencoderKL, "vae")
     _register("sdxl", "text_encoder", CLIPTextModel, "text_encoder")
     _register("sdxl", "text_encoder_2", CLIPTextModelWithProjection, "text_encoder_2")

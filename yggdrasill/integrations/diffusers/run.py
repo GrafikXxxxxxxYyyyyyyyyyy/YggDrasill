@@ -17,6 +17,17 @@ def _iter_controlnet_node_ids(graph: Any) -> List[str]:
     return out
 
 
+def _iter_t2i_adapter_node_ids(graph: Any) -> List[str]:
+    out: List[str] = []
+    for nid in getattr(graph, "node_ids", ()) or ():
+        node = graph.get_node(nid) if hasattr(graph, "get_node") else None
+        if node is None:
+            continue
+        if getattr(node, "block_type", None) == "adapter/t2i_adapter":
+            out.append(nid)
+    return out
+
+
 def _inject_guess_mode(graph: Any, guess_mode: Any) -> None:
     """Inject guess_mode into ControlNet nodes.
 
@@ -120,6 +131,14 @@ def run(
         merged[C.PORT_INIT_IMAGE] = merged.pop("image")
     normalize_merged_adapter_inputs(merged, graph)
 
+    t2i_adapter_image = run_kw.pop("t2i_adapter_image", None)
+    if isinstance(t2i_adapter_image, dict):
+        for nid, img in t2i_adapter_image.items():
+            if img is not None:
+                merged[f"{nid}:{C.PORT_T2I_ADAPTER_IMAGE}"] = img
+    elif t2i_adapter_image is not None:
+        _assign_to_single_exposed(merged, graph, C.PORT_T2I_ADAPTER_IMAGE, t2i_adapter_image)
+
     controlnet_image = run_kw.pop("controlnet_image", None)
     if isinstance(controlnet_image, dict):
         for nid, img in controlnet_image.items():
@@ -164,6 +183,27 @@ def run(
         _route_ip_adapter_masks(
             merged, graph, ip_masks_kw,
             pin_data=run_kw.setdefault("pin_data", {}),
+        )
+
+    # DiffusionGraphBuilder.run calls this wrapper directly (not the patched Hypergraph.run),
+    # so handle T2I-Adapter kwargs here.
+    t2i_scale = run_kw.pop("t2i_adapter_conditioning_scale", None)
+    if isinstance(t2i_scale, dict):
+        _inject_node_config(graph, t2i_scale, "conditioning_scale")
+    elif t2i_scale is not None:
+        _inject_node_config(
+            graph,
+            {nid: float(t2i_scale) for nid in _iter_t2i_adapter_node_ids(graph)},
+            "conditioning_scale",
+        )
+    t2i_factor = run_kw.pop("t2i_adapter_conditioning_factor", None)
+    if isinstance(t2i_factor, dict):
+        _inject_node_config(graph, t2i_factor, "conditioning_factor")
+    elif t2i_factor is not None:
+        _inject_node_config(
+            graph,
+            {nid: float(t2i_factor) for nid in _iter_t2i_adapter_node_ids(graph)},
+            "conditioning_factor",
         )
 
     _prepare_diffusion_run(graph, run_kw, merged_inputs=merged)
@@ -528,6 +568,7 @@ def normalize_merged_adapter_inputs(merged: Dict[str, Any], graph: Any) -> None:
     seeds the IP node with that dict and encoding fails or yields no conditioning.
     """
     _pop_expand_node_scoped_port(merged, graph, C.PORT_CONTROL_IMAGE)
+    _pop_expand_node_scoped_port(merged, graph, C.PORT_T2I_ADAPTER_IMAGE)
     _pop_expand_node_scoped_port(merged, graph, C.PORT_IP_ADAPTER_IMAGE)
     _pop_expand_node_scoped_port(merged, graph, C.PORT_IP_ADAPTER_IMAGE_EMBEDS)
     _pop_expand_node_scoped_port(merged, graph, C.PORT_IP_ADAPTER_MASK_IMAGES)
@@ -689,6 +730,11 @@ def _diffusion_skip_inactive_adapters(graph: Any, merged: Dict[str, Any]) -> Set
                 merged, nid, C.PORT_CONTROL_IMAGE, input_spec,
             ):
                 skip.add(nid)
+        if bt == "adapter/t2i_adapter":
+            if not _merged_provides_input_for_node_port(
+                merged, nid, C.PORT_T2I_ADAPTER_IMAGE, input_spec,
+            ):
+                skip.add(nid)
     return skip
 
 
@@ -825,6 +871,7 @@ def _prepare_diffusion_run(
             if (
                 "latent_init" not in bt
                 and "adapter/controlnet" not in bt
+                and "adapter/t2i_adapter" not in bt
                 and "sdxl/added_conditioning" not in bt
                 and "ip_adapter_mask_prep" not in bt
             ):
