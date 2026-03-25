@@ -210,3 +210,5 @@ __marimo__
 .gradio/
 checkpoints/
 output*.png/
+
+data/
