@@ -165,6 +165,67 @@ class TestControlNetNode:
         assert captured.get("guess_mode") is True
 
     @requires_torch
+    def test_control_guidance_window_matches_diffusers_keep(self):
+        import torch
+        from unittest.mock import MagicMock
+
+        from yggdrasill.integrations.diffusers.adapters.controlnet import ControlNetNode
+
+        captured: dict = {}
+
+        def fake_cn(latents, timestep, **kwargs):
+            captured["conditioning_scale"] = float(kwargs.get("conditioning_scale", -1))
+            down = [torch.zeros(latents.shape[0], 1, 2, 2)]
+            mid = torch.zeros(latents.shape[0], 1, 1, 1)
+            return down, mid
+
+        mock_cn = MagicMock(side_effect=fake_cn)
+        mock_cn.config = type("C", (), {"global_pool_conditions": False})()
+        mock_cn.parameters = lambda: iter([torch.zeros(1)])
+
+        class _Sched:
+            def __init__(self):
+                self.timesteps = list(range(10))  # L=10
+                self._yggdrasill_step_idx = 0
+
+            def scale_model_input(self, x, t):
+                return x
+
+        sched = _Sched()
+
+        node = ControlNetNode(
+            "cn",
+            controlnet=mock_cn,
+            config={
+                "guidance_scale": 1.0,
+                "height": 64,
+                "width": 64,
+                "conditioning_scale": 2.0,
+                "control_guidance_start": 0.2,
+                "control_guidance_end": 0.6,
+            },
+        )
+
+        def _call_at(i: int) -> float:
+            sched._yggdrasill_step_idx = i
+            node.forward({
+                C.PORT_LATENTS: torch.zeros(1, 4, 8, 8),
+                C.PORT_TIMESTEP: torch.tensor(999, dtype=torch.long),
+                C.PORT_PROMPT_EMBEDS: torch.zeros(1, 77, 768),
+                C.PORT_CONTROL_IMAGE: torch.zeros(1, 3, 64, 64),
+                C.PORT_SCHEDULER_STATE: {"scheduler": sched},
+            })
+            return float(captured["conditioning_scale"])
+
+        # Diffusers keep: keep=1 unless i/L < start OR (i+1)/L > end.
+        # i=0 => 0/10 < 0.2 => keep=0
+        assert _call_at(0) == 0.0
+        # i=2 => 0.2 < 0.2 is False, (3/10)>0.6 False => keep=1
+        assert _call_at(2) == 2.0
+        # i=6 => (7/10)>0.6 True => keep=0
+        assert _call_at(6) == 0.0
+
+    @requires_torch
     def test_sdxl_cfg_concatenates_added_cond_like_diffusers_pipeline(self):
         """Under CFG, SDXL ControlNet must get [neg, pos] stacked text_embeds / time_ids."""
         import torch

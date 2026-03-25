@@ -42,6 +42,33 @@ def _inject_guess_mode(graph: Any, guess_mode: Any) -> None:
         node._config["guess_mode"] = flag
 
 
+def _inject_control_guidance_window(graph: Any, *, start: Any, end: Any) -> None:
+    """Inject control guidance window (diffusers control_guidance_start/end) into ControlNet nodes.
+
+    Accepted forms:
+    - scalar float/int: applied to every ControlNet node
+    - {node_id: float}: per node
+    """
+    if start is not None:
+        if isinstance(start, dict):
+            _inject_node_config(graph, start, "control_guidance_start")
+        else:
+            _inject_node_config(
+                graph,
+                {nid: float(start) for nid in _iter_controlnet_node_ids(graph)},
+                "control_guidance_start",
+            )
+    if end is not None:
+        if isinstance(end, dict):
+            _inject_node_config(graph, end, "control_guidance_end")
+        else:
+            _inject_node_config(
+                graph,
+                {nid: float(end) for nid in _iter_controlnet_node_ids(graph)},
+                "control_guidance_end",
+            )
+
+
 def run(
     graph: Any,
     inputs: Optional[Dict[str, Any]] = None,
@@ -768,6 +795,11 @@ def _prepare_diffusion_run(
         run_kwargs["pin_data"] = {}
     # Apply guess_mode before node execution (ControlNetNode reads it from _config).
     _inject_guess_mode(graph, run_kwargs.pop("guess_mode", None))
+    _inject_control_guidance_window(
+        graph,
+        start=run_kwargs.pop("control_guidance_start", None),
+        end=run_kwargs.pop("control_guidance_end", None),
+    )
     _enforce_ip_adapter_multi_ref_with_masks(graph, merged)
     _sync_ip_adapter_mask_prep_pin(graph, run_kwargs, merged)
     extra_skip = _diffusion_universal_skip_nodes(graph, merged, run_kwargs)

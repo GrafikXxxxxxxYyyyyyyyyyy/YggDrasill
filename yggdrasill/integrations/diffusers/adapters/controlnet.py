@@ -146,6 +146,7 @@ class ControlNetNode(AbstractInnerModule):
                 latents_in = sched.scale_model_input(latents_in, timestep)
 
         conditioning_scale = self._config.get("conditioning_scale", 1.0)
+        conditioning_scale = self._apply_control_guidance_window(sched_state, conditioning_scale)
 
         def _resolved_conditioning_mode() -> str:
             """Canny / depth / … checkpoints expect different conditioning; 'canny' needs edge maps."""
@@ -301,6 +302,43 @@ class ControlNetNode(AbstractInnerModule):
             C.PORT_DOWN_BLOCK_RESIDUALS: down_residuals,
             C.PORT_MID_BLOCK_RESIDUAL: mid_residual,
         }
+
+    def _apply_control_guidance_window(self, sched_state: Any, scale: Any) -> Any:
+        """Match diffusers' control_guidance_start/end via controlnet_keep.
+
+        keep = 1.0 - float(i/L < start or (i+1)/L > end)
+        where L = len(timesteps), i = current index in timesteps.
+        """
+        if scale is None:
+            return scale
+        start = self._config.get("control_guidance_start", 0.0)
+        end = self._config.get("control_guidance_end", 1.0)
+        try:
+            s = float(start)
+            e = float(end)
+        except (TypeError, ValueError):
+            return scale
+
+        scheduler = None
+        if isinstance(sched_state, dict):
+            scheduler = sched_state.get("scheduler")
+        ts = getattr(scheduler, "timesteps", None) if scheduler is not None else None
+        try:
+            L = int(len(ts)) if ts is not None else 0
+        except Exception:
+            L = 0
+        if L <= 0:
+            return scale
+        try:
+            i = int(getattr(scheduler, "_yggdrasill_step_idx", 0))
+        except Exception:
+            i = 0
+
+        keep = 1.0 - float((i / L) < s or ((i + 1) / L) > e)
+        try:
+            return float(scale) * keep
+        except Exception:
+            return scale
 
     def to(self, device: Any) -> "ControlNetNode":
         if self._controlnet is not None:
