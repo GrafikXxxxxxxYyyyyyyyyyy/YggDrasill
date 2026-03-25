@@ -111,6 +111,15 @@ class TestHypergraphExposed:
         h.expose_input("A", "in", "x")
         assert len(h.get_input_spec()) == 1
 
+    def test_expose_input_updates_display_name(self):
+        h = Hypergraph()
+        h.add_node("A", IdentityTaskNode(node_id="A"))
+        h.expose_input("A", "in", "x")
+        h.expose_input("A", "in", "z")
+        spec = h.get_input_spec()
+        assert len(spec) == 1
+        assert spec[0]["name"] == "z"
+
     def test_include_dtype(self):
         h = Hypergraph()
         h.add_node("A", IdentityTaskNode(node_id="A"))

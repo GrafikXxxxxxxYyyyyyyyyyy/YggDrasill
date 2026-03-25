@@ -292,6 +292,9 @@ class Workflow:
         for existing in self._exposed_inputs:
             eid = existing.get("graph_id") or existing.get("node_id")
             if eid == graph_id and existing.get("port_name") == port_name:
+                if name is not None and existing.get("name") != name:
+                    existing["name"] = name
+                    self._execution_version += 1
                 return
         self._exposed_inputs.append(entry)
         self._execution_version += 1

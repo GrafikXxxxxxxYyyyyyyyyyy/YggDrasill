@@ -28,6 +28,17 @@ def _iter_t2i_adapter_node_ids(graph: Any) -> List[str]:
     return out
 
 
+def _iter_lora_loader_node_ids(graph: Any) -> List[str]:
+    out: List[str] = []
+    for nid in getattr(graph, "node_ids", ()) or ():
+        node = graph.get_node(nid) if hasattr(graph, "get_node") else None
+        if node is None:
+            continue
+        if getattr(node, "block_type", None) == "adapter/lora_loader":
+            out.append(nid)
+    return out
+
+
 def _inject_guess_mode(graph: Any, guess_mode: Any) -> None:
     """Inject guess_mode into ControlNet nodes.
 
@@ -184,6 +195,21 @@ def run(
             merged, graph, ip_masks_kw,
             pin_data=run_kw.setdefault("pin_data", {}),
         )
+
+    # LoRA runtime scale: feed LoRALoaderNode input (single node or per-node dict).
+    lora_scale = run_kw.pop("lora_conditioning_scale", None)
+    if lora_scale is not None:
+        lora_nodes = _iter_lora_loader_node_ids(graph)
+        if isinstance(lora_scale, dict):
+            for nid, s in lora_scale.items():
+                if s is not None:
+                    merged[f"{nid}:{C.PORT_LORA_SCALE}"] = float(s)
+        elif len(lora_nodes) == 1:
+            merged[f"{lora_nodes[0]}:{C.PORT_LORA_SCALE}"] = float(lora_scale)
+        elif len(lora_nodes) > 1:
+            # Apply the same scale to all LoRA loader nodes.
+            for nid in lora_nodes:
+                merged[f"{nid}:{C.PORT_LORA_SCALE}"] = float(lora_scale)
 
     # DiffusionGraphBuilder.run calls this wrapper directly (not the patched Hypergraph.run),
     # so handle T2I-Adapter kwargs here.
@@ -837,6 +863,7 @@ def _prepare_diffusion_run(
     this hook is for any extra diffusion-specific setup.
     """
     merged = dict(merged_inputs or {})
+    setattr(graph, "_yggdrasill_lora_merged", dict(merged))
     if run_kwargs.get("pin_data") is None:
         run_kwargs["pin_data"] = {}
     # Apply guess_mode before node execution (ControlNetNode reads it from _config).

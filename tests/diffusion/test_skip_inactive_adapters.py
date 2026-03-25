@@ -160,3 +160,23 @@ def test_run_t2i_adapter_conditioning_scale_reaches_node_config() -> None:
         pin_data={},
     )
     assert g._nodes["T2IAdapter"]._config.get("conditioning_scale") == 0.25
+
+
+def test_run_lora_conditioning_scale_routes_to_lora_loader_input() -> None:
+    from yggdrasill.integrations.diffusers.run import run as run_diffusion
+
+    g = _MockGraph(
+        {"LoRA": _Node("adapter/lora_loader")},
+        input_spec=[
+            {"node_id": "LoRA", "port_name": C.PORT_LORA_SCALE, "name": "lora_conditioning_scale"},
+        ],
+    )
+    captured: dict = {}
+
+    def _run(inputs, **kwargs):
+        captured["inputs"] = dict(inputs)
+        return {}
+
+    g.run = _run  # type: ignore[attr-defined]
+    run_diffusion(g, inputs={}, wrap_output=False, lora_conditioning_scale=0.7, pin_data={})
+    assert captured["inputs"].get(f"LoRA:{C.PORT_LORA_SCALE}") == 0.7

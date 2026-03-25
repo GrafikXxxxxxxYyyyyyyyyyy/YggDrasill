@@ -5,7 +5,7 @@ adds implicit nodes, and delegates to graph.add_node with ready nodes.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import torch
 
@@ -138,6 +138,73 @@ def _infer_hypergraph_device(graph: Any) -> Any:
 
 _META_IP_ADAPTER_SDS = "ip_adapter_accumulated_state_dicts"
 _META_IP_ADAPTER_ORDER = "ip_adapter_weight_node_ids"
+
+
+def _build_lora_pipe(graph: Any, *, family: str) -> Any:
+    """Create a minimal diffusers LoRA loader host bound to graph modules.
+
+    We do not use the pipeline for inference; only for `load_lora_weights` / `set_adapters`.
+    """
+    from yggdrasill.integrations.diffusers.lazy_component import resolve_if_lazy
+
+    unet = None
+    text_encoder = None
+    text_encoder_2 = None
+
+    for nid in getattr(graph, "node_ids", ()) or ():
+        node = graph.get_node(nid) if hasattr(graph, "get_node") else None
+        if node is None:
+            continue
+        bt = getattr(node, "block_type", "") or ""
+        if bt.endswith("/unet") and getattr(node, "_unet", None) is not None:
+            unet = resolve_if_lazy(getattr(node, "_unet"))
+        if "prompt_encoder" in bt:
+            te = getattr(node, "_text_encoder", None)
+            if te is not None:
+                text_encoder = resolve_if_lazy(te)
+            te2 = getattr(node, "_text_encoder_2", None)
+            if te2 is not None:
+                text_encoder_2 = resolve_if_lazy(te2)
+
+    if unet is None:
+        raise RuntimeError("LoRA: no UNet found on graph.")
+    if family == "sdxl" and (text_encoder is None or text_encoder_2 is None):
+        raise RuntimeError("LoRA: SDXL requires text_encoder and text_encoder_2 on graph.")
+    if family == "sd15" and text_encoder is None:
+        raise RuntimeError("LoRA: SD1.5 requires text_encoder on graph.")
+
+    if family == "sdxl":
+        from diffusers.loaders.lora_pipeline import StableDiffusionXLLoraLoaderMixin
+
+        class _Pipe(StableDiffusionXLLoraLoaderMixin):
+            def __init__(self, unet, text_encoder, text_encoder_2):
+                self.unet = unet
+                self.text_encoder = text_encoder
+                self.text_encoder_2 = text_encoder_2
+                # LoraBaseMixin exposes `lora_scale` as a read-only property.
+                self._lora_scale = 1.0
+                # Some loader utilities inspect `_pipeline.components` to manage hooks/offload.
+                self.components = {
+                    "unet": unet,
+                    "text_encoder": text_encoder,
+                    "text_encoder_2": text_encoder_2,
+                }
+                # Offload bookkeeping expected by diffusers loader helpers.
+                self.hf_device_map = None
+
+        return _Pipe(unet, text_encoder, text_encoder_2)
+
+    from diffusers.loaders.lora_pipeline import StableDiffusionLoraLoaderMixin
+
+    class _Pipe(StableDiffusionLoraLoaderMixin):
+        def __init__(self, unet, text_encoder):
+            self.unet = unet
+            self.text_encoder = text_encoder
+            self._lora_scale = 1.0
+            self.components = {"unet": unet, "text_encoder": text_encoder}
+            self.hf_device_map = None
+
+    return _Pipe(unet, text_encoder)
 
 
 def _sync_ip_adapter_plus_token_embed_dims_from_unet(graph: Any, unet: Any) -> None:
@@ -363,8 +430,10 @@ class DiffusionGraphBuilder:
         (InstantStyle / per-layer scales: pass a dict with only ``down`` / ``up`` / ``mid`` keys, or a list
         of per–IP-Adapter configs as in diffusers ``set_ip_adapter_scale``). For **multiple** IP-Adapter
         nodes, ``ip_adapter_image`` may be a **list** in the same order as ``add_component`` calls that
-        loaded weights (stored in graph metadata; falls back to sorted node ids if missing),
-        etc. Returns DiffusionOutput."""
+        loaded weights (stored in graph metadata; falls back to sorted node ids if missing).
+        For **several** ``sdxl.lora`` / ``sd15.lora`` components, pass ``lora_conditioning_scale`` as a
+        dict ``{node_id: float}`` so every LoRA stays active together (one diffusers ``set_adapters`` call).
+        Returns DiffusionOutput."""
         from yggdrasill.integrations.diffusers.run import run as run_diffusion
         return run_diffusion(self.graph, inputs, wrap_output=True, **kwargs)
 
@@ -565,6 +634,19 @@ class DiffusionGraphBuilder:
             elif component_type == "sd15.ipadapter_faceid":
                 cfg.setdefault("weight_name", "ip-adapter-faceid_sd15.bin")
         cfg.update(kwargs)
+        # LoRA weights are loaded at runtime via diffusers loader mixins.
+        if component_type.endswith(".lora") and pretrained is not None:
+            cfg.setdefault(
+                "lora_weights",
+                [
+                    {
+                        "name": str(node_id),
+                        "path": str(pretrained),
+                        "weight_name": cfg.get("weight_name"),
+                        "scale": float(cfg.get("scale", 1.0)),
+                    }
+                ],
+            )
         # IP-Adapter Plus / Plus-Face: UNet projection expects CLIP vision hidden states, not pooled
         # image_embeds (see diffusers SDXL prepare_ip_adapter_image_embeds / encode_image).
         wn = cfg.get("weight_name")
@@ -658,12 +740,16 @@ class DiffusionGraphBuilder:
                 "node_id": nid,
                 "config": kwargs.get("config", cfg),
             }
+            if block_type == "adapter/lora_loader":
+                build_cfg["pipe"] = _build_lora_pipe(self._graph, family=family)
             for k, v in kwargs.items():
                 if k not in ("config", "type", "node_id"):
                     build_cfg[k] = v
 
             node = reg.build(build_cfg)
             self._graph.add_node(nid, node)
+            if block_type == "adapter/lora_loader":
+                setattr(node, "_ygg_graph", self._graph)
             if spec.group:
                 self._added_groups[spec.group] = nid
             from yggdrasill.hypergraph.auto_connect import apply_port_name_auto_connect
@@ -728,6 +814,13 @@ class DiffusionGraphBuilder:
         """
         from yggdrasill.foundation.node import AbstractGraphNode
 
+        lora_loader_nids: List[str] = []
+        for ln in self._graph.node_ids:
+            n = self._graph.get_node(ln)
+            if n is not None and getattr(n, "block_type", None) == "adapter/lora_loader":
+                lora_loader_nids.append(ln)
+        multi_lora = len(lora_loader_nids) > 1
+
         for nid in self._graph.node_ids:
             node = self._graph.get_node(nid)
             if not isinstance(node, AbstractGraphNode):
@@ -762,6 +855,11 @@ class DiffusionGraphBuilder:
                 self._graph.expose_input(
                     nid, C.PORT_T2I_ADAPTER_IMAGE, f"{nid}:{C.PORT_T2I_ADAPTER_IMAGE}"
                 )
+            if "adapter/lora_loader" in bt and C.PORT_LORA_SCALE in in_names:
+                # One LoRA: `builder.run(lora_conditioning_scale=0.7)`. Several: per-node keys like
+                # `LoRA1:lora_scale` (same pattern as ControlNet) or a dict on `lora_conditioning_scale`.
+                ext = f"{nid}:{C.PORT_LORA_SCALE}" if multi_lora else "lora_conditioning_scale"
+                self._graph.expose_input(nid, C.PORT_LORA_SCALE, ext)
             if "ip_adapter_mask_prep" in bt and C.PORT_IP_ADAPTER_MASK_IMAGES in in_names:
                 self._graph.expose_input(
                     nid, C.PORT_IP_ADAPTER_MASK_IMAGES, C.PORT_IP_ADAPTER_MASK_IMAGES,

@@ -316,6 +316,18 @@ _ADAPTER_COMPONENTS: Dict[str, ComponentSpec] = {
         constructor_map={"adapter/t2i_adapter": {"adapter": "t2iadapter"}},
         load_family="sd15",
     ),
+    "sd15.lora": ComponentSpec(
+        block_types=["adapter/lora_loader"],
+        load_keys=[],
+        constructor_map={},
+        load_family="sd15",
+    ),
+    "sdxl.lora": ComponentSpec(
+        block_types=["adapter/lora_loader"],
+        load_keys=[],
+        constructor_map={},
+        load_family="sdxl",
+    ),
     "sd15.ipadapter": ComponentSpec(
         block_types=["adapter/ip_adapter"],
         load_keys=["image_encoder", "feature_extractor"],

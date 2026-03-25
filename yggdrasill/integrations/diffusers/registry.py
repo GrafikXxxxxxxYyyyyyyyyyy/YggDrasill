@@ -36,7 +36,7 @@ def register_diffusion_nodes(registry: Optional[BlockRegistry] = None) -> None:
     from yggdrasill.integrations.diffusers.sdxl.latent_init import SDXLLatentInitNode
     from yggdrasill.integrations.diffusers.sdxl.vae import SDXLVAEEncodeNode, SDXLVAEDecodeNode
 
-    from yggdrasill.integrations.diffusers.adapters.lora import LoRALoaderNode
+    from yggdrasill.integrations.diffusers.adapters.lora import LoRAInjectorNode
     from yggdrasill.integrations.diffusers.adapters.controlnet import ControlNetNode
     from yggdrasill.integrations.diffusers.adapters.ip_adapter import IPAdapterNode
     from yggdrasill.integrations.diffusers.adapters.t2i_adapter import T2IAdapterNode
@@ -75,7 +75,7 @@ def register_diffusion_nodes(registry: Optional[BlockRegistry] = None) -> None:
         "sdxl/latent_init": SDXLLatentInitNode,
         "sdxl/vae_encode": SDXLVAEEncodeNode,
         "sdxl/vae_decode": SDXLVAEDecodeNode,
-        "adapter/lora_loader": LoRALoaderNode,
+        "adapter/lora_loader": LoRAInjectorNode,
         "adapter/controlnet": ControlNetNode,
         "adapter/ip_adapter": IPAdapterNode,
         "adapter/t2i_adapter": T2IAdapterNode,

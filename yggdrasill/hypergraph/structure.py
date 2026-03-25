@@ -532,6 +532,9 @@ class Hypergraph:
             entry["name"] = name
         for existing in self._exposed_inputs:
             if existing["node_id"] == node_id and existing["port_name"] == port_name:
+                if name is not None and existing.get("name") != name:
+                    existing["name"] = name
+                    self._execution_version += 1
                 return
         self._exposed_inputs.append(entry)
         self._execution_version += 1

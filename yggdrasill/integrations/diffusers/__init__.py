@@ -47,6 +47,7 @@ def _wrap_hypergraph_run_for_diffusion():
         PORT_T2I_ADAPTER_IMAGE,
         PORT_IP_ADAPTER_IMAGE_EMBEDS,
         PORT_IP_ADAPTER_MASK_IMAGES,
+        PORT_LORA_SCALE,
     )
 
     _original_run = Hypergraph.run
@@ -59,6 +60,7 @@ def _wrap_hypergraph_run_for_diffusion():
             _inject_node_config,
             _prepare_diffusion_run,
             _iter_t2i_adapter_node_ids,
+            _iter_lora_loader_node_ids,
             merge_ip_adapter_image_kwarg,
             normalize_merged_adapter_inputs,
         )
@@ -111,6 +113,18 @@ def _wrap_hypergraph_run_for_diffusion():
                 merged, self, ip_adapter_masks,
                 pin_data=kwargs.setdefault("pin_data", {}),
             )
+        lora_conditioning_scale = kwargs.pop("lora_conditioning_scale", None)
+        if lora_conditioning_scale is not None:
+            lora_nodes = _iter_lora_loader_node_ids(self)
+            if isinstance(lora_conditioning_scale, dict):
+                for nid, s in lora_conditioning_scale.items():
+                    if s is not None:
+                        merged[f"{nid}:{PORT_LORA_SCALE}"] = float(s)
+            elif len(lora_nodes) == 1:
+                merged[f"{lora_nodes[0]}:{PORT_LORA_SCALE}"] = float(lora_conditioning_scale)
+            elif len(lora_nodes) > 1:
+                for nid in lora_nodes:
+                    merged[f"{nid}:{PORT_LORA_SCALE}"] = float(lora_conditioning_scale)
         # Route guess_mode into ControlNet nodes (handled inside _prepare_diffusion_run).
         controlnet_conditioning_scale = kwargs.pop("controlnet_conditioning_scale", None)
         if isinstance(controlnet_conditioning_scale, dict):

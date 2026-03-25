@@ -42,6 +42,7 @@ diffusion = [
     "Pillow>=9.0",
     "numpy>=1.24",
     "accelerate>=0.25.0",
+    "peft>=0.13.1",
     "opencv-python-headless>=4.5.0",
 ]
 dev = [

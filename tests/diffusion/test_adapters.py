@@ -514,26 +514,98 @@ class TestIPAdapterLoader:
             assert call_args[0][0][0] == {"image_proj": {}, "ip_adapter": {}}
 
 
-class TestLoRALoaderNode:
+class TestLoRAInjectorNode:
 
     def test_ports(self):
-        from yggdrasill.integrations.diffusers.adapters.lora import LoRALoaderNode
-        node = LoRALoaderNode("lora")
+        from yggdrasill.integrations.diffusers.adapters.lora import LoRAInjectorNode
+        node = LoRAInjectorNode("lora")
         ports = node.declare_ports()
         out_names = {p.name for p in ports if p.direction == PortDirection.OUT}
         assert "result" in out_names
 
     def test_block_type(self):
-        from yggdrasill.integrations.diffusers.adapters.lora import LoRALoaderNode
-        assert LoRALoaderNode("lora").block_type == "adapter/lora_loader"
+        from yggdrasill.integrations.diffusers.adapters.lora import LoRAInjectorNode
+        assert LoRAInjectorNode("lora").block_type == "adapter/lora_loader"
 
     def test_forward_no_weights(self):
-        from yggdrasill.integrations.diffusers.adapters.lora import LoRALoaderNode
+        from yggdrasill.integrations.diffusers.adapters.lora import LoRAInjectorNode
         from unittest.mock import MagicMock
         pipe = MagicMock()
-        node = LoRALoaderNode("lora", pipe=pipe, config={"lora_weights": []})
+        node = LoRAInjectorNode("lora", pipe=pipe, config={"lora_weights": []})
         out = node.forward({})
         assert out["result"]["loaded_loras"] == []
+
+    def test_forward_does_not_reload_same_adapter_name(self):
+        from yggdrasill.integrations.diffusers.adapters.lora import LoRAInjectorNode
+        from unittest.mock import MagicMock
+
+        unet = MagicMock()
+        unet.peft_config = {"LoRA": object()}
+        pipe = MagicMock()
+        pipe.unet = unet
+        pipe.text_encoder = MagicMock()
+        pipe.text_encoder.peft_config = {}
+        pipe.text_encoder_2 = MagicMock()
+        pipe.text_encoder_2.peft_config = {}
+
+        node = LoRAInjectorNode(
+            "LoRA",
+            pipe=pipe,
+            config={"lora_weights": [{"name": "LoRA", "path": "x", "weight_name": "y", "scale": 1.0}]},
+        )
+        node.forward({})
+        pipe.load_lora_weights.assert_not_called()
+        pipe.set_adapters.assert_called()
+
+    def test_forward_two_lora_nodes_set_adapters_with_both_names(self):
+        from unittest.mock import MagicMock, call
+
+        from yggdrasill.integrations.diffusers.adapters.lora import LoRAInjectorNode
+
+        class _G:
+            node_ids = ("B", "A")
+
+            def get_node(self, nid):
+                return self._nodes[nid]
+
+            def __init__(self):
+                self._nodes: dict = {}
+
+        pipe = MagicMock()
+        unet = MagicMock()
+        unet.peft_config = {}
+        pipe.unet = unet
+        pipe.text_encoder = MagicMock()
+        pipe.text_encoder.peft_config = {}
+        pipe.text_encoder_2 = MagicMock()
+        pipe.text_encoder_2.peft_config = {}
+
+        g = _G()
+        node_a = LoRAInjectorNode(
+            "A",
+            pipe=pipe,
+            config={"lora_weights": [{"name": "LoRA_A", "path": "pa", "weight_name": "wa", "scale": 1.0}]},
+        )
+        node_b = LoRAInjectorNode(
+            "B",
+            pipe=pipe,
+            config={"lora_weights": [{"name": "LoRA_B", "path": "pb", "weight_name": "wb", "scale": 1.0}]},
+        )
+        g._nodes = {"A": node_a, "B": node_b}
+        node_a._ygg_graph = g
+        node_b._ygg_graph = g
+        g._yggdrasill_lora_merged = {"A:lora_scale": 0.5, "B:lora_scale": 0.9}
+
+        node_a.forward({})
+        pipe.set_adapters.assert_called_with(
+            ["LoRA_A", "LoRA_B"],
+            adapter_weights=[0.5, 0.9],
+        )
+        node_b.forward({})
+        assert pipe.set_adapters.call_args_list[-1] == call(
+            ["LoRA_A", "LoRA_B"],
+            adapter_weights=[0.5, 0.9],
+        )
 
 
 class TestTextualInversionNode:
