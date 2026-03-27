@@ -458,6 +458,26 @@ class _IpImageInOnly(AbstractBaseBlock, AbstractGraphNode):
         return {}
 
 
+class _InitImageInOnly(AbstractBaseBlock, AbstractGraphNode):
+    """Minimal node exposing ``init_image`` for fan-in routing tests."""
+
+    def __init__(self, node_id: str) -> None:
+        AbstractBaseBlock.__init__(self)
+        AbstractGraphNode.__init__(self, node_id=node_id)
+
+    @property
+    def block_type(self) -> str:
+        return "test/init_image_in"
+
+    def declare_ports(self) -> List[Port]:
+        return [
+            Port("init_image", PortDirection.IN, PortType.IMAGE, optional=True),
+        ]
+
+    def forward(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        return {}
+
+
 class TestResolveRunKwargsMultiExposeSamePort:
     """Bare port names must not route kwargs when several nodes share that port (multi IP-Adapter)."""
 
@@ -482,3 +502,13 @@ class TestResolveRunKwargsMultiExposeSamePort:
         h.expose_input("ip", "ip_adapter_image", "custom_name")
         resolved, _ = h._resolve_run_kwargs({}, {"ip_adapter_image": "Z"})
         assert resolved["ip_adapter_image"] == "Z"
+
+    def test_bare_init_image_routed_when_two_nodes_share_same_alias_name(self):
+        """Universal diffusion: two ``init_image`` ports both exposed as ``image``; ``init_image=`` must resolve."""
+        h = Hypergraph()
+        h.add_node("enc", _InitImageInOnly("enc"))
+        h.add_node("mask", _InitImageInOnly("mask"))
+        h.expose_input("enc", "init_image", "image")
+        h.expose_input("mask", "init_image", "image")
+        resolved, _ = h._resolve_run_kwargs({}, {"init_image": "IMG"})
+        assert resolved["init_image"] == "IMG"

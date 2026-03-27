@@ -33,6 +33,11 @@ class SD15UNetNode(AbstractBackbone):
     def block_type(self) -> str:
         return "sd15/unet"
 
+    def _resolve_unet(self) -> Any:
+        from yggdrasill.integrations.diffusers.lazy_component import resolve_if_lazy
+        self._unet = resolve_if_lazy(self._unet)
+        return self._unet
+
     def declare_ports(self) -> List[Port]:
         return [
             Port(C.PORT_LATENTS, PortDirection.IN, PortType.TENSOR),
@@ -58,8 +63,7 @@ class SD15UNetNode(AbstractBackbone):
         ]
 
     def forward(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
-        from yggdrasill.integrations.diffusers.lazy_component import resolve_if_lazy
-        self._unet = resolve_if_lazy(self._unet)
+        self._resolve_unet()
 
         import torch
         from yggdrasill.integrations.diffusers.common.guidance import apply_cfg
@@ -237,8 +241,20 @@ class SD15UNetNode(AbstractBackbone):
         return {C.PORT_NOISE_PRED: noise_pred}
 
     def to(self, device: Any) -> "SD15UNetNode":
-        from yggdrasill.integrations.diffusers.lazy_component import resolve_if_lazy
-        self._unet = resolve_if_lazy(self._unet)
+        self._resolve_unet()
         if self._unet is not None and hasattr(self._unet, "to"):
             self._unet.to(device)
         return self
+
+    def train(self, mode: bool = True) -> "SD15UNetNode":
+        super().train(mode)
+        self._resolve_unet()
+        if self._unet is not None and hasattr(self._unet, "train"):
+            self._unet.train(mode)
+        return self
+
+    def trainable_parameters(self):
+        self._resolve_unet()
+        if self._unet is None or not hasattr(self._unet, "parameters"):
+            return iter(())
+        return (parameter for parameter in self._unet.parameters() if getattr(parameter, "requires_grad", False))

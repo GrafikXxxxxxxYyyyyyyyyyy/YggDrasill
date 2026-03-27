@@ -18,7 +18,23 @@ Diffusion-слой является **opt-in addon** над ядром:
 - SDXL graph assembly и builders;
 - общая diffusion ergonomics вокруг `run_diffusion`;
 - adapters: ControlNet, IP-Adapter, LoRA в текущем test-covered surface;
+- минимальный `SD1.5 LoRA training` subsystem через `yggdrasill.integrations.diffusers.training`;
 - diffusion builders / presets для smoke и development use.
+
+## Minimal training subsystem
+
+Текущая training-поддержка намеренно узкая:
+
+- реализован только отдельный training path для `SD1.5 LoRA`;
+- первый recipe ориентирован на folder dataset (`image + .txt` или `metadata.jsonl` / `metadata.csv`);
+- по умолчанию обучается `UNet LoRA`, а `text_encoder LoRA` включается явно;
+- `VAE training`, `ControlNet training`, `SDXL training`, `FLUX training` и generic graph-wide training orchestration пока не входят в поддерживаемую поверхность.
+
+Важно:
+
+- training subsystem не использует существующий inference-cycle как основной train-loop;
+- `run_diffusion(...)` и builders остаются inference-oriented слоем;
+- training-export должен быть совместим с текущей LoRA inference-loading surface.
 
 ## Частично поддерживается / experimental
 

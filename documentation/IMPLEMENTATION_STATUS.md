@@ -38,6 +38,7 @@
 В репозитории присутствуют рабочие доменные слои:
 
 - diffusion / diffusers integration;
+- минимальный diffusion training subsystem для `SD1.5 LoRA`;
 - набор diffusion builders / presets / templates;
 - базовые сценарии для agent- и LLM-подобных графов через общий hypergraph engine.
 
@@ -67,6 +68,7 @@ Diffusion-слой функционален, но остаётся **экспе�
 - API ещё дорабатывается;
 - поддержка семейств и сценариев не равна всему объёму ambition-документов;
 - ergonomics и high-level shortcuts допускают изменение при очистке архитектуры.
+- training surface существует, но пока стабилизирован только как узкий `SD1.5 LoRA` recipe с отдельным trainer path, а не как общий graph-native diffusion training runtime.
 
 ### 3.2. Agent semantics
 

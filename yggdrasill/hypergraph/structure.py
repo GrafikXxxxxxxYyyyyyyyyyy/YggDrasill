@@ -881,8 +881,32 @@ class Hypergraph:
             if port_name_counts.get(port_name, 0) == 1:
                 exposed_names.add(port_name)
 
+        # Ports duplicated on the graph intentionally share one public alias (same ``name`` on
+        # every ``expose_input`` for that ``port_name``). :meth:`EdgeBuffers.init_from_inputs`
+        # then fans a single value out to each node. The bare ``port_name`` is omitted from
+        # ``exposed_names`` when ``port_name_counts[port_name] > 1`` so per-adapter graphs with
+        # *different* names (e.g. ``style_ip:ip_adapter_image``) do not accept a bare keyword
+        # that would collide. Universal diffusion graphs use one alias (e.g. ``image``) for two
+        # ``init_image`` ports; after ``run()`` normalizes ``image`` → ``init_image`` the
+        # remaining keyword must still land in ``resolved`` inputs.
+        fanin_kwarg_port_names: set[str] = set()
+        for pname, cnt in port_name_counts.items():
+            if cnt <= 1:
+                continue
+            aliases = {
+                e.get("name")
+                for e in input_spec
+                if e.get("port_name") == pname
+            }
+            if len(aliases) == 1:
+                only = next(iter(aliases))
+                if only is not None:
+                    fanin_kwarg_port_names.add(pname)
+
         for key, val in list(kwargs.items()):
             if key in exposed_names:
+                resolved[key] = val
+            elif key in fanin_kwarg_port_names:
                 resolved[key] = val
             else:
                 # Apply to every node that already defines this key (e.g. guidance_scale on
