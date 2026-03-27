@@ -143,8 +143,10 @@ class TestFluxScheduler:
         in_names = {p.name for p in ports if p.direction == PortDirection.IN}
         out_names = {p.name for p in ports if p.direction == PortDirection.OUT}
         assert C.PORT_PACKED_LATENTS in in_names
+        assert C.PORT_TIMESTEP in in_names
         assert C.PORT_NOISE_PRED in in_names
         assert "next_latent" in out_names
+        assert "next_timestep" in out_names
 
     def test_step_forward(self):
         from yggdrasill.integrations.diffusers.flux.scheduler import FluxSchedulerStepNode
@@ -181,6 +183,7 @@ class TestFluxLatentInit:
         out_names = {p.name for p in ports if p.direction == PortDirection.OUT}
         assert C.PORT_PACKED_LATENTS in out_names
         assert C.PORT_IMG_IDS in out_names
+        assert C.PORT_TIMESTEP in out_names
 
     @requires_torch
     def test_forward_text2img(self):

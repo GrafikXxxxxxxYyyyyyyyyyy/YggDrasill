@@ -12,7 +12,10 @@ from __future__ import annotations
 
 from typing import Any, List, Optional, Sequence, Tuple, Union
 
-import torch
+try:
+    import torch
+except ImportError:  # pragma: no cover - exercised in no-diffusion environments
+    torch = None  # type: ignore[assignment]
 
 __all__ = [
     "format_ip_adapter_image_embeds",
@@ -84,6 +87,11 @@ def prepare_ip_adapter_image_embeds(
         ValueError: If the graph has no IP-Adapter nodes, *node_id* is invalid, or image count
             does not match adapter count (after broadcast rules).
     """
+    if torch is None:
+        raise ImportError(
+            "torch is required for IP-Adapter image embeddings. "
+            "Install with: pip install 'yggdrasill[diffusion]'"
+        )
     _ = do_classifier_free_guidance  # API parity with Diffusers; CFG handled in UNet.
 
     slots = _iter_ip_adapter_nodes(graph)

@@ -43,6 +43,7 @@ class FluxLatentInitNode(AbstractOuterModule):
             Port(C.PORT_INIT_LATENTS, PortDirection.IN, PortType.TENSOR, optional=True),
             Port(C.PORT_PACKED_LATENTS, PortDirection.OUT, PortType.TENSOR),
             Port(C.PORT_IMG_IDS, PortDirection.OUT, PortType.TENSOR),
+            Port(C.PORT_TIMESTEP, PortDirection.OUT, PortType.TENSOR),
         ]
 
     def forward(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
@@ -67,32 +68,42 @@ class FluxLatentInitNode(AbstractOuterModule):
 
         existing = inputs.get(C.PORT_INIT_LATENTS)
         sched_state = inputs.get(C.PORT_SCHEDULER_STATE, {})
-        scheduler = sched_state.get("scheduler") if isinstance(sched_state, dict) else None
+        if not isinstance(sched_state, dict):
+            sched_state = {}
+        scheduler = sched_state.get("scheduler")
+        timestep = self._get_first_timestep(sched_state)
 
         if existing is not None:
             latents = existing
+            if not self._is_packed_latents(latents):
+                latents = self._pack_latents(latents)
             strength = self._config.get("strength", 1.0)
             if scheduler is not None and strength < 1.0 and hasattr(scheduler, "scale_noise"):
                 noise = torch.randn_like(latents)
-                timesteps = sched_state.get("scheduler", scheduler).timesteps if isinstance(sched_state, dict) else None
+                timesteps = getattr(scheduler, "timesteps", None)
                 if timesteps is not None and len(timesteps) > 0:
                     t = timesteps[0]
                     latents = scheduler.scale_noise(latents, t, noise)
+                    if self._config.get("inpaint_4ch_composite"):
+                        sched_state["_inpaint_blend_noise"] = noise
         else:
             shape = (batch_size, num_channels, latent_h, latent_w)
             generator = None
             seed = self._config.get("seed")
             if seed is not None:
                 generator = torch.Generator(device="cpu").manual_seed(seed)
-            latents = torch.randn(shape, generator=generator, device="cpu", dtype=dtype)
-            latents = latents.to(device)
+            noise = torch.randn(shape, generator=generator, device="cpu", dtype=dtype)
+            noise = noise.to(device)
+            latents = self._pack_latents(noise)
+            if self._config.get("inpaint_4ch_composite"):
+                sched_state["_inpaint_blend_noise"] = latents
 
-        packed = self._pack_latents(latents)
         img_ids = self._prepare_img_ids(batch_size, latent_h // 2, latent_w // 2, device, dtype)
 
         return {
-            C.PORT_PACKED_LATENTS: packed,
+            C.PORT_PACKED_LATENTS: latents,
             C.PORT_IMG_IDS: img_ids,
+            C.PORT_TIMESTEP: self._coerce_timestep(timestep, device=device),
         }
 
     @staticmethod
@@ -103,6 +114,34 @@ class FluxLatentInitNode(AbstractOuterModule):
         latents = latents.permute(0, 2, 4, 1, 3, 5)
         latents = latents.reshape(b, (h // 2) * (w // 2), c * 4)
         return latents
+
+    @staticmethod
+    def _is_packed_latents(latents: Any) -> bool:
+        shape = getattr(latents, "shape", ())
+        return len(shape) == 3
+
+    def _get_first_timestep(self, sched_state: Dict[str, Any]) -> Any:
+        import torch
+
+        scheduler = sched_state.get("scheduler")
+        if scheduler is not None and hasattr(scheduler, "timesteps"):
+            timesteps = scheduler.timesteps
+            if timesteps is not None and len(timesteps) > 0:
+                return timesteps[0]
+        return torch.tensor(1.0, device=self._config.get("device", "cpu"), dtype=torch.float32)
+
+    @staticmethod
+    def _coerce_timestep(timestep: Any, *, device: Any) -> Any:
+        import torch
+
+        if isinstance(timestep, torch.Tensor):
+            return timestep.to(device=device)
+        if hasattr(timestep, "item"):
+            try:
+                timestep = timestep.item()
+            except Exception:
+                pass
+        return torch.tensor(float(timestep), device=device, dtype=torch.float32)
 
     @staticmethod
     def _prepare_img_ids(batch_size: int, h: int, w: int, device: Any, dtype: Any) -> Any:

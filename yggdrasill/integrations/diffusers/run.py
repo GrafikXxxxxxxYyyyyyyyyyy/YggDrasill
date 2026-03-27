@@ -181,9 +181,18 @@ def run(
             merged, graph, C.PORT_IP_ADAPTER_MASK_IMAGES, ip_adapter_mask_images,
         )
 
-    # Do not pop or apply controlnet_conditioning_scale / ip_adapter_conditioning_scale here.
-    # Hypergraph.run is patched to merge those kwargs and call _inject_*; if we popped them
-    # above, the patch would see None and re-apply IP defaults (scale 1.0), wiping user scale.
+    controlnet_conditioning_scale = run_kw.pop("controlnet_conditioning_scale", None)
+    if isinstance(controlnet_conditioning_scale, dict):
+        _inject_node_config(graph, controlnet_conditioning_scale, "conditioning_scale")
+    elif controlnet_conditioning_scale is not None:
+        _inject_node_config(
+            graph,
+            {
+                nid: float(controlnet_conditioning_scale)
+                for nid in _iter_controlnet_node_ids(graph)
+            },
+            "conditioning_scale",
+        )
 
     if "image" in run_kw:
         _img2img = run_kw.pop("image")
@@ -232,17 +241,21 @@ def run(
             "conditioning_factor",
         )
 
+    ip_scale = run_kw.pop("ip_adapter_conditioning_scale", None)
+    if isinstance(ip_scale, list):
+        _inject_ip_adapter_scale(graph, ip_scale, merged)
+    elif isinstance(ip_scale, dict):
+        _inject_ip_adapter_scale(graph, ip_scale, merged)
+    elif ip_scale is not None:
+        _inject_ip_adapter_scale(graph, {"default": float(ip_scale)}, merged)
+    else:
+        _inject_ip_adapter_scale(graph, {"default": 1.0}, merged)
+
     _prepare_diffusion_run(graph, run_kw, merged_inputs=merged)
     raw = graph.run(merged, **run_kw)
 
     if wrap_output:
-        # Hypergraph.run is patched on diffusers import to return DiffusionOutput when
-        # image ports are present; avoid double-wrapping.
-        if isinstance(raw, DiffusionOutput):
-            return raw
         return DiffusionOutput.from_executor_output(raw)
-    if isinstance(raw, DiffusionOutput):
-        return raw.raw
     return raw
 
 

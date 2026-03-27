@@ -280,6 +280,15 @@ class TestHypergraphExposeValidation:
         h.expose_output("A", "out", "y")
         assert h.execution_version == v
 
+    def test_expose_output_duplicate_updates_name(self):
+        h = Hypergraph()
+        h.add_node("A", IdentityTaskNode(node_id="A"))
+        h.expose_output("A", "out", "y")
+        v = h.execution_version
+        h.expose_output("A", "out", "result")
+        assert h.execution_version > v
+        assert h.get_output_spec()[0]["name"] == "result"
+
 
 class TestHypergraphRemoveEdge:
     def test_remove_nonexistent_edge_no_error(self):

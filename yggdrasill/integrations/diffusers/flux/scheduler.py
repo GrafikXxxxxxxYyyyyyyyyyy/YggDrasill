@@ -55,6 +55,7 @@ class FluxSchedulerSetupNode(AbstractOuterModule):
             set_timesteps_kwargs["mu"] = mu
 
         self._scheduler.set_timesteps(num_steps, device=device, **set_timesteps_kwargs)
+        setattr(self._scheduler, "_yggdrasill_step_idx", 0)
 
         return {
             C.PORT_TIMESTEPS: self._scheduler.timesteps,
@@ -62,6 +63,8 @@ class FluxSchedulerSetupNode(AbstractOuterModule):
                 "scheduler": self._scheduler,
                 "init_noise_sigma": getattr(self._scheduler, "init_noise_sigma", 1.0),
                 "order": getattr(self._scheduler, "order", 1),
+                "num_loop_steps": len(self._scheduler.timesteps) if self._scheduler.timesteps is not None else num_steps,
+                "_inpaint_blend_i": 0,
             },
         }
 
@@ -121,10 +124,22 @@ class FluxSchedulerStepNode(AbstractInnerModule):
 
         return {
             "next_latent": next_latents,
-            "next_timestep": timestep,
+            "next_timestep": self._get_next_timestep(timestep),
         }
 
     def to(self, device: Any) -> "FluxSchedulerStepNode":
         if self._scheduler is not None and hasattr(self._scheduler, "to"):
             self._scheduler.to(device)
         return self
+
+    def _get_next_timestep(self, timestep: Any) -> Any:
+        if not hasattr(self._scheduler, "timesteps") or self._scheduler.timesteps is None:
+            return timestep
+        ts = self._scheduler.timesteps
+        if len(ts) == 0:
+            return timestep
+        i = int(getattr(self._scheduler, "_yggdrasill_step_idx", 0))
+        setattr(self._scheduler, "_yggdrasill_step_idx", i + 1)
+        if i + 1 < len(ts):
+            return ts[i + 1]
+        return timestep

@@ -69,11 +69,15 @@ def _init_adapter() -> None:
 def _init_flux() -> None:
     from diffusers import (
         AutoencoderKL,
-        ControlNetModel,
         FlowMatchEulerDiscreteScheduler,
         FluxTransformer2DModel,
     )
     from transformers import CLIPTextModelWithProjection, CLIPTokenizer, T5EncoderModel, T5Tokenizer
+
+    try:
+        from diffusers import FluxControlNetModel as FluxControlNetLoader
+    except ImportError:
+        from diffusers import ControlNetModel as FluxControlNetLoader
 
     _register("flux", "transformer", FluxTransformer2DModel, "transformer")
     _register("flux", "vae", AutoencoderKL, "vae")
@@ -82,7 +86,7 @@ def _init_flux() -> None:
     _register("flux", "tokenizer", CLIPTokenizer, "tokenizer")
     _register("flux", "tokenizer_2", T5Tokenizer, "tokenizer_2")
     _register("flux", "scheduler", FlowMatchEulerDiscreteScheduler, "scheduler")
-    _register("flux", "controlnet", ControlNetModel, "")
+    _register("flux", "controlnet", FluxControlNetLoader, "")
 
 
 def _ensure_registry() -> None:

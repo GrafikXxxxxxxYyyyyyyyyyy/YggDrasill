@@ -169,6 +169,10 @@ def run_stream(
     max_steps: Optional[int] = None,
     pin_data: Optional[Dict[str, Dict[str, Any]]] = None,
     seed: Optional[int] = None,
+    run_data: Optional[Dict[str, Dict[str, Any]]] = None,
+    destination_node_id: Optional[str] = None,
+    dirty_node_ids: Optional[List[str]] = None,
+    skip_node_ids: Optional[Set[str]] = None,
 ) -> Generator[Dict[str, Any], None, None]:
     """Streaming variant of :func:`run`.
 
@@ -194,16 +198,28 @@ def run_stream(
     output_spec = structure.get_output_spec()
 
     buf = EdgeBuffers.init_from_inputs(input_spec, inputs)
+    if run_data:
+        for nid, port_values in run_data.items():
+            if isinstance(port_values, dict):
+                for pname, val in port_values.items():
+                    buf.write(nid, pname, val)
     _prepare_nodes(structure, training, device, seed)
 
     plan = build_plan(structure)
     cbs = callbacks or []
     pin = pin_data or {}
+    skip = set(skip_node_ids or ()) | _compute_skip_set(
+        structure, plan, run_data, dirty_node_ids,
+    )
 
     for step_type, step_data in plan:
         if step_type == "node":
+            if step_data in skip:
+                continue
             _execute_node(structure, step_data, buf, input_spec, dry_run, cbs, pin, training)
             yield _collect_outputs(output_spec, buf)
+            if destination_node_id and step_data == destination_node_id:
+                break
 
         elif step_type == "cycle":
             rep, comp = step_data
@@ -212,16 +228,32 @@ def run_stream(
             _fire_callbacks(cbs, "loop_start", {"nodes": node_order, "steps": K_use})
             for _it in range(K_use):
                 for nid in node_order:
+                    if nid in skip:
+                        continue
                     _execute_node(structure, nid, buf, input_spec, dry_run, cbs, pin, training)
                 yield _collect_outputs(output_spec, buf)
             _fire_callbacks(cbs, "loop_end", {"nodes": node_order, "steps": K_use})
 
         elif step_type == "agent_loop":
+            if step_data in skip:
+                continue
+            snapshots: List[Dict[str, Any]] = []
             _execute_agent_loop(
-                structure, step_data, buf, input_spec, dry_run, cbs, agent_max, pin,
+                structure,
+                step_data,
+                buf,
+                input_spec,
+                dry_run,
+                cbs,
+                agent_max,
+                pin,
                 training,
+                on_iteration_end=lambda: snapshots.append(_collect_outputs(output_spec, buf)),
             )
-            yield _collect_outputs(output_spec, buf)
+            for snapshot in snapshots:
+                yield snapshot
+            if destination_node_id and step_data == destination_node_id:
+                break
 
 
 # ---------------------------------------------------------------------------
@@ -381,21 +413,12 @@ def _execute_node(
 
     _fire_callbacks(callbacks, "before", {"node_id": node_id})
 
-    if dry_run:
-        node_outputs: Dict[str, Any] = {}
-        if hasattr(node, "get_output_ports"):
-            for port in node.get_output_ports():
-                node_outputs[port.name] = None
-        elif hasattr(node, "get_output_spec"):
-            for entry in node.get_output_spec():
-                node_outputs[entry.get("name") or entry["port_name"]] = None
-    else:
-        if training:
-            node_outputs = node.run(node_inputs)
-        else:
-            import torch
-            with torch.inference_mode():
-                node_outputs = node.run(node_inputs)
+    node_outputs = _run_node_outputs(
+        node,
+        node_inputs,
+        dry_run=dry_run,
+        training=training,
+    )
 
     for port_name, value in node_outputs.items():
         buf.write(node_id, port_name, value)
@@ -413,10 +436,12 @@ def _execute_agent_loop(
     max_steps: int,
     pin_data: Dict[str, Dict[str, Any]],
     training: bool = False,
+    on_iteration_end: Optional[Callable[[], None]] = None,
 ) -> None:
     """Run an agent node in a tool_calls sub-loop."""
     meta = getattr(structure, "metadata", {}) or {}
     tool_map: Dict[str, str] = meta.get("tool_id_to_node_id", {})
+    missing_tool_policy = meta.get("missing_tool_policy", "skip")
 
     node = structure.get_node(node_id)
     if node is None:
@@ -435,19 +460,20 @@ def _execute_agent_loop(
         steps_taken += 1
         _fire_callbacks(callbacks, "agent_step", {"node_id": node_id, "step": step})
 
-        if dry_run:
-            outputs: Dict[str, Any] = {}
-            if hasattr(node, "get_output_ports"):
-                for port in node.get_output_ports():
-                    outputs[port.name] = None
-        else:
-            outputs = node.run(base_inputs)
+        outputs = _run_node_outputs(
+            node,
+            base_inputs,
+            dry_run=dry_run,
+            training=training,
+        )
 
         for pname, val in outputs.items():
             buf.write(node_id, pname, val)
 
         tool_calls = outputs.get("tool_calls")
         if not tool_calls:
+            if on_iteration_end is not None:
+                on_iteration_end()
             break
 
         tool_results: List[Dict[str, Any]] = []
@@ -455,29 +481,96 @@ def _execute_agent_loop(
             tid = tc.get("tool_id") or tc.get("function", {}).get("name", "")
             tool_nid = tool_map.get(tid)
             if tool_nid is None:
+                _handle_missing_tool(
+                    callbacks,
+                    missing_tool_policy,
+                    tool_id=tid,
+                    tool_node_id=None,
+                )
                 continue
             tool_node = structure.get_node(tool_nid)
             if tool_node is None:
+                _handle_missing_tool(
+                    callbacks,
+                    missing_tool_policy,
+                    tool_id=tid,
+                    tool_node_id=tool_nid,
+                )
                 continue
             tool_args = tc.get("arguments") or tc.get("args", {})
 
             _fire_callbacks(callbacks, "tool_call", {"tool_id": tid, "node_id": tool_nid})
 
-            if dry_run:
-                tool_out: Dict[str, Any] = {}
+            if tool_nid in pin_data:
+                tool_out = dict(pin_data[tool_nid])
+                _fire_callbacks(callbacks, "pinned", {"node_id": tool_nid})
             else:
-                tool_out = tool_node.run(tool_args)
+                tool_out = _run_node_outputs(
+                    tool_node,
+                    tool_args,
+                    dry_run=dry_run,
+                    training=training,
+                )
 
             tool_results.append({
                 "tool_call_id": tc.get("id", tid),
                 "content": tool_out,
             })
 
-        base_inputs["tool_results"] = tool_results
+        next_inputs = dict(base_inputs)
+        next_inputs["tool_results"] = tool_results
+        base_inputs = next_inputs
+        if on_iteration_end is not None:
+            on_iteration_end()
 
     _fire_callbacks(callbacks, "agent_loop_done", {
         "node_id": node_id, "steps": steps_taken,
     })
+
+
+def _run_node_outputs(
+    node: Any,
+    node_inputs: Dict[str, Any],
+    *,
+    dry_run: bool,
+    training: bool,
+) -> Dict[str, Any]:
+    if dry_run:
+        return _make_dry_run_outputs(node)
+    if training:
+        return node.run(node_inputs)
+    try:
+        import torch
+    except ImportError:
+        return node.run(node_inputs)
+    with torch.inference_mode():
+        return node.run(node_inputs)
+
+
+def _make_dry_run_outputs(node: Any) -> Dict[str, Any]:
+    outputs: Dict[str, Any] = {}
+    if hasattr(node, "get_output_ports"):
+        for port in node.get_output_ports():
+            outputs[port.name] = None
+    elif hasattr(node, "get_output_spec"):
+        for entry in node.get_output_spec():
+            outputs[entry.get("name") or entry["port_name"]] = None
+    return outputs
+
+
+def _handle_missing_tool(
+    callbacks: List[Callable[..., None]],
+    missing_tool_policy: Any,
+    *,
+    tool_id: str,
+    tool_node_id: Optional[str],
+) -> None:
+    info = {"tool_id": tool_id, "node_id": tool_node_id}
+    if missing_tool_policy == "error":
+        raise KeyError(
+            f"Missing tool mapping for tool_id={tool_id!r}, node_id={tool_node_id!r}"
+        )
+    _fire_callbacks(callbacks, "tool_missing", info)
 
 
 def _compute_skip_set(

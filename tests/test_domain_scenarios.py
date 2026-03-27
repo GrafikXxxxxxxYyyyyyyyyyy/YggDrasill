@@ -1198,7 +1198,7 @@ class TestEngineFeatures:
         assert snapshots[-1]["y"] == 42
 
     def test_run_stream_with_agent_loop(self, domain_registry):
-        """run_stream yields output snapshot for agent_loop step."""
+        """run_stream yields a snapshot after each agent-loop iteration."""
         clear_plan_cache()
         h = Hypergraph()
         h.add_node_from_config("agent", "agent/llm", registry=domain_registry)
@@ -1213,8 +1213,9 @@ class TestEngineFeatures:
         snapshots = list(run_stream(
             h, {"q": "test"}, validate_before=False,
         ))
-        assert len(snapshots) == 1
-        assert "final" in snapshots[0]["a"]
+        assert len(snapshots) == 2
+        assert "thinking" in snapshots[0]["a"]
+        assert "final" in snapshots[-1]["a"]
 
     def test_interrupt_in_cycle(self):
         """Interrupt inside a cycle body returns suspended result."""

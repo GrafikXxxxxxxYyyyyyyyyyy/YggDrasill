@@ -7,28 +7,20 @@ Planner, Executor) runs the workflow without any changes.
 from __future__ import annotations
 
 import itertools
-import json
-import pickle
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Optional, Set
 
 from yggdrasill.engine.edge import Edge
 from yggdrasill.engine.structure import Hypergraph
+from yggdrasill.hypergraph.serialization import (
+    load_checkpoint as _load_checkpoint_file,
+    load_config as _load_config_file,
+    save_checkpoint as _save_checkpoint_file,
+    save_config as _save_config_file,
+)
+from yggdrasill.hypergraph.structure import _make_progress_callback
 
 _wf_instance_counter = itertools.count()
-
-
-def _read_workflow_config(path: Path) -> Dict[str, Any]:
-    """Read a JSON or YAML config file."""
-    if path.suffix in (".yaml", ".yml"):
-        try:
-            import yaml  # type: ignore[import-untyped]
-        except ImportError:
-            raise ImportError(f"PyYAML required to load YAML config: {path}")
-        with open(path, "r", encoding="utf-8") as f:
-            return yaml.safe_load(f) or {}
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
 
 
 class Workflow:
@@ -316,6 +308,9 @@ class Workflow:
         for existing in self._exposed_outputs:
             eid = existing.get("graph_id") or existing.get("node_id")
             if eid == graph_id and existing.get("port_name") == port_name:
+                if name is not None and existing.get("name") != name:
+                    existing["name"] = name
+                    self._execution_version += 1
                 return
         self._exposed_outputs.append(entry)
         self._execution_version += 1
@@ -352,7 +347,7 @@ class Workflow:
 
     def run(
         self,
-        inputs: Dict[str, Any],
+        inputs: Optional[Dict[str, Any]] = None,
         *,
         training: bool = False,
         num_loop_steps: Optional[int] = None,
@@ -360,19 +355,98 @@ class Workflow:
         callbacks: Optional[List[Callable[..., None]]] = None,
         dry_run: bool = False,
         validate_before: bool = True,
+        show_progress: bool = False,
         **kwargs: Any,
     ) -> Dict[str, Any]:
         from yggdrasill.engine.executor import run as _run
-        return _run(
-            self, inputs,
-            training=training,
+        cbs = list(callbacks) if callbacks else []
+        if show_progress and not dry_run:
+            cbs.insert(0, _make_progress_callback())
+
+        resolved_inputs, executor_kwargs = self._resolve_run_kwargs(
+            inputs, kwargs,
             num_loop_steps=num_loop_steps,
             device=device,
-            callbacks=callbacks,
+        )
+        return _run(
+            self, resolved_inputs,
+            training=training,
+            num_loop_steps=executor_kwargs.get("num_loop_steps", num_loop_steps),
+            device=executor_kwargs.get("device", device),
+            callbacks=cbs if cbs else callbacks,
             dry_run=dry_run,
             validate_before=validate_before,
-            **kwargs,
+            seed=executor_kwargs.get("seed"),
+            pin_data=executor_kwargs.get("pin_data"),
+            max_steps=executor_kwargs.get("max_steps"),
+            run_data=executor_kwargs.get("run_data"),
+            destination_node_id=executor_kwargs.get("destination_node_id"),
+            dirty_node_ids=executor_kwargs.get("dirty_node_ids"),
+            interrupt_on=executor_kwargs.get("interrupt_on"),
+            skip_node_ids=executor_kwargs.get("skip_node_ids"),
         )
+
+    def _resolve_run_kwargs(
+        self,
+        inputs: Optional[Dict[str, Any]],
+        kwargs: Dict[str, Any],
+        *,
+        num_loop_steps: Optional[int] = None,
+        device: Optional[Any] = None,
+    ) -> tuple[Dict[str, Any], Dict[str, Any]]:
+        """Split workflow run kwargs into user inputs and executor kwargs."""
+        resolved: Dict[str, Any] = dict(inputs or {})
+        executor_kw: Dict[str, Any] = {}
+
+        if num_loop_steps is not None:
+            executor_kw["num_loop_steps"] = num_loop_steps
+        if device is not None:
+            executor_kw["device"] = device
+
+        num_inference_steps = kwargs.pop("num_inference_steps", None)
+        if num_inference_steps is not None:
+            executor_kw["num_loop_steps"] = num_inference_steps
+        if "seed" in kwargs:
+            executor_kw["seed"] = kwargs.pop("seed")
+        if "max_steps" in kwargs:
+            executor_kw["max_steps"] = kwargs.pop("max_steps")
+        if "pin_data" in kwargs:
+            executor_kw["pin_data"] = kwargs.pop("pin_data")
+        if "run_data" in kwargs:
+            executor_kw["run_data"] = kwargs.pop("run_data")
+        if "destination_node_id" in kwargs:
+            executor_kw["destination_node_id"] = kwargs.pop("destination_node_id")
+        if "dirty_node_ids" in kwargs:
+            dirty = kwargs.pop("dirty_node_ids")
+            if dirty is not None:
+                executor_kw["dirty_node_ids"] = list(dirty)
+        if "interrupt_on" in kwargs:
+            interrupt = kwargs.pop("interrupt_on")
+            if interrupt is not None:
+                executor_kw["interrupt_on"] = list(interrupt)
+        if "skip_node_ids" in kwargs:
+            skip = kwargs.pop("skip_node_ids")
+            if skip is not None:
+                executor_kw["skip_node_ids"] = set(skip) if not isinstance(skip, set) else skip
+
+        input_spec = self.get_input_spec()
+        exposed_names = set()
+        port_name_counts: Dict[str, int] = {}
+        for spec_entry in input_spec:
+            pname = spec_entry["port_name"]
+            port_name_counts[pname] = port_name_counts.get(pname, 0) + 1
+        for spec_entry in input_spec:
+            key = spec_entry.get("name") or spec_entry["port_name"]
+            exposed_names.add(key)
+            port_name = spec_entry["port_name"]
+            if port_name_counts.get(port_name, 0) == 1:
+                exposed_names.add(port_name)
+
+        for key, val in list(kwargs.items()):
+            if key in exposed_names:
+                resolved[key] = val
+
+        return resolved, executor_kw
 
     # --- state dict ---------------------------------------------------------
 
@@ -524,12 +598,10 @@ class Workflow:
         directory.mkdir(parents=True, exist_ok=True)
 
         cfg = self.to_config()
-        with open(directory / config_filename, "w", encoding="utf-8") as f:
-            json.dump(cfg, f, indent=2, ensure_ascii=False)
+        _save_config_file(cfg, directory / config_filename)
 
         state = self.state_dict()
-        with open(directory / checkpoint_filename, "wb") as f:
-            pickle.dump(state, f, protocol=pickle.HIGHEST_PROTOCOL)
+        _save_checkpoint_file(state, directory / checkpoint_filename)
 
         return directory
 
@@ -542,8 +614,7 @@ class Workflow:
         directory = Path(directory)
         directory.mkdir(parents=True, exist_ok=True)
         cfg = self.to_config()
-        with open(directory / filename, "w", encoding="utf-8") as f:
-            json.dump(cfg, f, indent=2, ensure_ascii=False)
+        _save_config_file(cfg, directory / filename)
         return directory
 
     def save_checkpoint(
@@ -555,8 +626,7 @@ class Workflow:
         directory = Path(directory)
         directory.mkdir(parents=True, exist_ok=True)
         state = self.state_dict()
-        with open(directory / filename, "wb") as f:
-            pickle.dump(state, f, protocol=pickle.HIGHEST_PROTOCOL)
+        _save_checkpoint_file(state, directory / filename)
         return directory
 
     @classmethod
@@ -571,15 +641,14 @@ class Workflow:
         load_checkpoint_flag: bool = True,
     ) -> "Workflow":
         directory = Path(directory)
-        config = _read_workflow_config(directory / config_filename)
+        config = _load_config_file(directory / config_filename)
 
         w = cls.from_config(config, registry=registry, validate=validate)
 
         if load_checkpoint_flag:
             ckpt_path = directory / checkpoint_filename
             if ckpt_path.exists():
-                with open(ckpt_path, "rb") as f:
-                    state = pickle.load(f)  # noqa: S301 -- trusted checkpoint
+                state = _load_checkpoint_file(ckpt_path)
                 w.load_state_dict(state, strict=False)
 
         return w
@@ -595,7 +664,7 @@ class Workflow:
     ) -> "Workflow":
         """Load only the workflow config (no checkpoint)."""
         directory = Path(directory)
-        config = _read_workflow_config(directory / config_filename)
+        config = _load_config_file(directory / config_filename)
         return cls.from_config(config, registry=registry, validate=validate)
 
     def load_from_checkpoint(
@@ -611,6 +680,5 @@ class Workflow:
         """
         directory = Path(directory)
         ckpt_path = directory / checkpoint_filename
-        with open(ckpt_path, "rb") as f:
-            state = pickle.load(f)  # noqa: S301 -- trusted checkpoint
+        state = _load_checkpoint_file(ckpt_path)
         self.load_state_dict(state, strict=False)

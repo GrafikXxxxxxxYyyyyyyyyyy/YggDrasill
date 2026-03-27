@@ -25,7 +25,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Union
 
-import torch
+try:
+    import torch
+except ImportError:  # pragma: no cover - exercised in no-diffusion environments
+    torch = None  # type: ignore[assignment]
 
 from yggdrasill.integrations.diffusers import contracts as C
 from yggdrasill.integrations.diffusers.common.image_utils import load_mask_image
@@ -53,7 +56,7 @@ def prepare_ip_adapter_masks_tensor(
     *,
     height: Optional[int] = None,
     width: Optional[int] = None,
-) -> torch.Tensor:
+) -> Any:
     """Run :class:`diffusers.image_processor.IPAdapterMaskProcessor` and pack for ``cross_attention_kwargs``.
 
     Returns a tensor of shape ``[1, num_masks, H, W]`` — the form expected inside
@@ -72,6 +75,11 @@ def prepare_ip_adapter_masks_tensor(
             "diffusers is required for IP-Adapter mask preprocessing. "
             "Install with: pip install 'yggdrasill[diffusion]'"
         ) from exc
+    if torch is None:
+        raise ImportError(
+            "torch is required for IP-Adapter mask preprocessing. "
+            "Install with: pip install 'yggdrasill[diffusion]'"
+        )
 
     if isinstance(mask_images, (str, bytes)) or (
         not isinstance(mask_images, (list, tuple))

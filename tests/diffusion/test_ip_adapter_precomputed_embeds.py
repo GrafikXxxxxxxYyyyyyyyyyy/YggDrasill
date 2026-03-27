@@ -26,7 +26,7 @@ def test_run_diffusion_merges_ip_adapter_image_embeds_dict() -> None:
     pytest.importorskip("torch")
     import torch
 
-    import yggdrasill.integrations.diffusers  # noqa: F401 — patches Hypergraph.run
+    import yggdrasill.integrations.diffusers  # noqa: F401
 
     from yggdrasill.engine.structure import Hypergraph
     from yggdrasill.integrations.diffusers import contracts as C

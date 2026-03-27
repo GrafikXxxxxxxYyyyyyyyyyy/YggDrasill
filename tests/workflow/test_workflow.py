@@ -1,4 +1,5 @@
 import json
+from unittest.mock import patch
 
 import pytest
 from yggdrasill.engine.edge import Edge
@@ -102,6 +103,45 @@ class TestWorkflowRun:
         result = w.run({"x": 99}, validate_before=False)
         assert result["y"] == 99
 
+    def test_run_with_kwargs_routes_to_inputs(self, registry):
+        w = Workflow()
+        w.add_node("g", _make_identity_hg("hg", registry))
+        w.expose_input("g", "in", "x")
+        w.expose_output("g", "out", "y")
+
+        with patch("yggdrasill.engine.executor.run") as mock_run:
+            mock_run.return_value = {"y": 1}
+            w.run(x=42)
+            assert mock_run.call_args[0][1]["x"] == 42
+
+    def test_run_forwards_executor_kwargs(self, registry):
+        w = Workflow()
+        w.add_node("g", _make_identity_hg("hg", registry))
+        w.expose_input("g", "in", "x")
+        w.expose_output("g", "out", "y")
+
+        with patch("yggdrasill.engine.executor.run") as mock_run:
+            mock_run.return_value = {"y": 1}
+            w.run(
+                x=1,
+                pin_data={"g": {"out": 7}},
+                run_data={"g": {"out": 6}},
+                dirty_node_ids=["g"],
+                destination_node_id="g",
+                interrupt_on=["g"],
+                seed=123,
+                max_steps=5,
+                validate_before=False,
+            )
+            call_kwargs = mock_run.call_args[1]
+            assert call_kwargs["pin_data"] == {"g": {"out": 7}}
+            assert call_kwargs["run_data"] == {"g": {"out": 6}}
+            assert call_kwargs["dirty_node_ids"] == ["g"]
+            assert call_kwargs["destination_node_id"] == "g"
+            assert call_kwargs["interrupt_on"] == ["g"]
+            assert call_kwargs["seed"] == 123
+            assert call_kwargs["max_steps"] == 5
+
 
 class TestWorkflowAddEdgeMissing:
     def test_add_edge_target_not_in_workflow(self, registry):
@@ -130,7 +170,7 @@ class TestWorkflowYAMLImportError:
         yaml_path = tmp_path / "config.yaml"
         yaml_path.write_text("{}")
         monkeypatch.setattr(builtins, "__import__", mock_import)
-        from yggdrasill.workflow.workflow import _read_workflow_config
+        from yggdrasill.hypergraph.serialization import load_config as _read_workflow_config
         with pytest.raises(ImportError, match="PyYAML"):
             _read_workflow_config(yaml_path)
 
@@ -594,6 +634,15 @@ class TestWorkflowExposeValidation:
         w.expose_output("s1", "out", "y")
         assert w.execution_version == v_before
 
+    def test_expose_output_duplicate_updates_name(self, registry):
+        w = Workflow()
+        w.add_node("s1", _make_identity_hg("hg1", registry))
+        w.expose_output("s1", "out", "y")
+        v_before = w.execution_version
+        w.expose_output("s1", "out", "result")
+        assert w.execution_version > v_before
+        assert w.get_output_spec()[0]["name"] == "result"
+
 
 class TestWorkflowAddNodeValidation:
     def test_empty_graph_id_raises(self, registry):
@@ -725,31 +774,65 @@ class TestWorkflowAutoConnect:
     """PHASE_6 §13.2: suggest_auto_edges / apply_auto_connect at workflow level."""
 
     def test_suggest_matching_ports(self, registry):
+        from yggdrasill.foundation.block import AbstractBaseBlock
+        from yggdrasill.foundation.node import AbstractGraphNode
+        from yggdrasill.foundation.port import Port, PortDirection, PortType
+
+        class OutputDataTaskNode(AbstractBaseBlock, AbstractGraphNode):
+            def __init__(self, node_id):
+                AbstractBaseBlock.__init__(self)
+                AbstractGraphNode.__init__(self, node_id=node_id)
+
+            @property
+            def block_type(self):
+                return "test/output_data_task"
+
+            def declare_ports(self):
+                return [
+                    Port("data", PortDirection.OUT, PortType.ANY),
+                ]
+
+            def forward(self, inputs):
+                return {"data": "value"}
+
+        class InputDataTaskNode(AbstractBaseBlock, AbstractGraphNode):
+            def __init__(self, node_id):
+                AbstractBaseBlock.__init__(self)
+                AbstractGraphNode.__init__(self, node_id=node_id)
+
+            @property
+            def block_type(self):
+                return "test/input_data_task"
+
+            def declare_ports(self):
+                return [
+                    Port("data", PortDirection.IN, PortType.ANY),
+                    Port("result", PortDirection.OUT, PortType.ANY),
+                ]
+
+            def forward(self, inputs):
+                return {"result": inputs["data"]}
+
+        registry.register("test/output_data_task", OutputDataTaskNode)
+        registry.register("test/input_data_task", InputDataTaskNode)
         w = Workflow()
         hg1 = Hypergraph.from_config({
             "graph_id": "src",
-            "nodes": [{"node_id": "N", "block_type": "test/identity_task"}],
+            "nodes": [{"node_id": "N", "block_type": "test/output_data_task"}],
             "edges": [],
-            "exposed_inputs": [{"node_id": "N", "port_name": "in", "name": "data"}],
-            "exposed_outputs": [{"node_id": "N", "port_name": "out", "name": "data"}],
+            "exposed_outputs": [{"node_id": "N", "port_name": "data", "name": "data"}],
         }, registry=registry)
         hg2 = Hypergraph.from_config({
             "graph_id": "dst",
-            "nodes": [{"node_id": "N", "block_type": "test/identity_task"}],
+            "nodes": [{"node_id": "N", "block_type": "test/input_data_task"}],
             "edges": [],
-            "exposed_inputs": [{"node_id": "N", "port_name": "in", "name": "data"}],
-            "exposed_outputs": [{"node_id": "N", "port_name": "out", "name": "data"}],
+            "exposed_inputs": [{"node_id": "N", "port_name": "data", "name": "data"}],
+            "exposed_outputs": [{"node_id": "N", "port_name": "result", "name": "result"}],
         }, registry=registry)
         w.add_node("g1", hg1)
         w.add_node("g2", hg2)
-        # Both expose "data" port -- auto should detect the match
-        # Note: port names in input/output specs use the raw port_name ("in"/"out")
-        # not the "name" alias, so matching is on port_name.
         suggestions = suggest_auto_edges(w)
-        # "out" from g1 matches "out" port name on g2? No -- g1 exposes output "out",
-        # g2 exposes input "in". These have different port_names.
-        # We need matching port names. Let's just test apply:
-        assert isinstance(suggestions, list)
+        assert suggestions == [("g1", "data", "g2", "data")]
 
     def test_apply_auto_connect_no_match(self, registry):
         clear_plan_cache()

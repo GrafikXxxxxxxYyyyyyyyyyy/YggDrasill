@@ -103,6 +103,39 @@ class _ToolNode(AbstractBaseBlock, AbstractGraphNode):
         return {"result": f"tool_result({inputs})"}
 
 
+class _InspectingAgentNode(AbstractBaseBlock, AbstractGraphNode):
+    is_agent = True
+
+    def __init__(self, node_id: str) -> None:
+        AbstractBaseBlock.__init__(self)
+        AbstractGraphNode.__init__(self, node_id=node_id)
+        self._call_count = 0
+
+    @property
+    def block_type(self) -> str:
+        return "test/inspecting_agent"
+
+    def declare_ports(self) -> List[Port]:
+        return [
+            Port("input", PortDirection.IN, PortType.ANY),
+            Port("output", PortDirection.OUT, PortType.ANY),
+        ]
+
+    def forward(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        self._call_count += 1
+        if self._call_count == 1:
+            return {
+                "output": "thinking",
+                "tool_calls": [{"tool_id": "t1", "args": {"x": 1}}],
+            }
+        return {
+            "output": {
+                "tool_results": inputs.get("tool_results"),
+                "keys": sorted(inputs.keys()),
+            },
+        }
+
+
 class _CounterNode(AbstractBaseBlock, AbstractGraphNode):
     """Node that counts how many times it's been called."""
 
@@ -580,6 +613,22 @@ class TestStreamEdgeCases:
         snapshots = list(run_stream(h, {"x": 1}, validate_before=False))
         assert len(snapshots) == 2
 
+    def test_stream_supports_partial_run_arguments(self):
+        clear_plan_cache()
+        h = make_chain("A", "B", "C")
+        snapshots = list(
+            run_stream(
+                h,
+                {"x": 1},
+                run_data={"A": {"out": 1}},
+                dirty_node_ids=["B"],
+                destination_node_id="B",
+                validate_before=False,
+            )
+        )
+        assert len(snapshots) == 1
+        assert snapshots[0]["y"] is None
+
 
 # ============================================================================
 # Executor: seed edge cases
@@ -658,6 +707,28 @@ class TestAgentLoopEdgeCases:
         out = run(h, {"q": "hi"}, validate_before=False)
         assert out["a"] is not None
 
+    def test_agent_loop_missing_tool_emits_callback(self):
+        clear_plan_cache()
+        agent = _AgentNode("ag")
+        h = self._build_agent_graph(agent, tool_nodes={"other_tool": "ot"})
+        phases: list[tuple[str, dict]] = []
+        run(
+            h, {"q": "hi"},
+            validate_before=False,
+            callbacks=[lambda p, i: phases.append((p, dict(i)))],
+        )
+        missing = [info for phase, info in phases if phase == "tool_missing"]
+        assert missing
+        assert missing[0]["tool_id"] == "t1"
+
+    def test_agent_loop_missing_tool_policy_error(self):
+        clear_plan_cache()
+        agent = _AgentNode("ag")
+        h = self._build_agent_graph(agent, tool_nodes={"other_tool": "ot"})
+        h.metadata["missing_tool_policy"] = "error"
+        with pytest.raises(KeyError):
+            run(h, {"q": "hi"}, validate_before=False)
+
     def test_agent_loop_dry_run(self):
         clear_plan_cache()
         h = self._build_agent_graph(
@@ -695,6 +766,21 @@ class TestAgentLoopEdgeCases:
         assert "agent_step" in phases
         assert "tool_call" in phases
         assert "agent_loop_done" in phases
+
+    def test_agent_loop_pin_data_applies_to_tool_nodes(self):
+        clear_plan_cache()
+        h = self._build_agent_graph(
+            _InspectingAgentNode("ag"),
+            tool_nodes={"t1": "tool1"},
+        )
+        out = run(
+            h,
+            {"q": "hi"},
+            pin_data={"tool1": {"result": "PINNED_TOOL"}},
+            validate_before=False,
+        )
+        assert out["a"]["tool_results"] == [{"tool_call_id": "t1", "content": {"result": "PINNED_TOOL"}}]
+        assert out["a"]["keys"] == ["input", "tool_results"]
 
     def test_agent_max_steps_from_metadata(self):
         clear_plan_cache()

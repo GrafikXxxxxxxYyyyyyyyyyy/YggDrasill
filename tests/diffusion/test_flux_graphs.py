@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import pytest
+from PIL import Image
 
+from yggdrasill.engine.executor import run
 from yggdrasill.integrations.diffusers import contracts as C
 from yggdrasill.integrations.diffusers.presets.flux import (
     build_flux_text2img_graph,
@@ -20,6 +22,7 @@ from tests.diffusion.conftest import (
     FakeT5Encoder,
     FakeT5Tokenizer,
     FakeTokenizer,
+    requires_torch,
 )
 
 
@@ -132,6 +135,30 @@ class TestFluxText2ImgGraph:
         g = build_flux_text2img_graph(**flux_kwargs)
         assert g.metadata.get("num_loop_steps") == 28
 
+    def test_wires_timestep_loop(self, flux_kwargs):
+        g = build_flux_text2img_graph(**flux_kwargs)
+        edges = {
+            (e.source_node, e.source_port, e.target_node, e.target_port)
+            for e in g.get_edges()
+        }
+        assert ("latent_init", C.PORT_TIMESTEP, "transformer", C.PORT_TIMESTEP) in edges
+        assert ("latent_init", C.PORT_TIMESTEP, "sched_step", C.PORT_TIMESTEP) in edges
+        assert ("sched_step", "next_timestep", "transformer", C.PORT_TIMESTEP) in edges
+        assert ("sched_step", "next_timestep", "sched_step", C.PORT_TIMESTEP) in edges
+
+    @requires_torch
+    def test_executor_runs_text2img_loop(self, flux_kwargs):
+        g = build_flux_text2img_graph(
+            **flux_kwargs,
+            config={"height": 1024, "width": 1024, "num_inference_steps": 2, "output_type": "latent"},
+        )
+        out = run(
+            g,
+            {"prompt": "forest", "guidance": 3.5},
+            validate_before=False,
+        )
+        assert C.PORT_OUTPUT_IMAGE in out
+
 
 class TestFluxImg2ImgGraph:
 
@@ -169,6 +196,25 @@ class TestFluxInpaintGraph:
         g = build_flux_inpaint_graph(**flux_kwargs)
         port_names = {s["port_name"] for s in g.get_input_spec()}
         assert C.PORT_INIT_IMAGE in port_names
+
+    def test_uses_inpaint_blend(self, flux_kwargs):
+        g = build_flux_inpaint_graph(**flux_kwargs)
+        assert "inpaint_blend" in g.node_ids
+
+    @requires_torch
+    def test_executor_runs_inpaint_loop(self, flux_kwargs):
+        g = build_flux_inpaint_graph(
+            **flux_kwargs,
+            config={"height": 1024, "width": 1024, "num_inference_steps": 2, "output_type": "latent"},
+        )
+        image = Image.new("RGB", (1024, 1024), color="white")
+        mask = Image.new("L", (1024, 1024), color=255)
+        out = run(
+            g,
+            {"prompt": "forest", "guidance": 3.5, "init_image": image, "mask_image": mask},
+            validate_before=False,
+        )
+        assert C.PORT_OUTPUT_IMAGE in out
 
 
 class TestFluxControlNetText2ImgGraph:
@@ -215,3 +261,14 @@ class TestFluxControlNetText2ImgGraph:
             for e in edges
         )
         assert found, "prompt_embeds -> controlnet edge missing"
+
+    def test_controlnet_wires_timestep_loop(self, flux_kwargs):
+        g = build_flux_controlnet_text2img_graph(
+            **flux_kwargs, controlnet=FakeFluxControlNet(),
+        )
+        edges = {
+            (e.source_node, e.source_port, e.target_node, e.target_port)
+            for e in g.get_edges()
+        }
+        assert ("latent_init", C.PORT_TIMESTEP, "controlnet", C.PORT_TIMESTEP) in edges
+        assert ("sched_step", "next_timestep", "controlnet", C.PORT_TIMESTEP) in edges

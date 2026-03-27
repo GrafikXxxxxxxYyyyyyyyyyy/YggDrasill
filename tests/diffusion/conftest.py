@@ -352,6 +352,10 @@ class FakeFluxTransformer:
         self.config = SimpleNamespace(guidance_embeds=guidance_embeds)
 
     def __call__(self, hidden_states=None, **kwargs):
+        if torch_available:
+            import torch
+            if isinstance(hidden_states, torch.Tensor):
+                return (torch.zeros_like(hidden_states),)
         shape = hidden_states.shape if hasattr(hidden_states, 'shape') else (1, 4096, 64)
         return (FakeTensor(shape),)
 
@@ -371,12 +375,28 @@ class FakeFluxVAE:
         )
 
     def encode(self, x):
+        if torch_available:
+            import torch
+            if isinstance(x, torch.Tensor):
+                b = x.shape[0]
+                latent_h = x.shape[-2] // 8
+                latent_w = x.shape[-1] // 8
+                latents = torch.zeros((b, 16, latent_h, latent_w), device=x.device, dtype=x.dtype)
+                return FakeVAEOutput(latent_dist=FakeLatentDist(latents))
         b = x.shape[0] if hasattr(x, 'shape') else 1
         return FakeVAEOutput(
             latent_dist=FakeLatentDist(FakeTensor((b, 16, 128, 128)))
         )
 
     def decode(self, latents, return_dict=True):
+        if torch_available:
+            import torch
+            if isinstance(latents, torch.Tensor):
+                b = latents.shape[0]
+                image = torch.zeros((b, 3, 1024, 1024), device=latents.device, dtype=latents.dtype)
+                if return_dict:
+                    return SimpleNamespace(sample=image)
+                return (image,)
         b = latents.shape[0] if hasattr(latents, 'shape') else 1
         image = FakeTensor((b, 3, 1024, 1024))
         if return_dict:
@@ -408,12 +428,24 @@ class FakeFlowMatchScheduler:
         return latents
 
     def step(self, noise_pred, timestep, latents, return_dict=False):
+        if torch_available:
+            import torch
+            if isinstance(latents, torch.Tensor):
+                prev = latents - noise_pred
+                result = SimpleNamespace(prev_sample=prev)
+                if return_dict:
+                    return result
+                return (prev,)
         result = SimpleNamespace(prev_sample=FakeTensor(latents.shape))
         if return_dict:
             return result
         return (FakeTensor(latents.shape),)
 
     def scale_noise(self, sample, timestep, noise):
+        if torch_available:
+            import torch
+            if isinstance(sample, torch.Tensor):
+                return sample + noise
         return sample
 
 
@@ -422,6 +454,12 @@ class FakeFluxControlNet:
     device = "cpu"
 
     def __call__(self, hidden_states=None, **kwargs):
+        if torch_available:
+            import torch
+            if isinstance(hidden_states, torch.Tensor):
+                block = [torch.zeros_like(hidden_states) for _ in range(19)]
+                single = [torch.zeros_like(hidden_states) for _ in range(38)]
+                return (block, single)
         block_samples = [FakeTensor((1, 4096, 64)) for _ in range(19)]
         single_samples = [FakeTensor((1, 4096, 64)) for _ in range(38)]
         return (block_samples, single_samples)

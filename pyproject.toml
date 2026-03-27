@@ -34,6 +34,9 @@ dependencies = []
 yaml = [
     "pyyaml>=6.0",
 ]
+# GPU: install torch/torchvision from a wheel index that matches your NVIDIA driver
+# (e.g. driver reporting CUDA 12.6 → --index-url https://download.pytorch.org/whl/cu126).
+# A cu13x torch build will fail at runtime with "driver too old" on older drivers.
 diffusion = [
     "torch>=2.0",
     "torchvision>=0.15.0",
@@ -48,6 +51,7 @@ diffusion = [
     "opencv-python-headless>=4.5.0",
 ]
 dev = [
+    "build>=1.2.2",
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
     "ruff>=0.1.0",

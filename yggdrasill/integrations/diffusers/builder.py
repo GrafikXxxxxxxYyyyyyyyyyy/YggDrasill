@@ -7,7 +7,10 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-import torch
+try:
+    import torch
+except ImportError:  # pragma: no cover - exercised in no-diffusion environments
+    torch = None  # type: ignore[assignment]
 
 from yggdrasill.engine.edge import Edge
 from yggdrasill.integrations.diffusers.adapters.ip_adapter_loader import (
@@ -47,7 +50,7 @@ def _reclaim_cuda_after_backbone_replace() -> None:
     import gc
 
     gc.collect()
-    if torch.cuda.is_available():
+    if torch is not None and torch.cuda.is_available():
         torch.cuda.empty_cache()
 
 
@@ -734,14 +737,14 @@ class DiffusionGraphBuilder:
                 suffix = "_" + block_type.split("/")[-1].split("_", 1)[-1]
                 nid = f"{node_id}{suffix}"
             build_cfg: Dict[str, Any] = {
-                "type": block_type,
+                "block_type": block_type,
                 "node_id": nid,
                 "config": kwargs.get("config", cfg),
             }
             if block_type == "adapter/lora_loader":
                 build_cfg["pipe"] = _build_lora_pipe(self._graph, family=family)
             for k, v in kwargs.items():
-                if k not in ("config", "type", "node_id"):
+                if k not in ("config", "type", "block_type", "node_id"):
                     build_cfg[k] = v
 
             node = reg.build(build_cfg)

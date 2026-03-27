@@ -1,6 +1,4 @@
-"""Regression: run_diffusion must not pop ip_adapter_conditioning_scale before patched Hypergraph.run.
-
-If run_kw loses the scale, the patch applies {"default": 1.0} and user scale is ignored."""
+"""Regression: run_diffusion must apply IP-Adapter scale exactly once."""
 from __future__ import annotations
 
 from unittest.mock import patch
@@ -8,9 +6,9 @@ from unittest.mock import patch
 import pytest
 
 
-def test_run_diffusion_applies_ip_adapter_scale_only_via_patched_graph_run() -> None:
+def test_run_diffusion_applies_ip_adapter_scale_once() -> None:
     pytest.importorskip("torch")
-    import yggdrasill.integrations.diffusers  # noqa: F401 — patches Hypergraph.run
+    import yggdrasill.integrations.diffusers  # noqa: F401
 
     from yggdrasill.engine.structure import Hypergraph
     from yggdrasill.integrations.diffusers.run import _inject_ip_adapter_scale
@@ -34,5 +32,5 @@ def test_run_diffusion_applies_ip_adapter_scale_only_via_patched_graph_run() -> 
                 ip_adapter_conditioning_scale={"IPAdapter": 0.33},
             )
 
-    assert len(scale_maps) == 1, "expected a single inject (patched run only), not run_diffusion + patch"
+    assert len(scale_maps) == 1, "expected a single inject, not duplicated runtime scaling"
     assert scale_maps[0].get("IPAdapter") == 0.33

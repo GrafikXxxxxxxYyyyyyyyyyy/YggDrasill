@@ -62,10 +62,7 @@ class InpaintLatentBlendNode(AbstractInnerModule):
         i = int(sched_state.get("_inpaint_blend_i", 0))
         device, dtype = latents.device, latents.dtype
         if mask is None:
-            mask = torch.ones(
-                latents.shape[0], 1, latents.shape[2], latents.shape[3],
-                device=device, dtype=dtype,
-            )
+            mask = torch.ones_like(latents, device=device, dtype=dtype)
         else:
             mask = mask.to(device=device, dtype=dtype)
         if clean is None:
@@ -79,7 +76,10 @@ class InpaintLatentBlendNode(AbstractInnerModule):
             t_next = coerce_timestep_for_add_noise(
                 timesteps[i + 1], scheduler=scheduler, device=device
             )
-            init_latents_proper = scheduler.add_noise(clean, noise, t_next)
+            if hasattr(scheduler, "scale_noise"):
+                init_latents_proper = scheduler.scale_noise(clean, t_next, noise)
+            else:
+                init_latents_proper = scheduler.add_noise(clean, noise, t_next)
 
         out = (1.0 - mask) * init_latents_proper + mask * latents
         sched_state["_inpaint_blend_i"] = i + 1

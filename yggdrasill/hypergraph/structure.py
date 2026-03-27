@@ -54,10 +54,12 @@ def _resolve_config_ref(
         if base_dir is not None:
             resolved = (base_dir / ref_path).resolve()
             base_resolved = base_dir.resolve()
-            if not str(resolved).startswith(str(base_resolved)):
+            try:
+                resolved.relative_to(base_resolved)
+            except ValueError as exc:
                 raise ValueError(
                     f"Config ref resolves outside base dir: {ref_path}"
-                )
+                ) from exc
             ref_path = resolved
         elif not ref_path.is_absolute():
             ref_path = ref_path.resolve()
@@ -556,6 +558,9 @@ class Hypergraph:
             entry["name"] = name
         for existing in self._exposed_outputs:
             if existing["node_id"] == node_id and existing["port_name"] == port_name:
+                if name is not None and existing.get("name") != name:
+                    existing["name"] = name
+                    self._execution_version += 1
                 return
         self._exposed_outputs.append(entry)
         self._execution_version += 1
@@ -764,11 +769,13 @@ class Hypergraph:
         Keyword argument routing
         ------------------------
         * ``num_inference_steps`` -> ``num_loop_steps`` (executor)
+        * ``pin_data`` / ``run_data`` / ``dirty_node_ids`` / ``destination_node_id``
+          / ``interrupt_on`` / ``skip_node_ids`` -> executor kwargs
         * ``seed`` -> ``seed`` (executor)
         * ``max_steps`` -> ``max_steps`` (executor, for agent loops)
         * ``show_progress=True`` — tqdm progress bar for loop steps
         * Names matching an exposed input port -> ``inputs`` dict
-        * Remaining kwargs -> ``pin_data`` config overrides on nodes that
+        * Remaining kwargs -> per-node config overrides for nodes that already
           recognise the key in their config.
         """
         from yggdrasill.engine.executor import run as _run
@@ -791,13 +798,17 @@ class Hypergraph:
             resolved_inputs,
             training=training,
             num_loop_steps=executor_kwargs.get("num_loop_steps", num_loop_steps),
-            device=device,
+            device=executor_kwargs.get("device", device),
             callbacks=cbs if cbs else callbacks,
             dry_run=dry_run,
             validate_before=validate_before,
             seed=executor_kwargs.get("seed"),
             pin_data=executor_kwargs.get("pin_data"),
             max_steps=executor_kwargs.get("max_steps"),
+            run_data=executor_kwargs.get("run_data"),
+            destination_node_id=executor_kwargs.get("destination_node_id"),
+            dirty_node_ids=executor_kwargs.get("dirty_node_ids"),
+            interrupt_on=executor_kwargs.get("interrupt_on"),
             skip_node_ids=executor_kwargs.get("skip_node_ids"),
         )
 
@@ -812,6 +823,11 @@ class Hypergraph:
         """Split kwargs into (inputs_dict, executor_kwargs)."""
         resolved: Dict[str, Any] = dict(inputs or {})
         executor_kw: Dict[str, Any] = {}
+
+        if num_loop_steps is not None:
+            executor_kw["num_loop_steps"] = num_loop_steps
+        if device is not None:
+            executor_kw["device"] = device
 
         num_inference_steps = kwargs.pop("num_inference_steps", None)
         if num_inference_steps is not None:
@@ -829,6 +845,20 @@ class Hypergraph:
             executor_kw["seed"] = kwargs.pop("seed")
         if "max_steps" in kwargs:
             executor_kw["max_steps"] = kwargs.pop("max_steps")
+        if "pin_data" in kwargs:
+            executor_kw["pin_data"] = kwargs.pop("pin_data")
+        if "run_data" in kwargs:
+            executor_kw["run_data"] = kwargs.pop("run_data")
+        if "destination_node_id" in kwargs:
+            executor_kw["destination_node_id"] = kwargs.pop("destination_node_id")
+        if "dirty_node_ids" in kwargs:
+            dirty = kwargs.pop("dirty_node_ids")
+            if dirty is not None:
+                executor_kw["dirty_node_ids"] = list(dirty)
+        if "interrupt_on" in kwargs:
+            interrupt = kwargs.pop("interrupt_on")
+            if interrupt is not None:
+                executor_kw["interrupt_on"] = list(interrupt)
         if "skip_node_ids" in kwargs:
             sk = kwargs.pop("skip_node_ids")
             if sk is not None:

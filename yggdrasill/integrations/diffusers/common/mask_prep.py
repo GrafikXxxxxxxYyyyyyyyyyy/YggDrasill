@@ -36,6 +36,7 @@ class InpaintMaskPrepNode(AbstractConverter):
             Port(C.PORT_MASK_IMAGE, PortDirection.IN, PortType.IMAGE, optional=True),
             Port(C.PORT_MASK_LATENTS, PortDirection.OUT, PortType.TENSOR),
             Port(C.PORT_MASKED_IMAGE_LATENTS, PortDirection.OUT, PortType.TENSOR),
+            Port(C.PORT_CLEAN_IMAGE_LATENTS, PortDirection.OUT, PortType.TENSOR, optional=True),
         ]
 
     def forward(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
@@ -74,10 +75,14 @@ class InpaintMaskPrepNode(AbstractConverter):
 
         if self._vae is not None:
             with torch.no_grad():
+                clean_latents = self._vae.encode(image_tensor).latent_dist.sample()
                 masked_latents = self._vae.encode(masked_image).latent_dist.sample()
             scaling = getattr(self._vae.config, "scaling_factor", 0.18215)
-            masked_latents = masked_latents * scaling
+            shift = getattr(self._vae.config, "shift_factor", 0.0) or 0.0
+            clean_latents = (clean_latents - shift) * scaling
+            masked_latents = (masked_latents - shift) * scaling
         else:
+            clean_latents = image_tensor
             masked_latents = masked_image
 
         latent_h, latent_w = height // 8, width // 8
@@ -89,9 +94,21 @@ class InpaintMaskPrepNode(AbstractConverter):
         # 4-channel UNet path, which composites with (1 - mask) * ref + mask * denoised.
         mask_tensor = (mask_tensor >= 0.5).to(dtype=mask_tensor.dtype)
 
+        if self._config.get("pack_latents_2x2"):
+            from yggdrasill.integrations.diffusers.flux.latent_init import FluxLatentInitNode
+
+            num_latent_channels = int(
+                getattr(clean_latents, "shape", [1, self._config.get("num_latent_channels", 16)])[1]
+            )
+            mask_tensor = mask_tensor.repeat(1, num_latent_channels, 1, 1)
+            clean_latents = FluxLatentInitNode._pack_latents(clean_latents)
+            masked_latents = FluxLatentInitNode._pack_latents(masked_latents)
+            mask_tensor = FluxLatentInitNode._pack_latents(mask_tensor)
+
         return {
             C.PORT_MASK_LATENTS: mask_tensor,
             C.PORT_MASKED_IMAGE_LATENTS: masked_latents,
+            C.PORT_CLEAN_IMAGE_LATENTS: clean_latents,
         }
 
     def to(self, device: Any) -> "InpaintMaskPrepNode":

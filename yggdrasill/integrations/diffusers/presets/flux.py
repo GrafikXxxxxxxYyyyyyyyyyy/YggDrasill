@@ -85,9 +85,13 @@ def build_flux_text2img_graph(
     h.add_edge(Edge("prompt_enc", C.PORT_TXT_IDS, "transformer", C.PORT_TXT_IDS))
     h.add_edge(Edge("latent_init", C.PORT_PACKED_LATENTS, "transformer", C.PORT_PACKED_LATENTS))
     h.add_edge(Edge("latent_init", C.PORT_IMG_IDS, "transformer", C.PORT_IMG_IDS))
+    h.add_edge(Edge("latent_init", C.PORT_TIMESTEP, "transformer", C.PORT_TIMESTEP))
+    h.add_edge(Edge("latent_init", C.PORT_TIMESTEP, "sched_step", C.PORT_TIMESTEP))
     h.add_edge(Edge("transformer", C.PORT_NOISE_PRED, "sched_step", C.PORT_NOISE_PRED))
     h.add_edge(Edge("sched_step", "next_latent", "transformer", C.PORT_PACKED_LATENTS))
     h.add_edge(Edge("sched_step", "next_latent", "vae_decode", C.PORT_PACKED_LATENTS))
+    h.add_edge(Edge("sched_step", "next_timestep", "transformer", C.PORT_TIMESTEP))
+    h.add_edge(Edge("sched_step", "next_timestep", "sched_step", C.PORT_TIMESTEP))
 
     h.expose_input("tokenizer", C.PORT_PROMPT, C.PORT_PROMPT)
     h.expose_input("tokenizer", C.PORT_PROMPT_2, C.PORT_PROMPT_2)
@@ -175,9 +179,13 @@ def build_flux_img2img_graph(
     h.add_edge(Edge("prompt_enc", C.PORT_TXT_IDS, "transformer", C.PORT_TXT_IDS))
     h.add_edge(Edge("latent_init", C.PORT_PACKED_LATENTS, "transformer", C.PORT_PACKED_LATENTS))
     h.add_edge(Edge("latent_init", C.PORT_IMG_IDS, "transformer", C.PORT_IMG_IDS))
+    h.add_edge(Edge("latent_init", C.PORT_TIMESTEP, "transformer", C.PORT_TIMESTEP))
+    h.add_edge(Edge("latent_init", C.PORT_TIMESTEP, "sched_step", C.PORT_TIMESTEP))
     h.add_edge(Edge("transformer", C.PORT_NOISE_PRED, "sched_step", C.PORT_NOISE_PRED))
     h.add_edge(Edge("sched_step", "next_latent", "transformer", C.PORT_PACKED_LATENTS))
     h.add_edge(Edge("sched_step", "next_latent", "vae_decode", C.PORT_PACKED_LATENTS))
+    h.add_edge(Edge("sched_step", "next_timestep", "transformer", C.PORT_TIMESTEP))
+    h.add_edge(Edge("sched_step", "next_timestep", "sched_step", C.PORT_TIMESTEP))
 
     h.expose_input("tokenizer", C.PORT_PROMPT, C.PORT_PROMPT)
     h.expose_input("img_encode", C.PORT_INIT_IMAGE, C.PORT_INIT_IMAGE)
@@ -209,6 +217,7 @@ def build_flux_inpaint_graph(
     from yggdrasill.integrations.diffusers.flux.latent_init import FluxLatentInitNode
     from yggdrasill.integrations.diffusers.flux.vae import FluxVAEDecodeNode
     from yggdrasill.integrations.diffusers.common.mask_prep import InpaintMaskPrepNode
+    from yggdrasill.integrations.diffusers.common.inpaint_latent_blend import InpaintLatentBlendNode
 
     cfg = config or {}
     h = Hypergraph(graph_id="flux_inpaint")
@@ -224,6 +233,8 @@ def build_flux_inpaint_graph(
     mask_prep = InpaintMaskPrepNode("mask_prep", vae=vae, config={
         "height": cfg.get("height", 1024), "width": cfg.get("width", 1024),
         "device": cfg.get("device", "cpu"),
+        "pack_latents_2x2": True,
+        "num_latent_channels": cfg.get("num_latent_channels", 16),
     })
     sched_setup = FluxSchedulerSetupNode("sched_setup", scheduler=scheduler, config={
         "num_inference_steps": cfg.get("num_inference_steps", 28),
@@ -238,11 +249,13 @@ def build_flux_inpaint_graph(
         "dtype": cfg.get("dtype", "bfloat16"),
         "seed": cfg.get("seed"),
         "strength": cfg.get("strength", 0.6),
+        "inpaint_4ch_composite": True,
     })
     transformer_node = FluxTransformerNode("transformer", transformer=transformer, config={
         "guidance_scale": cfg.get("guidance_scale", 3.5),
     })
     sched_step = FluxSchedulerStepNode("sched_step", scheduler=scheduler)
+    inpaint_blend = InpaintLatentBlendNode("inpaint_blend", config={})
     vae_dec = FluxVAEDecodeNode("vae_decode", vae=vae, config={
         "output_type": cfg.get("output_type", "pil"),
         "height": cfg.get("height", 1024),
@@ -253,6 +266,7 @@ def build_flux_inpaint_graph(
         ("tokenizer", tok_node), ("prompt_enc", prompt_enc), ("mask_prep", mask_prep),
         ("sched_setup", sched_setup), ("latent_init", lat_init),
         ("transformer", transformer_node), ("sched_step", sched_step),
+        ("inpaint_blend", inpaint_blend),
         ("vae_decode", vae_dec),
     ]:
         h.add_node(nid, node)
@@ -260,14 +274,24 @@ def build_flux_inpaint_graph(
     h.add_edge(Edge("tokenizer", C.PORT_INPUT_IDS, "prompt_enc", C.PORT_INPUT_IDS))
     h.add_edge(Edge("tokenizer", C.PORT_INPUT_IDS_2, "prompt_enc", C.PORT_INPUT_IDS_2))
     h.add_edge(Edge("sched_setup", C.PORT_SCHEDULER_STATE, "latent_init", C.PORT_SCHEDULER_STATE))
+    h.add_edge(Edge("sched_setup", C.PORT_SCHEDULER_STATE, "inpaint_blend", C.PORT_SCHEDULER_STATE))
+    h.add_edge(Edge("mask_prep", C.PORT_CLEAN_IMAGE_LATENTS, "latent_init", C.PORT_INIT_LATENTS))
+    h.add_edge(Edge("mask_prep", C.PORT_CLEAN_IMAGE_LATENTS, "inpaint_blend", C.PORT_CLEAN_IMAGE_LATENTS))
+    h.add_edge(Edge("mask_prep", C.PORT_MASK_LATENTS, "inpaint_blend", C.PORT_MASK_LATENTS))
     h.add_edge(Edge("prompt_enc", C.PORT_PROMPT_EMBEDS, "transformer", C.PORT_PROMPT_EMBEDS))
     h.add_edge(Edge("prompt_enc", C.PORT_POOLED_PROMPT_EMBEDS, "transformer", C.PORT_POOLED_PROJECTIONS))
     h.add_edge(Edge("prompt_enc", C.PORT_TXT_IDS, "transformer", C.PORT_TXT_IDS))
     h.add_edge(Edge("latent_init", C.PORT_PACKED_LATENTS, "transformer", C.PORT_PACKED_LATENTS))
     h.add_edge(Edge("latent_init", C.PORT_IMG_IDS, "transformer", C.PORT_IMG_IDS))
+    h.add_edge(Edge("latent_init", C.PORT_TIMESTEP, "transformer", C.PORT_TIMESTEP))
+    h.add_edge(Edge("latent_init", C.PORT_TIMESTEP, "sched_step", C.PORT_TIMESTEP))
     h.add_edge(Edge("transformer", C.PORT_NOISE_PRED, "sched_step", C.PORT_NOISE_PRED))
-    h.add_edge(Edge("sched_step", "next_latent", "transformer", C.PORT_PACKED_LATENTS))
-    h.add_edge(Edge("sched_step", "next_latent", "vae_decode", C.PORT_PACKED_LATENTS))
+    h.add_edge(Edge("sched_step", "next_latent", "inpaint_blend", "latents_post_step"))
+    h.add_edge(Edge("inpaint_blend", "next_latent", "transformer", C.PORT_PACKED_LATENTS))
+    h.add_edge(Edge("inpaint_blend", "next_latent", "sched_step", C.PORT_PACKED_LATENTS))
+    h.add_edge(Edge("inpaint_blend", "next_latent", "vae_decode", C.PORT_PACKED_LATENTS))
+    h.add_edge(Edge("sched_step", "next_timestep", "transformer", C.PORT_TIMESTEP))
+    h.add_edge(Edge("sched_step", "next_timestep", "sched_step", C.PORT_TIMESTEP))
 
     h.expose_input("tokenizer", C.PORT_PROMPT, C.PORT_PROMPT)
     h.expose_input("mask_prep", C.PORT_INIT_IMAGE, C.PORT_INIT_IMAGE)
@@ -363,13 +387,20 @@ def build_flux_controlnet_text2img_graph(
     h.add_edge(Edge("latent_init", C.PORT_IMG_IDS, "transformer", C.PORT_IMG_IDS))
     h.add_edge(Edge("latent_init", C.PORT_PACKED_LATENTS, "controlnet", C.PORT_PACKED_LATENTS))
     h.add_edge(Edge("latent_init", C.PORT_IMG_IDS, "controlnet", C.PORT_IMG_IDS))
+    h.add_edge(Edge("latent_init", C.PORT_TIMESTEP, "transformer", C.PORT_TIMESTEP))
+    h.add_edge(Edge("latent_init", C.PORT_TIMESTEP, "controlnet", C.PORT_TIMESTEP))
+    h.add_edge(Edge("latent_init", C.PORT_TIMESTEP, "sched_step", C.PORT_TIMESTEP))
 
     h.add_edge(Edge("controlnet", C.PORT_CONTROLNET_BLOCK_SAMPLES, "transformer", C.PORT_CONTROLNET_BLOCK_SAMPLES))
     h.add_edge(Edge("controlnet", C.PORT_CONTROLNET_SINGLE_BLOCK_SAMPLES, "transformer", C.PORT_CONTROLNET_SINGLE_BLOCK_SAMPLES))
 
     h.add_edge(Edge("transformer", C.PORT_NOISE_PRED, "sched_step", C.PORT_NOISE_PRED))
     h.add_edge(Edge("sched_step", "next_latent", "transformer", C.PORT_PACKED_LATENTS))
+    h.add_edge(Edge("sched_step", "next_latent", "controlnet", C.PORT_PACKED_LATENTS))
     h.add_edge(Edge("sched_step", "next_latent", "vae_decode", C.PORT_PACKED_LATENTS))
+    h.add_edge(Edge("sched_step", "next_timestep", "transformer", C.PORT_TIMESTEP))
+    h.add_edge(Edge("sched_step", "next_timestep", "controlnet", C.PORT_TIMESTEP))
+    h.add_edge(Edge("sched_step", "next_timestep", "sched_step", C.PORT_TIMESTEP))
 
     h.expose_input("tokenizer", C.PORT_PROMPT, C.PORT_PROMPT)
     h.expose_input("controlnet", C.PORT_CONTROL_IMAGE, C.PORT_CONTROL_IMAGE)
