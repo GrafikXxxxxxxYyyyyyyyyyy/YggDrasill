@@ -303,6 +303,7 @@ class ModelStore:
         variant: str = "",
         revision: Optional[str] = None,
         torch_dtype: Optional[Any] = None,
+        force_reload: bool = False,
         use_safetensors: Optional[bool] = None,
         pretrained_map: Optional[Dict[str, str]] = None,
         subfolder_map: Optional[Dict[str, str]] = None,
@@ -352,6 +353,7 @@ class ModelStore:
                 variant=key_variant,
                 revision=revision,
                 torch_dtype=torch_dtype,
+                force_reload=force_reload,
                 use_safetensors=use_safetensors,
                 extra_kwargs=key_extra,
             )

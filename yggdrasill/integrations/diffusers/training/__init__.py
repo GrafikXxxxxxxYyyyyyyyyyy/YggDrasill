@@ -1,17 +1,28 @@
-"""Minimal diffusion training subsystem for YggDrasill."""
+"""Diffusion LoRA training subsystem for YggDrasill."""
 from __future__ import annotations
 
 from typing import Optional
 
 from yggdrasill.integrations.diffusers.training.config import TrainingConfig
-from yggdrasill.integrations.diffusers.training.trainer import SD15LoRATrainer
+from yggdrasill.integrations.diffusers.training.trainer import (
+    DiffusionLoRATrainer,
+    FluxLoRATrainer,
+    SD15LoRATrainer,
+    SDXLLoRATrainer,
+)
 from yggdrasill.integrations.diffusers.training.types import TrainResult, TrainingComponents, TrainingTargetSetup
+
+
+def train_diffusion_lora(*, config: TrainingConfig) -> TrainResult:
+    """Generic family-dispatched diffusion LoRA training entrypoint."""
+    return DiffusionLoRATrainer(config).train()
 
 
 def train_sd15_lora(
     *,
     data_dir: str,
     pretrained: str,
+    task: str = "text2img",
     output_path: Optional[str] = None,
     output_dir: Optional[str] = None,
     resolution: int = 512,
@@ -31,6 +42,10 @@ def train_sd15_lora(
     logging_steps: int = 10,
     caption_column: str = "caption",
     image_column: str = "image",
+    prompt_2_column: Optional[str] = None,
+    init_image_column: str = "init_image",
+    mask_column: str = "mask_image",
+    masked_image_column: Optional[str] = "masked_image",
     dataset_split: str = "train",
     dataset_config_name: Optional[str] = None,
     lr_warmup_steps: int = 0,
@@ -42,6 +57,8 @@ def train_sd15_lora(
     config = TrainingConfig(
         pretrained_model_name_or_path=pretrained,
         data_dir=data_dir,
+        family="sd15",
+        task=task,
         output_path=output_path,
         output_dir=output_dir,
         resolution=resolution,
@@ -61,6 +78,10 @@ def train_sd15_lora(
         logging_steps=logging_steps,
         caption_column=caption_column,
         image_column=image_column,
+        prompt_2_column=prompt_2_column,
+        init_image_column=init_image_column,
+        mask_column=mask_column,
+        masked_image_column=masked_image_column,
         dataset_split=dataset_split,
         dataset_config_name=dataset_config_name,
         lr_warmup_steps=lr_warmup_steps,
@@ -68,7 +89,7 @@ def train_sd15_lora(
         device=device,
         resume_from_checkpoint=resume_from_checkpoint,
     )
-    return SD15LoRATrainer(config).train()
+    return train_diffusion_lora(config=config)
 
 
 def train_sd15_lora_from_folder(**kwargs) -> TrainResult:
@@ -76,12 +97,180 @@ def train_sd15_lora_from_folder(**kwargs) -> TrainResult:
     return train_sd15_lora(**kwargs)
 
 
+def train_sdxl_lora(
+    *,
+    data_dir: str,
+    pretrained: str,
+    task: str = "text2img",
+    output_path: Optional[str] = None,
+    output_dir: Optional[str] = None,
+    resolution: int = 1024,
+    batch_size: int = 1,
+    gradient_accumulation_steps: int = 1,
+    lr: float = 1e-4,
+    num_epochs: int = 1,
+    max_train_steps: Optional[int] = None,
+    seed: int = 42,
+    lora_rank: int = 8,
+    lora_alpha: int = 8,
+    lora_dropout: float = 0.0,
+    train_vae: bool = False,
+    train_text_encoder: bool = False,
+    train_text_encoder_2: bool = False,
+    mixed_precision: Optional[str] = None,
+    checkpoint_every_n_steps: int = 0,
+    logging_steps: int = 10,
+    caption_column: str = "caption",
+    image_column: str = "image",
+    prompt_2_column: Optional[str] = None,
+    init_image_column: str = "init_image",
+    mask_column: str = "mask_image",
+    masked_image_column: Optional[str] = "masked_image",
+    aesthetic_score_column: Optional[str] = None,
+    dataset_split: str = "train",
+    dataset_config_name: Optional[str] = None,
+    lr_warmup_steps: int = 0,
+    num_workers: int = 0,
+    device: Optional[str] = None,
+    resume_from_checkpoint: Optional[str] = None,
+    original_size: Optional[tuple[int, int]] = None,
+    target_size: Optional[tuple[int, int]] = None,
+    crops_coords_top_left: tuple[int, int] = (0, 0),
+    requires_aesthetics_score: bool = False,
+    aesthetic_score: float = 6.0,
+    negative_aesthetic_score: float = 2.5,
+) -> TrainResult:
+    """Train an SDXL LoRA for text2img, img2img, inpaint, or refiner."""
+    config = TrainingConfig(
+        pretrained_model_name_or_path=pretrained,
+        data_dir=data_dir,
+        family="sdxl",
+        task=task,
+        output_path=output_path,
+        output_dir=output_dir,
+        resolution=resolution,
+        batch_size=batch_size,
+        gradient_accumulation_steps=gradient_accumulation_steps,
+        learning_rate=lr,
+        num_epochs=num_epochs,
+        max_train_steps=max_train_steps,
+        seed=seed,
+        lora_rank=lora_rank,
+        lora_alpha=lora_alpha,
+        lora_dropout=lora_dropout,
+        train_text_encoder=train_text_encoder,
+        train_text_encoder_2=train_text_encoder_2,
+        train_vae=train_vae,
+        mixed_precision=mixed_precision,
+        checkpoint_every_n_steps=checkpoint_every_n_steps,
+        logging_steps=logging_steps,
+        caption_column=caption_column,
+        image_column=image_column,
+        prompt_2_column=prompt_2_column,
+        init_image_column=init_image_column,
+        mask_column=mask_column,
+        masked_image_column=masked_image_column,
+        aesthetic_score_column=aesthetic_score_column,
+        dataset_split=dataset_split,
+        dataset_config_name=dataset_config_name,
+        lr_warmup_steps=lr_warmup_steps,
+        num_workers=num_workers,
+        device=device,
+        resume_from_checkpoint=resume_from_checkpoint,
+        original_size=original_size,
+        target_size=target_size,
+        crops_coords_top_left=crops_coords_top_left,
+        requires_aesthetics_score=requires_aesthetics_score,
+        aesthetic_score=aesthetic_score,
+        negative_aesthetic_score=negative_aesthetic_score,
+    )
+    return train_diffusion_lora(config=config)
+
+
+def train_flux_lora(
+    *,
+    data_dir: str,
+    pretrained: str,
+    task: str = "text2img",
+    output_path: Optional[str] = None,
+    output_dir: Optional[str] = None,
+    resolution: int = 1024,
+    batch_size: int = 1,
+    gradient_accumulation_steps: int = 1,
+    lr: float = 1e-4,
+    num_epochs: int = 1,
+    max_train_steps: Optional[int] = None,
+    seed: int = 42,
+    lora_rank: int = 8,
+    lora_alpha: int = 8,
+    lora_dropout: float = 0.0,
+    train_vae: bool = False,
+    train_text_encoder: bool = False,
+    train_text_encoder_2: bool = False,
+    mixed_precision: Optional[str] = None,
+    checkpoint_every_n_steps: int = 0,
+    logging_steps: int = 10,
+    caption_column: str = "caption",
+    image_column: str = "image",
+    prompt_2_column: Optional[str] = None,
+    dataset_split: str = "train",
+    dataset_config_name: Optional[str] = None,
+    lr_warmup_steps: int = 0,
+    num_workers: int = 0,
+    device: Optional[str] = None,
+    resume_from_checkpoint: Optional[str] = None,
+    guidance: Optional[float] = None,
+) -> TrainResult:
+    """Train a FLUX LoRA through the generic diffusion training core."""
+    config = TrainingConfig(
+        pretrained_model_name_or_path=pretrained,
+        data_dir=data_dir,
+        family="flux",
+        task=task,
+        output_path=output_path,
+        output_dir=output_dir,
+        resolution=resolution,
+        batch_size=batch_size,
+        gradient_accumulation_steps=gradient_accumulation_steps,
+        learning_rate=lr,
+        num_epochs=num_epochs,
+        max_train_steps=max_train_steps,
+        seed=seed,
+        lora_rank=lora_rank,
+        lora_alpha=lora_alpha,
+        lora_dropout=lora_dropout,
+        train_text_encoder=train_text_encoder,
+        train_text_encoder_2=train_text_encoder_2,
+        train_vae=train_vae,
+        mixed_precision=mixed_precision,
+        checkpoint_every_n_steps=checkpoint_every_n_steps,
+        logging_steps=logging_steps,
+        caption_column=caption_column,
+        image_column=image_column,
+        prompt_2_column=prompt_2_column,
+        dataset_split=dataset_split,
+        dataset_config_name=dataset_config_name,
+        lr_warmup_steps=lr_warmup_steps,
+        num_workers=num_workers,
+        device=device,
+        resume_from_checkpoint=resume_from_checkpoint,
+        guidance=guidance,
+    )
+    return train_diffusion_lora(config=config)
+
+
 __all__ = [
     "TrainingConfig",
     "TrainResult",
     "TrainingComponents",
     "TrainingTargetSetup",
+    "DiffusionLoRATrainer",
     "SD15LoRATrainer",
+    "SDXLLoRATrainer",
+    "FluxLoRATrainer",
+    "train_diffusion_lora",
     "train_sd15_lora",
+    "train_sdxl_lora",
+    "train_flux_lora",
     "train_sd15_lora_from_folder",
 ]

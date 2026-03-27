@@ -18,23 +18,63 @@ Diffusion-слой является **opt-in addon** над ядром:
 - SDXL graph assembly и builders;
 - общая diffusion ergonomics вокруг `run_diffusion`;
 - adapters: ControlNet, IP-Adapter, LoRA в текущем test-covered surface;
-- минимальный `SD1.5 LoRA training` subsystem через `yggdrasill.integrations.diffusers.training`;
+- family-aware `LoRA training` subsystem через `yggdrasill.integrations.diffusers.training`;
 - diffusion builders / presets для smoke и development use.
 
-## Minimal training subsystem
+## Training subsystem
 
-Текущая training-поддержка намеренно узкая:
+Текущая training-поддержка уже отделена от inference-cycle и теперь организована как
+**generic diffusers-family LoRA training layer** поверх training registry/contracts.
 
-- реализован только отдельный training path для `SD1.5 LoRA`;
-- первый recipe ориентирован на folder dataset (`image + .txt` или `metadata.jsonl` / `metadata.csv`);
-- по умолчанию обучается `UNet LoRA`, а `text_encoder LoRA` включается явно;
-- `VAE training`, `ControlNet training`, `SDXL training`, `FLUX training` и generic graph-wide training orchestration пока не входят в поддерживаемую поверхность.
+Поддерживаемая поверхность:
+
+- generic entrypoint: `train_diffusion_lora(config=TrainingConfig(...))`
+- ergonomic wrappers:
+  - `train_sd15_lora(...)`
+  - `train_sdxl_lora(...)`
+  - `train_flux_lora(...)`
+- registry-owned training dispatch:
+  - backbone/component layout
+  - conditioning builder
+  - latent representation/objective
+  - LoRA target attachment
+  - export strategy
+
+Поддерживаемые family/task proof points:
+
+- `SD1.5`
+  - `task="text2img" | "img2img" | "inpaint"`
+  - local folder datasets (`image + .txt`) и manifest/Hugging Face dataset paths
+  - `UNet LoRA` по умолчанию, optional `train_text_encoder=True`
+- `SDXL`
+  - `task="text2img" | "img2img" | "inpaint" | "refiner"`
+  - dual tokenizer / dual text encoder path
+  - pooled embeddings + `added_cond_kwargs` (`text_embeds`, `time_ids`)
+  - optional `train_text_encoder` и `train_text_encoder_2`
+- `FLUX`
+  - текущий training proof point: `task="text2img"`
+  - transformer backbone вместо `UNet`
+  - packed latent representation + FLUX-specific text conditioning/export path
+
+Общая поддержка включает:
+
+- registry-driven trainer shell вместо hardcoded `sd15/sdxl` dispatch
+- family-pluggable checkpoint/export path
+- diffusers-compatible LoRA export contract для `SD1.5`, `SDXL` и `FLUX`
+- compatibility wrappers: текущие `train_sd15_lora(...)` и `train_sdxl_lora(...)` работают поверх generic core
+
+Что всё ещё вне поддерживаемой поверхности:
+
+- `VAE training`
+- `ControlNet training`
+- generic graph-native diffusion training orchestration
+- distributed / multi-host training surface
 
 Важно:
 
 - training subsystem не использует существующий inference-cycle как основной train-loop;
 - `run_diffusion(...)` и builders остаются inference-oriented слоем;
-- training-export должен быть совместим с текущей LoRA inference-loading surface.
+- training-export совместим с текущей LoRA inference-loading surface для `sd15`, `sdxl` и proof-point `flux`.
 
 ## Частично поддерживается / experimental
 

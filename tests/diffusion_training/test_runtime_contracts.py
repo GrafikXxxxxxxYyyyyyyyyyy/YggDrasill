@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 
@@ -57,3 +59,48 @@ def test_sd15_prompt_encoder_train_propagates_to_underlying_module() -> None:
 
     node.train(False)
     assert module.training is False
+
+
+@pytest.mark.skipif(__import__("importlib").util.find_spec("torch") is None, reason="torch not installed")
+def test_training_vae_encode_force_upcast_runs_encoder_in_float32() -> None:
+    import torch
+    import torch.nn as nn
+
+    from yggdrasill.integrations.diffusers.training.objective_utils import vae_encode_latents
+
+    class MiniVAE(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.enc = nn.Conv2d(3, 4, 1)
+
+        def encode(self, x: torch.Tensor):
+            seen.append(x.dtype)
+            assert x.dtype == torch.float32
+
+            class D:
+                def sample(self_inner):
+                    return torch.zeros(
+                        x.shape[0], 4, x.shape[2] // 8, x.shape[3] // 8,
+                        device=x.device, dtype=torch.float32,
+                    )
+
+            return SimpleNamespace(latent_dist=D())
+
+    seen: list = []
+    vae = MiniVAE().half()
+    vae.config = SimpleNamespace(
+        scaling_factor=0.13025,
+        shift_factor=None,
+        force_upcast=True,
+    )
+
+    latents = vae_encode_latents(
+        vae=vae,
+        pixel_values=torch.randn(1, 3, 64, 64, dtype=torch.float16),
+        device=torch.device("cpu"),
+        dtype=torch.float16,
+    )
+
+    assert seen and seen[0] == torch.float32
+    assert latents.dtype == torch.float16
+    assert next(vae.parameters()).dtype == torch.float16

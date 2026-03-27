@@ -1,4 +1,4 @@
-"""Single-step SD1.5 text2img LoRA training objective."""
+"""Single-step SD1.5 img2img LoRA training objective."""
 from __future__ import annotations
 
 from typing import Any, Dict
@@ -14,8 +14,8 @@ from yggdrasill.integrations.diffusers.training.objective_utils import (
 from yggdrasill.integrations.diffusers.training.types import TrainingComponents, TrainingTargetSetup
 
 
-class SD15LoRAObjective:
-    """SD1.5 text2img training step: noisy latents -> UNet -> MSE loss."""
+class SD15Img2ImgLoRAObjective:
+    """SD1.5 img2img training step driven by init-image latents."""
 
     def __init__(
         self,
@@ -33,39 +33,30 @@ class SD15LoRAObjective:
         self._config = config
         self._device = device
 
-    def _encode_prompts(self, captions: list[str]) -> Any:
-        unet_device, unet_dtype = module_device_dtype(self._unet)
-        return encode_sd15_prompt(
-            tokenizer=self._tokenizer,
-            text_encoder=self._text_encoder,
-            captions=captions,
-            train_text_encoder=self._config.train_text_encoder,
-            device=unet_device,
-            dtype=unet_dtype,
-        )
-
     def compute_loss(self, batch: Dict[str, Any]) -> Any:
         import torch.nn.functional as F
 
         unet_device, unet_dtype = module_device_dtype(self._unet)
-        pixel_values = batch["pixel_values"]
-        captions = list(batch["caption"])
         latents = vae_encode_latents(
             vae=self._vae,
-            pixel_values=pixel_values,
+            pixel_values=batch["init_pixel_values"],
             device=unet_device,
             dtype=unet_dtype,
         )
-
-        prompt_embeds = self._encode_prompts(captions)
+        prompt_embeds = encode_sd15_prompt(
+            tokenizer=self._tokenizer,
+            text_encoder=self._text_encoder,
+            captions=list(batch["caption"]),
+            train_text_encoder=self._config.train_text_encoder,
+            device=unet_device,
+            dtype=unet_dtype,
+        )
         noise, timesteps, noisy_latents = sample_noise_schedule(scheduler=self._scheduler, latents=latents)
-
         noise_pred = self._unet(
             noisy_latents,
             timesteps,
             encoder_hidden_states=prompt_embeds,
         ).sample
-
         target = resolve_diffusion_target(
             scheduler=self._scheduler,
             latents=latents,

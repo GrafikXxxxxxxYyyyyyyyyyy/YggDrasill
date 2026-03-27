@@ -56,19 +56,25 @@ def load_training_state(
     return int(state.get("global_step", 0))
 
 
-def export_sd15_lora_weights(
+def export_lora_weights(
     *,
     output_path: str | Path,
-    unet: Any,
+    family: str,
+    unet: Any = None,
+    backbone: Any = None,
+    pipeline_class_name: Optional[str] = None,
+    backbone_save_arg_name: Optional[str] = None,
     text_encoder: Any = None,
+    text_encoder_2: Any = None,
     include_text_encoder: bool = False,
+    include_text_encoder_2: bool = False,
     metadata: Optional[Dict[str, Any]] = None,
 ) -> Path:
     """Export LoRA weights in a format compatible with diffusers loading APIs."""
     from peft import get_peft_model_state_dict
 
     try:
-        from diffusers import StableDiffusionPipeline
+        import diffusers
         from diffusers.utils import convert_state_dict_to_diffusers
     except ImportError as exc:
         raise ImportError(
@@ -78,19 +84,63 @@ def export_sd15_lora_weights(
     target = Path(output_path)
     target.parent.mkdir(parents=True, exist_ok=True)
 
-    unet_lora_layers = convert_state_dict_to_diffusers(get_peft_model_state_dict(unet))
-    text_lora_layers = None
-    if include_text_encoder and text_encoder is not None:
-        text_lora_layers = convert_state_dict_to_diffusers(get_peft_model_state_dict(text_encoder))
+    if pipeline_class_name is None:
+        if family == "sd15":
+            pipeline_class_name = "StableDiffusionPipeline"
+        elif family == "sdxl":
+            pipeline_class_name = "StableDiffusionXLPipeline"
+        elif family == "flux":
+            pipeline_class_name = "FluxPipeline"
+        else:
+            raise ValueError(f"Unsupported export family: {family!r}")
+    pipeline_cls = getattr(diffusers, pipeline_class_name, None)
+    if pipeline_cls is None:
+        raise ImportError(
+            f"Diffusers does not expose the expected pipeline class {pipeline_class_name!r} for family {family!r}"
+        )
 
-    StableDiffusionPipeline.save_lora_weights(
-        save_directory=str(target.parent),
-        unet_lora_layers=unet_lora_layers,
-        text_encoder_lora_layers=text_lora_layers,
-        weight_name=target.name,
-        safe_serialization=target.suffix == ".safetensors",
-    )
+    if backbone_save_arg_name is None:
+        backbone_save_arg_name = "transformer_lora_layers" if family == "flux" else "unet_lora_layers"
+    backbone_model = backbone if backbone is not None else unet
+    if backbone_model is None:
+        raise ValueError("A backbone model must be provided for LoRA export")
+
+    save_kwargs: Dict[str, Any] = {
+        "save_directory": str(target.parent),
+        backbone_save_arg_name: convert_state_dict_to_diffusers(get_peft_model_state_dict(backbone_model)),
+        "text_encoder_lora_layers": None,
+        "weight_name": target.name,
+        "safe_serialization": target.suffix == ".safetensors",
+    }
+    if include_text_encoder and text_encoder is not None:
+        save_kwargs["text_encoder_lora_layers"] = convert_state_dict_to_diffusers(
+            get_peft_model_state_dict(text_encoder)
+        )
+    if include_text_encoder_2 and text_encoder_2 is not None:
+        save_kwargs["text_encoder_2_lora_layers"] = convert_state_dict_to_diffusers(
+            get_peft_model_state_dict(text_encoder_2)
+        )
+
+    pipeline_cls.save_lora_weights(**save_kwargs)
     if metadata is not None:
         metadata_path = target.with_suffix(".metadata.json")
         metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8")
     return target
+
+
+def export_sd15_lora_weights(
+    *,
+    output_path: str | Path,
+    unet: Any,
+    text_encoder: Any = None,
+    include_text_encoder: bool = False,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> Path:
+    return export_lora_weights(
+        output_path=output_path,
+        family="sd15",
+        unet=unet,
+        text_encoder=text_encoder,
+        include_text_encoder=include_text_encoder,
+        metadata=metadata,
+    )

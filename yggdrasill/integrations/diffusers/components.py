@@ -502,6 +502,7 @@ def load_components_from_pretrained(
     store: Optional[Any] = None,
     torch_dtype: Optional[Any] = None,
     variant: str = "",
+    force_reload: bool = False,
     use_safetensors: Optional[bool] = None,
     pretrained_map: Optional[Dict[str, str]] = None,
     subfolder_map: Optional[Dict[str, str]] = None,
@@ -525,6 +526,7 @@ def load_components_from_pretrained(
     return ms.load_components_by_keys(
         family, list(load_keys), pretrained,
         variant=variant, torch_dtype=torch_dtype,
+        force_reload=force_reload,
         use_safetensors=use_safetensors,
         pretrained_map=pretrained_map,
         subfolder_map=subfolder_map,

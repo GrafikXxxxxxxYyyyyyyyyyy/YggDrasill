@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from yggdrasill.integrations.diffusers.training.config import TrainingConfig
-from yggdrasill.integrations.diffusers.training.dataset import FolderCaptionDataset, discover_caption_samples
+from yggdrasill.integrations.diffusers.training.dataset import DiffusionTrainingDataset, FolderCaptionDataset, discover_caption_samples
 
 
 def test_training_config_builds_final_output_path(tmp_path) -> None:
@@ -107,3 +107,109 @@ def test_folder_caption_dataset_supports_huggingface_dataset(monkeypatch, tmp_pa
     assert item["caption"] == "green square"
     assert item["image_path"] is None
     assert item["source_kind"] == "hf"
+
+
+def test_diffusion_training_dataset_supports_img2img_manifest_fields(tmp_path) -> None:
+    pytest.importorskip("torch")
+    pytest.importorskip("torchvision")
+    PIL = pytest.importorskip("PIL.Image")
+
+    target_image = PIL.new("RGB", (16, 16), color="red")
+    init_image = PIL.new("RGB", (16, 16), color="blue")
+    target_image.save(tmp_path / "target.png")
+    init_image.save(tmp_path / "init.png")
+    (tmp_path / "metadata.jsonl").write_text(
+        json.dumps(
+            {
+                "image": "target.png",
+                "init_image": "init.png",
+                "caption": "red square",
+                "prompt_2": "detailed red square",
+            }
+        ) + "\n",
+        encoding="utf-8",
+    )
+
+    config = TrainingConfig(
+        pretrained_model_name_or_path="stabilityai/stable-diffusion-xl-base-1.0",
+        data_dir=str(tmp_path),
+        output_path=str(tmp_path / "adapter.safetensors"),
+        family="sdxl",
+        task="img2img",
+        resolution=16,
+    )
+    dataset = DiffusionTrainingDataset(config)
+    item = dataset[0]
+
+    assert item["prompt_2"] == "detailed red square"
+    assert tuple(item["init_pixel_values"].shape) == (3, 16, 16)
+
+
+def test_diffusion_training_dataset_inpaint_requires_mask_at_access_time(tmp_path) -> None:
+    pytest.importorskip("torch")
+    pytest.importorskip("torchvision")
+    PIL = pytest.importorskip("PIL.Image")
+
+    target_image = PIL.new("RGB", (16, 16), color="red")
+    init_image = PIL.new("RGB", (16, 16), color="blue")
+    target_image.save(tmp_path / "target.png")
+    init_image.save(tmp_path / "init.png")
+    (tmp_path / "metadata.jsonl").write_text(
+        json.dumps(
+            {
+                "image": "target.png",
+                "init_image": "init.png",
+                "caption": "red square",
+            }
+        ) + "\n",
+        encoding="utf-8",
+    )
+
+    config = TrainingConfig(
+        pretrained_model_name_or_path="stabilityai/stable-diffusion-xl-base-1.0",
+        data_dir=str(tmp_path),
+        output_path=str(tmp_path / "adapter.safetensors"),
+        family="sdxl",
+        task="inpaint",
+        resolution=16,
+    )
+    dataset = DiffusionTrainingDataset(config)
+
+    with pytest.raises(ValueError):
+        _ = dataset[0]
+
+
+def test_diffusion_training_dataset_reads_aesthetic_score(tmp_path) -> None:
+    pytest.importorskip("torch")
+    pytest.importorskip("torchvision")
+    PIL = pytest.importorskip("PIL.Image")
+
+    target_image = PIL.new("RGB", (16, 16), color="red")
+    init_image = PIL.new("RGB", (16, 16), color="blue")
+    target_image.save(tmp_path / "target.png")
+    init_image.save(tmp_path / "init.png")
+    (tmp_path / "metadata.jsonl").write_text(
+        json.dumps(
+            {
+                "image": "target.png",
+                "init_image": "init.png",
+                "caption": "red square",
+                "aesthetic_score": 7.25,
+            }
+        ) + "\n",
+        encoding="utf-8",
+    )
+
+    config = TrainingConfig(
+        pretrained_model_name_or_path="stabilityai/stable-diffusion-xl-refiner-1.0",
+        data_dir=str(tmp_path),
+        output_path=str(tmp_path / "adapter.safetensors"),
+        family="sdxl",
+        task="refiner",
+        resolution=16,
+        aesthetic_score_column="aesthetic_score",
+    )
+    dataset = DiffusionTrainingDataset(config)
+    item = dataset[0]
+
+    assert item["aesthetic_score"] == 7.25

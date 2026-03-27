@@ -1,7 +1,7 @@
-"""Trainable LoRA target resolution for the minimal SD1.5 recipe."""
+"""Trainable LoRA target resolution for diffusion training recipes."""
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, List
 
 from yggdrasill.integrations.diffusers.training.config import TrainingConfig
 from yggdrasill.integrations.diffusers.training.types import TrainingTargetSetup
@@ -64,6 +64,22 @@ def _cast_trainable_parameters_to_float32(*models: Any) -> None:
                 parameter.data = data.float()
 
 
+def _upcast_module_to_float32(model: Any) -> None:
+    try:
+        import torch
+    except ImportError:
+        return
+
+    if model is None or not hasattr(model, "to"):
+        return
+
+    try:
+        model.to(dtype=torch.float32)
+    except Exception:
+        # Some wrappers may not support dtype-only upcast cleanly.
+        return
+
+
 def _add_adapter(model: Any, config: Any, adapter_name: str) -> Any:
     try:
         from peft import get_peft_model
@@ -78,35 +94,40 @@ def _add_adapter(model: Any, config: Any, adapter_name: str) -> Any:
     return get_peft_model(model, config, adapter_name=adapter_name)
 
 
-def attach_lora_targets(
+def attach_standard_lora_targets(
     *,
-    unet: Any,
-    text_encoder: Any,
+    backbone: Any,
+    backbone_key: str,
+    text_encoder: Any = None,
+    text_encoder_2: Any = None,
     config: TrainingConfig,
+    default_backbone_target_modules: list[str],
+    default_text_encoder_target_modules: list[str],
 ) -> TrainingTargetSetup:
-    """Attach LoRA adapters and return the resolved trainable parameter surface."""
+    """Attach LoRA adapters for a generic backbone and optional text encoders."""
     LoraConfig = _require_peft()
 
-    if unet is None:
-        raise ValueError("UNet must be provided for LoRA target attachment")
+    if backbone is None:
+        raise ValueError("Backbone must be provided for LoRA target attachment")
 
     _freeze_module(text_encoder)
-    _freeze_module(unet)
+    _freeze_module(text_encoder_2)
+    _freeze_module(backbone)
 
-    unet_cfg = LoraConfig(
+    backbone_cfg = LoraConfig(
         r=config.lora_rank,
         lora_alpha=config.lora_alpha,
         lora_dropout=config.lora_dropout,
         bias="none",
-        target_modules=config.unet_target_modules or list(_DEFAULT_UNET_TARGET_MODULES),
+        target_modules=config.resolved_backbone_target_modules or list(default_backbone_target_modules),
     )
-    unet = _add_adapter(unet, unet_cfg, adapter_name="default")
-    _enable_training_mode(unet)
+    backbone = _add_adapter(backbone, backbone_cfg, adapter_name="default")
+    _enable_training_mode(backbone)
 
     adapter_metadata: Dict[str, Any] = {
-        "unet": {
+        backbone_key: {
             "adapter_name": "default",
-            "target_modules": config.unet_target_modules or list(_DEFAULT_UNET_TARGET_MODULES),
+            "target_modules": config.resolved_backbone_target_modules or list(default_backbone_target_modules),
         }
     }
 
@@ -116,27 +137,70 @@ def attach_lora_targets(
             lora_alpha=config.lora_alpha,
             lora_dropout=config.lora_dropout,
             bias="none",
-            target_modules=config.text_encoder_target_modules or list(_DEFAULT_TEXT_ENCODER_TARGET_MODULES),
+            target_modules=config.text_encoder_target_modules or list(default_text_encoder_target_modules),
         )
         text_encoder = _add_adapter(text_encoder, text_cfg, adapter_name="default")
         _enable_training_mode(text_encoder)
         adapter_metadata["text_encoder"] = {
             "adapter_name": "default",
-            "target_modules": config.text_encoder_target_modules or list(_DEFAULT_TEXT_ENCODER_TARGET_MODULES),
+            "target_modules": config.text_encoder_target_modules or list(default_text_encoder_target_modules),
         }
+        if config.mixed_precision == "fp16":
+            _upcast_module_to_float32(text_encoder)
+
+    if config.train_text_encoder_2 and text_encoder_2 is not None:
+        text_encoder_2_cfg = LoraConfig(
+            r=config.lora_rank,
+            lora_alpha=config.lora_alpha,
+            lora_dropout=config.lora_dropout,
+            bias="none",
+            target_modules=config.text_encoder_2_target_modules or list(default_text_encoder_target_modules),
+        )
+        text_encoder_2 = _add_adapter(text_encoder_2, text_encoder_2_cfg, adapter_name="default")
+        _enable_training_mode(text_encoder_2)
+        adapter_metadata["text_encoder_2"] = {
+            "adapter_name": "default",
+            "target_modules": config.text_encoder_2_target_modules or list(default_text_encoder_target_modules),
+        }
+        if config.mixed_precision == "fp16":
+            _upcast_module_to_float32(text_encoder_2)
 
     _cast_trainable_parameters_to_float32(
-        unet,
+        backbone,
         text_encoder if config.train_text_encoder else None,
+        text_encoder_2 if config.train_text_encoder_2 else None,
     )
 
-    trainable_parameters = _collect_trainable_parameters(unet, text_encoder if config.train_text_encoder else None)
+    trainable_parameters = _collect_trainable_parameters(
+        backbone,
+        text_encoder if config.train_text_encoder else None,
+        text_encoder_2 if config.train_text_encoder_2 else None,
+    )
     if not trainable_parameters:
         raise RuntimeError("No trainable parameters were produced by LoRA target attachment")
 
     return TrainingTargetSetup(
-        unet=unet,
+        backbone=backbone,
+        backbone_key=backbone_key,
         text_encoder=text_encoder,
+        text_encoder_2=text_encoder_2,
         trainable_parameters=trainable_parameters,
         adapter_metadata=adapter_metadata,
+    )
+
+
+def attach_lora_targets(
+    *,
+    unet: Any,
+    text_encoder: Any,
+    config: TrainingConfig,
+) -> TrainingTargetSetup:
+    """Attach LoRA adapters and return the resolved trainable parameter surface."""
+    return attach_standard_lora_targets(
+        backbone=unet,
+        backbone_key="unet",
+        text_encoder=text_encoder,
+        config=config,
+        default_backbone_target_modules=list(_DEFAULT_UNET_TARGET_MODULES),
+        default_text_encoder_target_modules=list(_DEFAULT_TEXT_ENCODER_TARGET_MODULES),
     )

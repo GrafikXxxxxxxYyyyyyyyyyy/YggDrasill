@@ -1,30 +1,48 @@
-"""Minimal trainer for SD1.5 LoRA diffusion training."""
+"""Family-aware trainer shell for diffusion LoRA training."""
 from __future__ import annotations
 
 import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from yggdrasill.integrations.diffusers.components import load_components_from_pretrained
-from yggdrasill.integrations.diffusers.model_store import ModelStore
 from yggdrasill.integrations.diffusers.training.checkpointing import (
-    export_sd15_lora_weights,
+    export_lora_weights,
     load_training_state,
     save_training_state,
 )
 from yggdrasill.integrations.diffusers.training.config import TrainingConfig
-from yggdrasill.integrations.diffusers.training.dataset import FolderCaptionDataset
-from yggdrasill.integrations.diffusers.training.lora_targets import attach_lora_targets
-from yggdrasill.integrations.diffusers.training.sd15_lora_objective import SD15LoRAObjective
-from yggdrasill.integrations.diffusers.training.types import TrainResult, TrainingComponents
+from yggdrasill.integrations.diffusers.training.dataset import DiffusionTrainingDataset
+from yggdrasill.integrations.diffusers.training.family_registry import (
+    get_training_family_spec,
+    load_training_components,
+    resolve_training_config,
+)
+from yggdrasill.integrations.diffusers.training.types import TrainResult, TrainingComponents, TrainingTargetSetup
 
 
-class SD15LoRATrainer:
-    """Trainer for the first supported diffusion training recipe."""
+class BaseLoRATrainer:
+    """Reusable trainer shell shared by SD1.5 and SDXL recipes."""
 
     def __init__(self, config: TrainingConfig, *, components: Optional[TrainingComponents] = None) -> None:
-        self.config = config
+        self.config = resolve_training_config(config)
         self._components_override = components
+
+    def _effective_mixed_precision(self) -> Optional[str]:
+        import torch
+
+        requested = self.config.mixed_precision
+        if requested != "fp16":
+            return requested
+        if self.config.family != "sdxl" or not self.config.train_text_encoder:
+            return requested
+        if not torch.cuda.is_available():
+            return requested
+        try:
+            if torch.cuda.is_bf16_supported():
+                return "bf16"
+        except Exception:
+            return requested
+        return requested
 
     def _resolve_device(self) -> Any:
         import torch
@@ -36,33 +54,37 @@ class SD15LoRATrainer:
     def _resolve_training_dtype(self) -> Any:
         import torch
 
-        if self.config.mixed_precision == "fp16":
+        effective_mixed_precision = self._effective_mixed_precision()
+        if effective_mixed_precision == "fp16":
             return torch.float16
-        if self.config.mixed_precision == "bf16":
+        if effective_mixed_precision == "bf16":
             return torch.bfloat16
         return torch.float32
 
     def _build_dataloader(self) -> Any:
         import torch
 
-        dataset = FolderCaptionDataset(
-            self.config.data_dir,
-            resolution=self.config.resolution,
-            image_column=self.config.image_column,
-            caption_column=self.config.caption_column,
-            dataset_split=self.config.dataset_split,
-            dataset_config_name=self.config.dataset_config_name,
-        )
+        dataset = DiffusionTrainingDataset(self.config)
 
         def _collate(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
-            pixel_values = torch.stack([item["pixel_values"] for item in batch])
-            captions = [item["caption"] for item in batch]
-            image_paths = [item["image_path"] for item in batch]
-            return {
-                "pixel_values": pixel_values,
-                "caption": captions,
-                "image_path": image_paths,
+            collated: Dict[str, Any] = {
+                "pixel_values": torch.stack([item["pixel_values"] for item in batch]),
+                "caption": [item["caption"] for item in batch],
+                "prompt_2": [item.get("prompt_2", item["caption"]) for item in batch],
+                "image_path": [item["image_path"] for item in batch],
             }
+            if "init_pixel_values" in batch[0]:
+                collated["init_pixel_values"] = torch.stack([item["init_pixel_values"] for item in batch])
+                collated["init_image_path"] = [item.get("init_image_path") for item in batch]
+            if "mask_values" in batch[0]:
+                collated["mask_values"] = torch.stack([item["mask_values"] for item in batch])
+                collated["mask_path"] = [item.get("mask_path") for item in batch]
+            if "masked_pixel_values" in batch[0]:
+                collated["masked_pixel_values"] = torch.stack([item["masked_pixel_values"] for item in batch])
+                collated["masked_image_path"] = [item.get("masked_image_path") for item in batch]
+            if "aesthetic_score" in batch[0]:
+                collated["aesthetic_score"] = torch.tensor([float(item["aesthetic_score"]) for item in batch])
+            return collated
 
         return torch.utils.data.DataLoader(
             dataset,
@@ -75,34 +97,117 @@ class SD15LoRATrainer:
     def _load_components(self, device: Any) -> TrainingComponents:
         if self._components_override is not None:
             return self._components_override
+        raise NotImplementedError
 
-        components = load_components_from_pretrained(
-            ["tokenizer", "text_encoder", "unet", "vae", "scheduler"],
-            self.config.pretrained_model_name_or_path,
-            family="sd15",
-            store=ModelStore.default(),
-            torch_dtype=self._resolve_training_dtype(),
-        )
-        loaded = TrainingComponents(
-            tokenizer=components["tokenizer"],
-            text_encoder=components["text_encoder"],
-            unet=components["unet"],
-            vae=components["vae"],
-            scheduler=components["scheduler"],
-        )
-        for module in (loaded.text_encoder, loaded.unet, loaded.vae):
-            if module is not None and hasattr(module, "to"):
-                module.to(device)
-        if loaded.vae is not None and hasattr(loaded.vae, "requires_grad_"):
-            loaded.vae.requires_grad_(False)
-        if loaded.vae is not None and hasattr(loaded.vae, "eval"):
-            loaded.vae.eval()
-        return loaded
+    def _attach_targets(self, components: TrainingComponents) -> TrainingTargetSetup:
+        raise NotImplementedError
 
-    def _build_optimizer(self, parameters: List[Any]) -> Any:
+    def _build_objective(
+        self,
+        *,
+        components: TrainingComponents,
+        targets: TrainingTargetSetup,
+        device: Any,
+    ) -> Any:
+        raise NotImplementedError
+
+    def _export_weights(self, *, targets: TrainingTargetSetup) -> Path:
+        raise NotImplementedError
+
+    def _training_metadata(self, result: TrainResult, targets: TrainingTargetSetup) -> Dict[str, Any]:
+        return {
+            "recipe": self.config.recipe_name,
+            "family": self.config.family,
+            "task": self.config.task,
+            "pretrained_model_name_or_path": self.config.pretrained_model_name_or_path,
+            "train_text_encoder": self.config.train_text_encoder,
+            "train_text_encoder_2": self.config.train_text_encoder_2,
+            "adapter_metadata": targets.adapter_metadata,
+            "final_output_path": str(result.output_path),
+            "global_step": result.global_step,
+            "final_loss": result.final_loss,
+            "checkpoints": [str(path) for path in result.checkpoints],
+            "config": self.config.to_dict(),
+        }
+
+    def _trainable_parameters_for_model(self, model: Any) -> List[Any]:
+        if model is None or not hasattr(model, "parameters"):
+            return []
+        return [parameter for parameter in model.parameters() if getattr(parameter, "requires_grad", False)]
+
+    def _resolve_text_encoder_learning_rate(self) -> float:
+        if self.config.text_encoder_learning_rate is not None:
+            return self.config.text_encoder_learning_rate
+        if (
+            self.config.family == "sdxl"
+            and self.config.mixed_precision == "fp16"
+            and self.config.train_text_encoder
+        ):
+            return min(self.config.learning_rate, 1e-5)
+        return self.config.learning_rate
+
+    def _resolve_backbone_learning_rate(self) -> float:
+        if self.config.backbone_learning_rate is not None:
+            return self.config.backbone_learning_rate
+        if (
+            self.config.family == "sdxl"
+            and self.config.mixed_precision == "fp16"
+            and self.config.train_text_encoder
+        ):
+            return min(self.config.learning_rate, 5e-5)
+        return self.config.learning_rate
+
+    def _resolve_text_encoder_2_learning_rate(self) -> float:
+        if self.config.text_encoder_2_learning_rate is not None:
+            return self.config.text_encoder_2_learning_rate
+        if self.config.text_encoder_learning_rate is not None:
+            return self.config.text_encoder_learning_rate
+        if (
+            self.config.family == "sdxl"
+            and self.config.mixed_precision == "fp16"
+            and self.config.train_text_encoder_2
+        ):
+            return min(self.config.learning_rate, 1e-5)
+        return self.config.learning_rate
+
+    def _build_optimizer(self, targets: TrainingTargetSetup) -> Any:
         import torch
 
-        return torch.optim.AdamW(parameters, lr=self.config.learning_rate)
+        param_groups: List[Dict[str, Any]] = []
+
+        backbone_parameters = self._trainable_parameters_for_model(targets.backbone)
+        if backbone_parameters:
+            param_groups.append(
+                {
+                    "params": backbone_parameters,
+                    "lr": self._resolve_backbone_learning_rate(),
+                }
+            )
+
+        if self.config.train_text_encoder:
+            text_encoder_parameters = self._trainable_parameters_for_model(targets.text_encoder)
+            if text_encoder_parameters:
+                param_groups.append(
+                    {
+                        "params": text_encoder_parameters,
+                        "lr": self._resolve_text_encoder_learning_rate(),
+                    }
+                )
+
+        if self.config.train_text_encoder_2:
+            text_encoder_2_parameters = self._trainable_parameters_for_model(targets.text_encoder_2)
+            if text_encoder_2_parameters:
+                param_groups.append(
+                    {
+                        "params": text_encoder_2_parameters,
+                        "lr": self._resolve_text_encoder_2_learning_rate(),
+                    }
+                )
+
+        if not param_groups:
+            raise RuntimeError("No trainable parameter groups were produced for the optimizer")
+
+        return torch.optim.AdamW(param_groups)
 
     def _build_lr_scheduler(self, optimizer: Any) -> Any:
         import torch
@@ -119,19 +224,52 @@ class SD15LoRATrainer:
     def _build_scaler(self) -> Any:
         import torch
 
-        if self.config.mixed_precision == "fp16" and torch.cuda.is_available():
-            return torch.cuda.amp.GradScaler()
+        if self._effective_mixed_precision() == "fp16" and torch.cuda.is_available():
+            return torch.amp.GradScaler("cuda")
         return None
 
     def _autocast_context(self, device: Any) -> Any:
         import contextlib
         import torch
 
-        if self.config.mixed_precision is None or device.type != "cuda":
+        effective_mixed_precision = self._effective_mixed_precision()
+        if effective_mixed_precision is None or device.type != "cuda":
             return contextlib.nullcontext()
 
-        dtype = torch.float16 if self.config.mixed_precision == "fp16" else torch.bfloat16
+        dtype = torch.float16 if effective_mixed_precision == "fp16" else torch.bfloat16
         return torch.autocast(device_type="cuda", dtype=dtype)
+
+    def _enable_gradient_checkpointing(self, module: Any) -> None:
+        if module is None:
+            return
+        if hasattr(module, "enable_gradient_checkpointing"):
+            try:
+                module.enable_gradient_checkpointing()
+                return
+            except Exception:
+                pass
+        if hasattr(module, "gradient_checkpointing_enable"):
+            try:
+                module.gradient_checkpointing_enable()
+            except Exception:
+                pass
+
+    def _enable_attention_slicing(self, module: Any) -> None:
+        if module is None:
+            return
+        if hasattr(module, "set_attention_slice"):
+            try:
+                module.set_attention_slice("auto")
+            except Exception:
+                pass
+
+    def _enable_memory_efficient_training(self, *, targets: TrainingTargetSetup) -> None:
+        self._enable_gradient_checkpointing(targets.backbone)
+        if self.config.train_text_encoder:
+            self._enable_gradient_checkpointing(targets.text_encoder)
+        if self.config.train_text_encoder_2:
+            self._enable_gradient_checkpointing(targets.text_encoder_2)
+        self._enable_attention_slicing(targets.backbone)
 
     def _resume_if_needed(self, *, optimizer: Any, lr_scheduler: Any, scaler: Any) -> int:
         if not self.config.resume_from_checkpoint:
@@ -145,16 +283,9 @@ class SD15LoRATrainer:
         )
 
     def _write_training_metadata(self, result: TrainResult) -> None:
-        metadata = {
-            "recipe": "sd15_lora",
-            "pretrained_model_name_or_path": self.config.pretrained_model_name_or_path,
-            "train_text_encoder": self.config.train_text_encoder,
-            "final_output_path": str(result.output_path),
-            "global_step": result.global_step,
-            "final_loss": result.final_loss,
-            "checkpoints": [str(path) for path in result.checkpoints],
-            "config": self.config.to_dict(),
-        }
+        metadata = getattr(self, "_latest_metadata", None)
+        if metadata is None:
+            metadata = self._training_metadata(result, getattr(self, "_latest_targets"))
         metadata_path = result.output_path.with_suffix(".training.json")
         metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8")
 
@@ -163,21 +294,20 @@ class SD15LoRATrainer:
 
         torch.manual_seed(self.config.seed)
         device = self._resolve_device()
+        effective_mixed_precision = self._effective_mixed_precision()
+        if effective_mixed_precision != self.config.mixed_precision:
+            print(
+                "[yggdrasill][train] promoting runtime mixed precision "
+                f"from {self.config.mixed_precision} to {effective_mixed_precision} "
+                "for SDXL text-encoder LoRA stability"
+            )
         dataloader = self._build_dataloader()
         components = self._load_components(device)
-        targets = attach_lora_targets(
-            unet=components.unet,
-            text_encoder=components.text_encoder,
-            config=self.config,
-        )
-
-        objective = SD15LoRAObjective(
-            components=components,
-            targets=targets,
-            config=self.config,
-            device=device,
-        )
-        optimizer = self._build_optimizer(targets.trainable_parameters)
+        targets = self._attach_targets(components)
+        self._enable_memory_efficient_training(targets=targets)
+        self._latest_targets = targets
+        objective = self._build_objective(components=components, targets=targets, device=device)
+        optimizer = self._build_optimizer(targets)
         lr_scheduler = self._build_lr_scheduler(optimizer)
         scaler = self._build_scaler()
         checkpoints: List[Path] = []
@@ -189,34 +319,78 @@ class SD15LoRATrainer:
         final_loss: Optional[float] = None
 
         grad_accum = self.config.gradient_accumulation_steps
+        micro_step = global_step * grad_accum if global_step > 0 else 0
         should_stop = False
         for _epoch in range(self.config.num_epochs):
             for batch in dataloader:
                 with self._autocast_context(device):
                     loss = objective.compute_loss(batch) / grad_accum
 
+                if not torch.isfinite(loss.detach()).all():
+                    guidance = ""
+                    if (
+                        self.config.family == "sdxl"
+                        and self.config.mixed_precision == "fp16"
+                        and self.config.train_text_encoder
+                    ):
+                        guidance = (
+                            " For SDXL, a safer starting point is "
+                            "train_text_encoder=False, or mixed_precision='bf16'. "
+                            "YggDrasill now auto-upgrades this runtime to bf16 when supported, "
+                            "auto-reduces LR, and enables memory-efficient training for this mode, "
+                            "but some datasets can still destabilize it."
+                        )
+                    raise RuntimeError(
+                        "Non-finite training loss encountered. "
+                        f"family={self.config.family!r} task={self.config.task!r} "
+                        f"mixed_precision={self.config.mixed_precision!r}. "
+                        "Check dataset values and mixed-precision stability."
+                        f"{guidance}"
+                    )
+
                 if scaler is not None:
                     scaler.scale(loss).backward()
                 else:
                     loss.backward()
 
-                step_in_accum = (global_step + 1) % grad_accum == 0
+                step_in_accum = (micro_step + 1) % grad_accum == 0
+                optimizer_ran = False
                 if step_in_accum:
+                    if self.config.max_grad_norm is not None:
+                        if scaler is not None:
+                            scaler.unscale_(optimizer)
+                        torch.nn.utils.clip_grad_norm_(
+                            targets.trainable_parameters,
+                            self.config.max_grad_norm,
+                        )
                     if scaler is not None:
+                        scale_before = scaler.get_scale()
                         scaler.step(optimizer)
                         scaler.update()
+                        optimizer_ran = scaler.get_scale() >= scale_before
                     else:
                         optimizer.step()
+                        optimizer_ran = True
                     optimizer.zero_grad(set_to_none=True)
-                    lr_scheduler.step()
+                    if optimizer_ran:
+                        lr_scheduler.step()
+                        global_step += 1
 
-                global_step += 1
+                micro_step += 1
                 final_loss = float(loss.detach().item() * grad_accum)
 
-                if self.config.logging_steps > 0 and global_step % self.config.logging_steps == 0:
+                if (
+                    optimizer_ran
+                    and self.config.logging_steps > 0
+                    and global_step % self.config.logging_steps == 0
+                ):
                     print(f"[yggdrasill][train] step={global_step} loss={final_loss:.6f}")
 
-                if self.config.checkpoint_every_n_steps > 0 and global_step % self.config.checkpoint_every_n_steps == 0:
+                if (
+                    optimizer_ran
+                    and self.config.checkpoint_every_n_steps > 0
+                    and global_step % self.config.checkpoint_every_n_steps == 0
+                ):
                     checkpoint_dir = self.config.output_dir_path / f"checkpoint-{global_step}"
                     checkpoints.append(
                         save_training_state(
@@ -229,28 +403,84 @@ class SD15LoRATrainer:
                         )
                     )
 
-                if self.config.max_train_steps is not None and global_step >= self.config.max_train_steps:
+                if (
+                    optimizer_ran
+                    and self.config.max_train_steps is not None
+                    and global_step >= self.config.max_train_steps
+                ):
                     should_stop = True
                     break
             if should_stop:
                 break
 
-        output_path = export_sd15_lora_weights(
-            output_path=self.config.final_output_path,
-            unet=targets.unet,
-            text_encoder=targets.text_encoder,
-            include_text_encoder=self.config.train_text_encoder,
-            metadata={
-                "recipe": "sd15_lora",
-                "adapter_metadata": targets.adapter_metadata,
-                "config": self.config.to_dict(),
-            },
-        )
+        output_path = self._export_weights(targets=targets)
         result = TrainResult(
             output_path=output_path,
             global_step=global_step,
             checkpoints=checkpoints,
             final_loss=final_loss,
         )
+        self._latest_metadata = self._training_metadata(result, targets)
         self._write_training_metadata(result)
         return result
+
+
+class DiffusionLoRATrainer(BaseLoRATrainer):
+    """Generic trainer dispatching through the training family registry."""
+
+    def __init__(self, config: TrainingConfig, *, components: Optional[TrainingComponents] = None) -> None:
+        super().__init__(config, components=components)
+        self._family_spec = get_training_family_spec(self.config.family)
+
+    def _load_components(self, device: Any) -> TrainingComponents:
+        if self._components_override is not None:
+            return self._components_override
+        return load_training_components(
+            config=self.config,
+            device=device,
+            torch_dtype=self._resolve_training_dtype(),
+        )
+
+    def _attach_targets(self, components: TrainingComponents) -> TrainingTargetSetup:
+        return self._family_spec.target_resolver(components, self.config)
+
+    def _build_objective(
+        self,
+        *,
+        components: TrainingComponents,
+        targets: TrainingTargetSetup,
+        device: Any,
+    ) -> Any:
+        objective_cls = self._family_spec.objective_factories[self.config.task]
+        return objective_cls(components=components, targets=targets, config=self.config, device=device)
+
+    def _export_weights(self, *, targets: TrainingTargetSetup) -> Path:
+        return export_lora_weights(
+            output_path=self.config.final_output_path,
+            family=self.config.family,
+            backbone=targets.backbone,
+            pipeline_class_name=self._family_spec.pipeline_class_name,
+            backbone_save_arg_name=self._family_spec.backbone_save_arg_name,
+            text_encoder=targets.text_encoder,
+            text_encoder_2=targets.text_encoder_2,
+            include_text_encoder=self.config.train_text_encoder,
+            include_text_encoder_2=self.config.train_text_encoder_2,
+            metadata={
+                "recipe": self.config.recipe_name,
+                "backbone_key": targets.backbone_key,
+                "adapter_metadata": targets.adapter_metadata,
+                "config": self.config.to_dict(),
+            },
+        )
+
+
+class SD15LoRATrainer(DiffusionLoRATrainer):
+    """Trainer wrapper for SD1.5 LoRA recipes."""
+
+
+class SDXLLoRATrainer(DiffusionLoRATrainer):
+    """Trainer wrapper for SDXL LoRA recipes."""
+
+
+class FluxLoRATrainer(DiffusionLoRATrainer):
+    """Trainer wrapper for FLUX LoRA recipes."""

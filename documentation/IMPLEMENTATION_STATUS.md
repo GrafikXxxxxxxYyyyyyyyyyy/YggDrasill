@@ -38,7 +38,7 @@
 В репозитории присутствуют рабочие доменные слои:
 
 - diffusion / diffusers integration;
-- минимальный diffusion training subsystem для `SD1.5 LoRA`;
+- generic diffusers-family diffusion training subsystem с proof points для `SD1.5 LoRA`, `SDXL LoRA`, `FLUX LoRA`;
 - набор diffusion builders / presets / templates;
 - базовые сценарии для agent- и LLM-подобных графов через общий hypergraph engine.
 
@@ -68,7 +68,16 @@ Diffusion-слой функционален, но остаётся **экспе�
 - API ещё дорабатывается;
 - поддержка семейств и сценариев не равна всему объёму ambition-документов;
 - ergonomics и high-level shortcuts допускают изменение при очистке архитектуры.
-- training surface существует, но пока стабилизирован только как узкий `SD1.5 LoRA` recipe с отдельным trainer path, а не как общий graph-native diffusion training runtime.
+- training surface существует как generic registry-driven trainer path, а не как общий graph-native diffusion training runtime.
+- practically supported training recipes:
+  - `SD1.5`: `text2img`, `img2img`, `inpaint`
+  - `SDXL`: `text2img`, `img2img`, `inpaint`, `refiner`
+  - `FLUX`: `text2img` proof point через generic training core
+- public surface now includes:
+  - `train_diffusion_lora(config=...)`
+  - compatibility wrappers `train_sd15_lora(...)`, `train_sdxl_lora(...)`
+  - proof-point wrapper `train_flux_lora(...)`
+- по-прежнему не гарантируются `VAE training`, `ControlNet training` и distributed training semantics.
 
 ### 3.2. Agent semantics
 
