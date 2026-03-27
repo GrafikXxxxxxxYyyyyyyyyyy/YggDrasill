@@ -70,6 +70,10 @@
 
 Эти пять компонентов присутствуют на всех уровнях, где применяется движок; на уровнях стадии, мира и вселенной «узлом» является целая стадия, мир и т.д., а по рёбрам течёт state или обмен (payload), но принцип тот же: план → буферы → обход → вызов run.
 
+### 4.1 Обучение (training step)
+
+Для графов с `metadata['training']` используется отдельный контракт **training plan** (`yggdrasill.training.plan.build_training_plan`): порядок forward-узлов до узла потерь, затем фаза backward по скаляру потерь (вне узлов), затем цепочка post-backward helper-узлов (optimizer, LR scheduler и т.д.). Публичные точки: `run_training_step`, `fit_training_graph`, `resume_training` (реэкспорт в `yggdrasill.engine`).
+
 ---
 
 ## 5. Применение движка по уровням

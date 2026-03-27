@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Set, Tuple
 
-from yggdrasill.engine.edge import Edge
+from yggdrasill.foundation.edge import Edge
 from yggdrasill.foundation.node import AbstractGraphNode
 from yggdrasill.foundation.port import PortDirection
 from yggdrasill.task_nodes.role_rules import suggest_edges_for_new_node

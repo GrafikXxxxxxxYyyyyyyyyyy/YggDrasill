@@ -2,7 +2,7 @@
 
 __version__ = "0.1.0"
 
-from yggdrasill.engine.structure import Hypergraph  # noqa: F401
+from yggdrasill.hypergraph.structure import Hypergraph  # noqa: F401 — avoid loading engine (training/torch) on bare import
 
 __all__ = ["__version__", "Hypergraph", "DiffusionGraphBuilder"]
 

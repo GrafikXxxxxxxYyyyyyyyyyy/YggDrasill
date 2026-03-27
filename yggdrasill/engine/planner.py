@@ -15,6 +15,9 @@ def build_plan(
 ) -> List[Tuple[str, Any]]:
     """Build an execution plan for the given structure.
 
+    Training-phase plans (forward / loss / backward / optim) are separate:
+    see :func:`yggdrasill.training.plan.build_training_plan`.
+
     Returns a list of steps:
       ("node", node_id)               -- execute one node once
       ("cycle", (rep, frozenset(ids))) -- execute nodes K times (K from options at run-time)

@@ -67,12 +67,15 @@ Diffusion-слой является **opt-in addon** над ядром:
 
 - `VAE training`
 - `ControlNet training`
-- generic graph-native diffusion training orchestration
 - distributed / multi-host training surface
+
+**Graph-native training loop:** шаг обучения LoRA выполняется через `yggdrasill.training.run_training_step` /
+`build_diffusion_lora_training_hypergraph` (forward до loss-узла → backward в исполнителе → helper-узлы optim/sched).
+Чекпоинты могут включать `training_graph.json` (подпись плана) рядом с `trainer_state.pt`.
 
 Важно:
 
-- training subsystem не использует существующий inference-cycle как основной train-loop;
+- training subsystem не использует inference denoising-cycle как train-loop; отдельный training-гиперграф описывает loss + пост-backward фазу;
 - `run_diffusion(...)` и builders остаются inference-oriented слоем;
 - training-export совместим с текущей LoRA inference-loading surface для `sd15`, `sdxl` и proof-point `flux`.
 

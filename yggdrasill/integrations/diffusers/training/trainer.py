@@ -7,7 +7,6 @@ from typing import Any, Dict, List, Optional
 
 from yggdrasill.integrations.diffusers.training.checkpointing import (
     export_lora_weights,
-    load_training_state,
     save_training_state,
 )
 from yggdrasill.integrations.diffusers.training.config import TrainingConfig
@@ -114,8 +113,14 @@ class BaseLoRATrainer:
     def _export_weights(self, *, targets: TrainingTargetSetup) -> Path:
         raise NotImplementedError
 
-    def _training_metadata(self, result: TrainResult, targets: TrainingTargetSetup) -> Dict[str, Any]:
-        return {
+    def _training_metadata(
+        self,
+        result: TrainResult,
+        targets: TrainingTargetSetup,
+        *,
+        training_plan_signature: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        meta: Dict[str, Any] = {
             "recipe": self.config.recipe_name,
             "family": self.config.family,
             "task": self.config.task,
@@ -128,7 +133,11 @@ class BaseLoRATrainer:
             "final_loss": result.final_loss,
             "checkpoints": [str(path) for path in result.checkpoints],
             "config": self.config.to_dict(),
+            "training_execution": "hypergraph",
         }
+        if training_plan_signature is not None:
+            meta["training_plan_signature"] = training_plan_signature
+        return meta
 
     def _trainable_parameters_for_model(self, model: Any) -> List[Any]:
         if model is None or not hasattr(model, "parameters"):
@@ -271,17 +280,6 @@ class BaseLoRATrainer:
             self._enable_gradient_checkpointing(targets.text_encoder_2)
         self._enable_attention_slicing(targets.backbone)
 
-    def _resume_if_needed(self, *, optimizer: Any, lr_scheduler: Any, scaler: Any) -> int:
-        if not self.config.resume_from_checkpoint:
-            return 0
-        return load_training_state(
-            self.config.resume_from_checkpoint,
-            optimizer=optimizer,
-            lr_scheduler=lr_scheduler,
-            scaler=scaler,
-            map_location="cpu",
-        )
-
     def _write_training_metadata(self, result: TrainResult) -> None:
         metadata = getattr(self, "_latest_metadata", None)
         if metadata is None:
@@ -291,6 +289,18 @@ class BaseLoRATrainer:
 
     def train(self) -> TrainResult:
         import torch
+
+        import yggdrasill.training.blocks  # noqa: F401 — register training/* and outer_module/*
+
+        from yggdrasill.integrations.diffusers.training.training_hypergraph import (
+            build_diffusion_lora_training_hypergraph,
+        )
+        from yggdrasill.training.context import TrainingStepContext
+        from yggdrasill.training.executor import (
+            resume_training as resume_training_graph,
+            run_training_step,
+        )
+        from yggdrasill.training.plan import training_plan_signature
 
         torch.manual_seed(self.config.seed)
         device = self._resolve_device()
@@ -310,84 +320,80 @@ class BaseLoRATrainer:
         optimizer = self._build_optimizer(targets)
         lr_scheduler = self._build_lr_scheduler(optimizer)
         scaler = self._build_scaler()
-        checkpoints: List[Path] = []
-        global_step = self._resume_if_needed(
+
+        graph = build_diffusion_lora_training_hypergraph(objective=objective)
+        plan_sig = training_plan_signature(graph)
+        ctx = TrainingStepContext(
             optimizer=optimizer,
             lr_scheduler=lr_scheduler,
+            trainable_parameters=targets.trainable_parameters,
+            grad_accumulation_steps=self.config.gradient_accumulation_steps,
+            max_grad_norm=self.config.max_grad_norm,
             scaler=scaler,
+            micro_step=0,
+            global_step=0,
+            autocast_cm=lambda: self._autocast_context(device),
         )
-        final_loss: Optional[float] = None
+        if self.config.resume_from_checkpoint:
+            resume_training_graph(
+                graph,
+                self.config.resume_from_checkpoint,
+                ctx,
+                map_location="cpu",
+            )
 
-        grad_accum = self.config.gradient_accumulation_steps
-        micro_step = global_step * grad_accum if global_step > 0 else 0
+        checkpoints: List[Path] = []
+        global_step = ctx.global_step
+        final_loss: Optional[float] = None
         should_stop = False
+        graph_validated = False
+
         for _epoch in range(self.config.num_epochs):
             for batch in dataloader:
-                with self._autocast_context(device):
-                    loss = objective.compute_loss(batch) / grad_accum
-
-                if not torch.isfinite(loss.detach()).all():
-                    guidance = ""
-                    if (
-                        self.config.family == "sdxl"
-                        and self.config.mixed_precision == "fp16"
-                        and self.config.train_text_encoder
-                    ):
-                        guidance = (
-                            " For SDXL, a safer starting point is "
-                            "train_text_encoder=False, or mixed_precision='bf16'. "
-                            "YggDrasill now auto-upgrades this runtime to bf16 when supported, "
-                            "auto-reduces LR, and enables memory-efficient training for this mode, "
-                            "but some datasets can still destabilize it."
-                        )
-                    raise RuntimeError(
-                        "Non-finite training loss encountered. "
-                        f"family={self.config.family!r} task={self.config.task!r} "
-                        f"mixed_precision={self.config.mixed_precision!r}. "
-                        "Check dataset values and mixed-precision stability."
-                        f"{guidance}"
+                try:
+                    outcome = run_training_step(
+                        graph,
+                        {"batch": batch},
+                        ctx,
+                        validate_before=not graph_validated,
                     )
-
-                if scaler is not None:
-                    scaler.scale(loss).backward()
-                else:
-                    loss.backward()
-
-                step_in_accum = (micro_step + 1) % grad_accum == 0
-                optimizer_ran = False
-                if step_in_accum:
-                    if self.config.max_grad_norm is not None:
-                        if scaler is not None:
-                            scaler.unscale_(optimizer)
-                        torch.nn.utils.clip_grad_norm_(
-                            targets.trainable_parameters,
-                            self.config.max_grad_norm,
-                        )
-                    if scaler is not None:
-                        scale_before = scaler.get_scale()
-                        scaler.step(optimizer)
-                        scaler.update()
-                        optimizer_ran = scaler.get_scale() >= scale_before
-                    else:
-                        optimizer.step()
-                        optimizer_ran = True
-                    optimizer.zero_grad(set_to_none=True)
-                    if optimizer_ran:
-                        lr_scheduler.step()
-                        global_step += 1
-
-                micro_step += 1
-                final_loss = float(loss.detach().item() * grad_accum)
+                except RuntimeError as exc:
+                    msg = str(exc)
+                    if "Non-finite" in msg:
+                        guidance = ""
+                        if (
+                            self.config.family == "sdxl"
+                            and self.config.mixed_precision == "fp16"
+                            and self.config.train_text_encoder
+                        ):
+                            guidance = (
+                                " For SDXL, a safer starting point is "
+                                "train_text_encoder=False, or mixed_precision='bf16'. "
+                                "YggDrasill now auto-upgrades this runtime to bf16 when supported, "
+                                "auto-reduces LR, and enables memory-efficient training for this mode, "
+                                "but some datasets can still destabilize it."
+                            )
+                        raise RuntimeError(
+                            "Non-finite training loss encountered. "
+                            f"family={self.config.family!r} task={self.config.task!r} "
+                            f"mixed_precision={self.config.mixed_precision!r}. "
+                            "Check dataset values and mixed-precision stability."
+                            f"{guidance}"
+                        ) from exc
+                    raise
+                graph_validated = True
+                global_step = outcome.global_step
+                final_loss = outcome.loss
 
                 if (
-                    optimizer_ran
+                    outcome.optimizer_ran
                     and self.config.logging_steps > 0
                     and global_step % self.config.logging_steps == 0
                 ):
                     print(f"[yggdrasill][train] step={global_step} loss={final_loss:.6f}")
 
                 if (
-                    optimizer_ran
+                    outcome.optimizer_ran
                     and self.config.checkpoint_every_n_steps > 0
                     and global_step % self.config.checkpoint_every_n_steps == 0
                 ):
@@ -400,11 +406,12 @@ class BaseLoRATrainer:
                             lr_scheduler=lr_scheduler,
                             scaler=scaler,
                             config=self.config,
+                            training_plan_signature=plan_sig,
                         )
                     )
 
                 if (
-                    optimizer_ran
+                    outcome.optimizer_ran
                     and self.config.max_train_steps is not None
                     and global_step >= self.config.max_train_steps
                 ):
@@ -420,7 +427,9 @@ class BaseLoRATrainer:
             checkpoints=checkpoints,
             final_loss=final_loss,
         )
-        self._latest_metadata = self._training_metadata(result, targets)
+        self._latest_metadata = self._training_metadata(
+            result, targets, training_plan_signature=plan_sig,
+        )
         self._write_training_metadata(result)
         return result
 

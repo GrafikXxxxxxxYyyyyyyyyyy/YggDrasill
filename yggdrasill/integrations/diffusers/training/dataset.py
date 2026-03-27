@@ -44,14 +44,6 @@ def _read_caption_txt(image_path: Path) -> Optional[str]:
     return text or None
 
 
-def _extract_row_path(row: Dict[str, Any], image_column: str) -> str:
-    for key in (image_column, "image", "image_path", "file_name", "path"):
-        value = row.get(key)
-        if value:
-            return str(value)
-    raise ValueError("Manifest row does not contain an image path field")
-
-
 def _extract_row_caption(row: Dict[str, Any], caption_column: str) -> str:
     for key in (caption_column, "caption", "text", "prompt"):
         value = row.get(key)

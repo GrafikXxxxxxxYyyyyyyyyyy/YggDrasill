@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Set
 
-from yggdrasill.engine.edge import Edge
+from yggdrasill.foundation.edge import Edge
 from yggdrasill.foundation.node import AbstractGraphNode
 from yggdrasill.foundation.port import PortDirection
 

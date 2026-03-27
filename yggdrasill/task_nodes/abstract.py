@@ -166,7 +166,11 @@ class AbstractOuterModule(_TaskNodeBase):
 # ---------------------------------------------------------------------------
 
 class AbstractHelper(_TaskNodeBase):
-    """Utility node (RAG, file I/O, API calls, etc.)."""
+    """Utility node (RAG, file I/O, API calls, etc.).
+
+    Training also maps here without new roles: optimiser steps, LR schedulers,
+    grad-scaler orchestration, checkpoint hooks (see ``training/*`` block types).
+    """
 
     _role = Role.HELPER
 

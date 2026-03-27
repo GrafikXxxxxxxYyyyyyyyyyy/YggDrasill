@@ -3,6 +3,10 @@
 Nodes are Hypergraph instances.  Edges connect their exposed outputs
 to other hypergraphs' exposed inputs.  The same engine (Validator,
 Planner, Executor) runs the workflow without any changes.
+
+Training checkpoints (``trainer_state.pt`` / ``training_graph.json`` under
+``integrations.diffusers.training``) are a separate lifecycle from
+workflow-level serialization here.
 """
 from __future__ import annotations
 

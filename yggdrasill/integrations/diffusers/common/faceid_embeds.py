@@ -166,8 +166,3 @@ def prepare_faceid_image_embeds(
     if device is not None:
         t = t.to(device=device)
     return t
-
-
-# Backward/semantic aliases (mirrors diffusers naming intent).
-prepare_face_embeddings = prepare_faceid_image_embeds
-

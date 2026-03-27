@@ -15,6 +15,8 @@ class EdgeBuffers:
     def __init__(self) -> None:
         self._data: Dict[Tuple[str, str], Any] = {}
         self._multi: Dict[Tuple[str, str], List[Tuple[Optional[str], Any]]] = {}
+        #: Optional scratch for training-step executors (not part of port buffers / serialization).
+        self.scratch: Dict[str, Any] = {}
 
     # --- single-value operations ---
 

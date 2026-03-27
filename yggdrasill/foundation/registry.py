@@ -62,6 +62,7 @@ class BlockRegistry:
             "image_encoder",
             "feature_extractor",
             "transformer",
+            "objective",
         )
         rest = {k: v for k, v in config.items() if k not in _meta_keys}
         node_id = rest.pop("node_id", None)

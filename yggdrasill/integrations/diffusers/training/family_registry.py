@@ -1,11 +1,15 @@
-"""Training-side family registry for diffusion LoRA recipes."""
+"""Training-side family registry for diffusion LoRA recipes.
+
+Objectives and targets from this registry feed the hypergraph assembled by
+:func:`~yggdrasill.integrations.diffusers.training.training_hypergraph.build_diffusion_lora_training_hypergraph`
+(used from :meth:`~yggdrasill.integrations.diffusers.training.trainer.BaseLoRATrainer.train`).
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Optional
 
 from yggdrasill.integrations.diffusers.components import load_components_from_pretrained
-from yggdrasill.integrations.diffusers.family_registry import get_family_spec as get_inference_family_spec
 from yggdrasill.integrations.diffusers.model_store import ModelStore
 from yggdrasill.integrations.diffusers.training.config import TrainingConfig
 from yggdrasill.integrations.diffusers.training.flux_lora_targets import attach_flux_lora_targets

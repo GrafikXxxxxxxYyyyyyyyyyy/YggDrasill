@@ -16,6 +16,7 @@ def save_training_state(
     lr_scheduler: Any,
     scaler: Any,
     config: TrainingConfig,
+    training_plan_signature: Optional[str] = None,
 ) -> Path:
     import torch
 
@@ -35,6 +36,19 @@ def save_training_state(
         json.dumps(config.to_dict(), indent=2, sort_keys=True),
         encoding="utf-8",
     )
+    if training_plan_signature is not None:
+        (path / "training_graph.json").write_text(
+            json.dumps(
+                {
+                    "kind": "yggdrasill_training_graph",
+                    "global_step": global_step,
+                    "training_plan_signature": training_plan_signature,
+                },
+                indent=2,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
     return path
 
 

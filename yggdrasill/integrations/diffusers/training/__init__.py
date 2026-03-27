@@ -10,6 +10,9 @@ from yggdrasill.integrations.diffusers.training.trainer import (
     SD15LoRATrainer,
     SDXLLoRATrainer,
 )
+from yggdrasill.integrations.diffusers.training.training_hypergraph import (
+    build_diffusion_lora_training_hypergraph,
+)
 from yggdrasill.integrations.diffusers.training.types import TrainResult, TrainingComponents, TrainingTargetSetup
 
 
@@ -264,6 +267,7 @@ __all__ = [
     "TrainResult",
     "TrainingComponents",
     "TrainingTargetSetup",
+    "build_diffusion_lora_training_hypergraph",
     "DiffusionLoRATrainer",
     "SD15LoRATrainer",
     "SDXLLoRATrainer",

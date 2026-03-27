@@ -120,6 +120,11 @@ class AbstractBaseBlock(ABC):
         """Yield trainable parameters (empty by default; override for GPU-backed blocks)."""
         return iter(())
 
+    @property
+    def supports_backward(self) -> bool:
+        """Whether this block participates in autograd when training (loss flows through it)."""
+        return False
+
     def get_config(self) -> Dict[str, Any]:
         """Return a JSON-serialisable config sufficient to recreate this block via the registry.
 

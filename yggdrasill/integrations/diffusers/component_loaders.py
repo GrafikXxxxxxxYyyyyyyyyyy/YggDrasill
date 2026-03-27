@@ -101,24 +101,3 @@ def get_loader(family: str, load_key: str) -> Optional[Tuple[Type[Any], str]]:
     """Return (cls, subfolder) for (family, load_key), or None."""
     _ensure_registry()
     return _COMPONENT_REGISTRY.get((family, load_key))
-
-
-def get_block_type_load_keys(block_type: str) -> list:
-    """Map block_type (e.g. sd15/unet) to load_keys (e.g. [unet])."""
-    if "/" not in block_type:
-        return []
-    _family, suffix = block_type.split("/", 1)
-    key_map: Dict[str, list] = {
-        "unet": ["unet"],
-        "transformer": ["transformer"],
-        "tokenizer": ["tokenizer"],
-        "tokenizer_2": ["tokenizer_2"],
-        "prompt_encoder": ["text_encoder"],
-        "text_encoder": ["text_encoder"],
-        "text_encoder_2": ["text_encoder_2"],
-        "scheduler_setup": ["scheduler"],
-        "scheduler_step": ["scheduler"],
-        "vae_encode": ["vae"],
-        "vae_decode": ["vae"],
-    }
-    return key_map.get(suffix, [])

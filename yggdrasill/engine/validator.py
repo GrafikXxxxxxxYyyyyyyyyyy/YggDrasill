@@ -105,7 +105,48 @@ def validate(structure: Any) -> ValidationResult:
 
     _check_cycles(structure, result)
 
+    _validate_training_graph_metadata(structure, result)
+
     return result
+
+
+def _validate_training_graph_metadata(structure: Any, result: ValidationResult) -> None:
+    meta = getattr(structure, "metadata", None) or {}
+    spec = meta.get("training")
+    if spec is None:
+        return
+    if not isinstance(spec, dict):
+        result.errors.append("metadata['training'] must be a dict when present")
+        return
+    loss_nid = spec.get("loss_node_id")
+    if not loss_nid or not isinstance(loss_nid, str):
+        result.errors.append("metadata['training']['loss_node_id'] must be a non-empty string")
+        return
+    if loss_nid not in structure.node_ids:
+        result.errors.append(
+            f"metadata['training']['loss_node_id'] {loss_nid!r} is not a graph node"
+        )
+    post = spec.get("post_backward_node_ids") or ()
+    if not isinstance(post, (list, tuple)):
+        result.errors.append("metadata['training']['post_backward_node_ids'] must be a list/tuple")
+        return
+    for nid in post:
+        if str(nid) not in structure.node_ids:
+            result.errors.append(
+                f"metadata['training']['post_backward_node_ids'] entry {nid!r} is not a graph node"
+            )
+    fwd = spec.get("forward_node_ids")
+    if fwd is not None:
+        if not isinstance(fwd, (list, tuple)) or not fwd:
+            result.errors.append("metadata['training']['forward_node_ids'] must be a non-empty list")
+            return
+        for nid in fwd:
+            if str(nid) not in structure.node_ids:
+                result.errors.append(
+                    f"metadata['training']['forward_node_ids'] entry {nid!r} is not a graph node"
+                )
+        if str(fwd[-1]) != str(loss_nid):
+            result.errors.append("metadata['training']['forward_node_ids'] must end with loss_node_id")
 
 
 def _check_cycles(structure: Any, result: ValidationResult) -> None:
@@ -149,9 +190,9 @@ def _find_port(node: Any, port_name: str, direction: PortDirection):
 
     # For workflow-level nodes (Hypergraph objects), check spec
     if direction == PortDirection.OUT:
-        spec = getattr(node, "get_output_spec", lambda **kw: [])(include_dtype=True)
+        spec = getattr(node, "get_output_spec", lambda **_k: [])(include_dtype=True)
     else:
-        spec = getattr(node, "get_input_spec", lambda **kw: [])(include_dtype=True)
+        spec = getattr(node, "get_input_spec", lambda **_k: [])(include_dtype=True)
 
     for entry in spec:
         key = entry.get("port_name") or entry.get("name", "")
