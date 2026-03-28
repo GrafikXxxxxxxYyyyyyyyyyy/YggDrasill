@@ -319,7 +319,7 @@ Injector **встроен в Backbone** по конфигурации (ссыл�
 
 ### 9.6 Примеры реализаций
 
-**Диффузия:** VAE (image ↔ latent); токенизатор текста (text → token_ids); **обучение:** узел потерь как Converter (`converter/diffusion_lora_loss`, `training/mse_loss` — батч или пары тензоров → скаляр `loss` для backward в исполнителе). **LLM:** BPE/SentencePiece (text ↔ token_ids); слой эмбеддингов (token_ids → embeddings). **Агенты:** модуль наблюдение → вектор/граф; модуль действие → команда/сообщение для среды.
+**Диффузия:** VAE (image ↔ latent); токенизатор текста (text → token_ids); **обучение:** узлы потерь (`training/diffusion_lora_loss`, `training/mse_loss` — батч или пары тензоров → скаляр `loss` для backward в исполнителе; роль в каноне — Converter). **LLM:** BPE/SentencePiece (text ↔ token_ids); слой эмбеддингов (token_ids → embeddings). **Агенты:** модуль наблюдение → вектор/граф; модуль действие → команда/сообщение для среды.
 
 ---
 

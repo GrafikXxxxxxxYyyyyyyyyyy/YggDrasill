@@ -68,15 +68,12 @@ Diffusion-слой функционален, но остаётся **экспе�
 - API ещё дорабатывается;
 - поддержка семейств и сценариев не равна всему объёму ambition-документов;
 - ergonomics и high-level shortcuts допускают изменение при очистке архитектуры.
-- training surface существует как generic registry-driven trainer path, а не как общий graph-native diffusion training runtime.
+- training: graph-native план в `engine.planner` (`build_training_plan` рядом с `build_plan`); полный цикл — `engine.run(..., run_mode="train")`; diffusion UX — `DiffusionGraphBuilder.from_template(..., task="train")`, `list_training_templates`.
 - practically supported training recipes:
   - `SD1.5`: `text2img`, `img2img`, `inpaint`
   - `SDXL`: `text2img`, `img2img`, `inpaint`, `refiner`
   - `FLUX`: `text2img` proof point через generic training core
-- public surface now includes:
-  - `train_diffusion_lora(config=...)`
-  - compatibility wrappers `train_sd15_lora(...)`, `train_sdxl_lora(...)`
-  - proof-point wrapper `train_flux_lora(...)`
+- legacy convenience (модуль `integrations.diffusers.training`, не в `__all__`): `train_diffusion_lora`, `train_sd15_lora`, `train_sdxl_lora`, `train_flux_lora`
 - по-прежнему не гарантируются `VAE training`, `ControlNet training` и distributed training semantics.
 
 ### 3.2. Agent semantics

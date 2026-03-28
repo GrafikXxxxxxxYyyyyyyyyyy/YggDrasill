@@ -51,10 +51,79 @@ class RunResult:
     run_data: Optional[Dict[str, Dict[str, Any]]] = None
 
 
+def _run_training_graph_full(
+    structure: Any,
+    inputs: Dict[str, Any],
+    *,
+    validate_before: bool,
+    dry_run: bool,
+) -> Dict[str, Any]:
+    """Full training loop inside one ``run`` call (``run_mode='train'``)."""
+    from yggdrasill.training.executor import run_training_step
+
+    inp = dict(inputs)
+    ctx = inp.pop("training_step_context", None)
+    if ctx is None:
+        raise ValueError(
+            "run_mode='train' requires inputs['training_step_context'] "
+            "(a TrainingStepContext instance)."
+        )
+    batch_iter = inp.pop("training_batch_iter", None)
+    dataloader = inp.pop("training_dataloader", None)
+    num_epochs = int(inp.pop("num_epochs", 1))
+    max_train_steps = inp.pop("max_train_steps", None)
+    batch_key = str(inp.pop("training_batch_input_key", "batch"))
+    batch_end = inp.pop("training_batch_end", None)
+
+    step_base = {k: v for k, v in inp.items() if not str(k).startswith("training_")}
+
+    def _one_batch(batch: Any, *, vb: bool) -> None:
+        step_in = dict(step_base)
+        step_in[batch_key] = batch
+        outcome = run_training_step(structure, step_in, ctx, validate_before=vb, dry_run=dry_run)
+        if batch_end is not None:
+            batch_end(ctx, outcome)
+
+    first = True
+    should_stop = False
+    if batch_iter is not None:
+        for batch in batch_iter:
+            if should_stop:
+                break
+            _one_batch(batch, vb=validate_before and first)
+            first = False
+            if max_train_steps is not None and ctx.global_step >= int(max_train_steps):
+                should_stop = True
+    elif dataloader is not None:
+        for _epoch in range(max(1, num_epochs)):
+            if should_stop:
+                break
+            for batch in dataloader:
+                if should_stop:
+                    break
+                _one_batch(batch, vb=validate_before and first)
+                first = False
+                if max_train_steps is not None and ctx.global_step >= int(max_train_steps):
+                    should_stop = True
+    else:
+        raise ValueError(
+            "run_mode='train' requires inputs['training_batch_iter'] or "
+            "inputs['training_dataloader']."
+        )
+
+    return {
+        "training_step_context": ctx,
+        "global_step": ctx.global_step,
+        "micro_step": ctx.micro_step,
+        "last_loss": ctx.last_loss,
+    }
+
+
 def run(
     structure: Any,
     inputs: Dict[str, Any],
     *,
+    run_mode: str = "inference",
     training: bool = False,
     num_loop_steps: Optional[int] = None,
     device: Optional[Any] = None,
@@ -72,10 +141,31 @@ def run(
 ) -> Dict[str, Any] | RunResult:
     """Execute the structure (Hypergraph, Workflow, etc.) and return outputs.
 
+    *run_mode*:
+      - ``\"inference\"`` (default): single forward pass using :func:`build_plan`.
+      - ``\"train\"``: full training loop (epochs/batches) using
+        ``metadata['training']``; requires ``inputs['training_step_context']`` and
+        ``inputs['training_batch_iter']`` or ``inputs['training_dataloader']``.
+        Optional: ``num_epochs``, ``max_train_steps``, ``training_batch_input_key``.
+
     Returns a plain ``dict`` unless *interrupt_on* fires, in which case a
     :class:`RunResult` is returned with ``suspended=True`` and a *run_data*
     snapshot that can be fed back to resume execution.
     """
+    if run_mode not in ("inference", "train"):
+        raise ValueError(f"run_mode must be 'inference' or 'train', got {run_mode!r}")
+    if run_mode == "train":
+        if interrupt_on:
+            raise ValueError("interrupt_on is not supported with run_mode='train'")
+        if destination_node_id is not None or dirty_node_ids is not None:
+            raise ValueError("partial run options are not supported with run_mode='train'")
+        return _run_training_graph_full(
+            structure,
+            dict(inputs),
+            validate_before=validate_before,
+            dry_run=dry_run,
+        )
+
     if validate_before:
         result = validate(structure)
         if not result.valid:
@@ -160,6 +250,7 @@ def run_stream(
     structure: Any,
     inputs: Dict[str, Any],
     *,
+    run_mode: str = "inference",
     training: bool = False,
     num_loop_steps: Optional[int] = None,
     device: Optional[Any] = None,
@@ -179,6 +270,9 @@ def run_stream(
     Yields intermediate output snapshots after each executed step.
     The **last** yielded value equals the normal ``run()`` return.
     """
+    if run_mode != "inference":
+        raise ValueError("run_stream only supports run_mode='inference'")
+
     if validate_before:
         result = validate(structure)
         if not result.valid:

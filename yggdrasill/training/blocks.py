@@ -1,4 +1,4 @@
-"""Training task nodes mapped to existing roles (converter loss, helper optim, etc.)."""
+"""Training task nodes (loss, optim step, lr schedule, checkpoint hook, dataloader)."""
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
@@ -14,7 +14,7 @@ from yggdrasill.task_nodes.abstract import AbstractConverter, AbstractHelper, Ab
 
 @register_block("outer_module/training_dataloader")
 class OuterModuleTrainingDataLoader(AbstractOuterModule):
-    """Outer module role: supplies the next batch each forward (iterates a PyTorch DataLoader)."""
+    """Supplies the next batch each forward (iterates a PyTorch DataLoader)."""
 
     @property
     def block_type(self) -> str:
@@ -46,8 +46,8 @@ class OuterModuleTrainingDataLoader(AbstractOuterModule):
 
 
 @register_block("training/mse_loss")
-class TrainingMSELossConverter(AbstractConverter):
-    """Converter role: (pred, target) -> scalar loss."""
+class TrainingMSELoss(AbstractConverter):
+    """(pred, target) -> scalar MSE loss."""
 
     @property
     def block_type(self) -> str:
@@ -71,8 +71,8 @@ class TrainingMSELossConverter(AbstractConverter):
 
 
 @register_block("training/toy_linear")
-class TrainingToyLinearHelper(AbstractHelper):
-    """Tiny trainable linear map for engine tests (helper role: emits pred/target)."""
+class TrainingToyLinear(AbstractHelper):
+    """Tiny trainable linear map for engine tests (emits pred/target)."""
 
     @property
     def block_type(self) -> str:
@@ -102,7 +102,7 @@ class TrainingToyLinearHelper(AbstractHelper):
         target = torch.zeros_like(pred)
         return {"pred": pred, "target": target}
 
-    def to(self, device: Any) -> "TrainingToyLinearHelper":
+    def to(self, device: Any) -> "TrainingToyLinear":
         self._lin = self._lin.to(device)
         return self
 
@@ -115,8 +115,8 @@ class TrainingToyLinearHelper(AbstractHelper):
 
 
 @register_block("training/optim_step")
-class TrainingOptimizerStepHelper(AbstractHelper):
-    """Helper: gradient clip, optimizer.step, scaler update, zero_grad; sets ctx flags."""
+class TrainingOptimizerStep(AbstractHelper):
+    """Gradient clip, optimizer.step, scaler update, zero_grad; sets ctx flags."""
 
     @property
     def block_type(self) -> str:
@@ -159,8 +159,8 @@ class TrainingOptimizerStepHelper(AbstractHelper):
 
 
 @register_block("training/lr_scheduler_step")
-class TrainingLRSchedulerStepHelper(AbstractHelper):
-    """Helper: lr_scheduler.step() when the optimizer actually ran."""
+class TrainingLRSchedulerStep(AbstractHelper):
+    """Calls lr_scheduler.step() when the optimizer actually ran."""
 
     @property
     def block_type(self) -> str:
@@ -183,8 +183,8 @@ class TrainingLRSchedulerStepHelper(AbstractHelper):
 
 
 @register_block("training/checkpoint_hook")
-class TrainingCheckpointHookHelper(AbstractHelper):
-    """Helper: optional periodic checkpoint via ctx.save_checkpoint_fn."""
+class TrainingCheckpointHook(AbstractHelper):
+    """Optional periodic checkpoint via ctx.save_checkpoint_fn."""
 
     @property
     def block_type(self) -> str:

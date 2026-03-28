@@ -8,8 +8,8 @@ import torch
 
 from yggdrasill.engine.buffers import EdgeBuffers
 from yggdrasill.engine.executor import ValidationError, _gather_node_inputs, _run_node_outputs, validate
+from yggdrasill.engine.planner import build_training_plan
 from yggdrasill.training.context import TrainingStepContext, TrainingStepOutcome
-from yggdrasill.training.plan import build_training_plan
 
 
 def run_training_step(
@@ -124,37 +124,17 @@ def fit_training_graph(
     max_train_steps: Optional[int] = None,
     validate_before: bool = True,
 ) -> TrainingStepContext:
-    """Iterate *batch_iter* and run :func:`run_training_step` until *max_train_steps* optimizer steps."""
-    should_stop = False
-    first = True
-    for batch in batch_iter:
-        if should_stop:
-            break
-        vb = validate_before and first
-        outcome = run_training_step(
-            structure,
-            _batch_to_inputs(structure, batch),
-            ctx,
-            validate_before=vb,
-        )
-        first = False
-        if max_train_steps is not None and outcome.global_step >= max_train_steps:
-            should_stop = True
+    """Iterate *batch_iter* via :func:`yggdrasill.engine.executor.run` (``run_mode='train'``)."""
+    from yggdrasill.engine.executor import run
+
+    payload: Dict[str, Any] = {
+        "training_step_context": ctx,
+        "training_batch_iter": batch_iter,
+    }
+    if max_train_steps is not None:
+        payload["max_train_steps"] = max_train_steps
+    run(structure, payload, run_mode="train", validate_before=validate_before)
     return ctx
-
-
-def _batch_to_inputs(structure: Any, batch: Any) -> Dict[str, Any]:
-    """Map a collated batch to exposed-input keys (single loss node with ``batch`` port)."""
-    spec = structure.get_input_spec()
-    if not spec:
-        return {"batch": batch}
-    names = [e.get("name") for e in spec if e.get("name")]
-    if "batch" in names:
-        return {"batch": batch}
-    # Fall back: first exposed input name
-    first = spec[0]
-    key = first.get("name") or first["port_name"]
-    return {key: batch}
 
 
 def resume_training(

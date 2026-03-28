@@ -394,17 +394,76 @@ class DiffusionGraphBuilder:
         *,
         graph_id: Optional[str] = None,
         name: Optional[str] = None,
+        train_recipe: Optional[str] = None,
     ) -> None:
+        if train_recipe is not None:
+            if graph is not None:
+                raise ValueError("train_recipe cannot be combined with an explicit graph")
+            gid = name or graph_id or train_recipe
+            self._graph = Hypergraph(graph_id=gid)
+            self._graph.metadata["ygg_diffusion_train_recipe"] = train_recipe
+            self._added_groups = {}
+            self._completed = True
+            return
         graph_id = name or graph_id or "diffusion_graph"
         self._graph = graph or Hypergraph(graph_id=graph_id)
         self._added_groups: Dict[str, str] = {}  # group -> node_id
         self._completed: bool = False
 
     @classmethod
-    def from_template(cls, template_name: str, **kwargs: Any) -> "DiffusionGraphBuilder":
-        """Wrap a graph built from a diffusion template (same kwargs as :meth:`Hypergraph.from_template`)."""
+    def from_template(
+        cls,
+        template_name: str,
+        *,
+        task: str = "inference",
+        **kwargs: Any,
+    ) -> "DiffusionGraphBuilder":
+        """Wrap a graph from a template.
+
+        *task* ``\"inference\"`` (default): same as :meth:`Hypergraph.from_template`.
+        *task* ``\"train\"``: training templates from
+        :mod:`yggdrasill.integrations.diffusers.training.training_templates`
+        (e.g. ``\"diffusion_lora\"``), implemented via level-2 training graph builders.
+
+        **Named recipes** (``\"sd15_lora_train\"``, ``\"sdxl_lora_train\"``, ``\"flux_lora_train\"``):
+        placeholder builder; pass training kwargs to :meth:`run` (full LoRA train via
+        :class:`~yggdrasill.integrations.diffusers.training.trainer.DiffusionLoRATrainer`).
+        """
+        key = template_name.strip().lower().replace("-", "_")
+        from yggdrasill.integrations.diffusers.train_recipe_registry import is_named_train_recipe
+
+        if is_named_train_recipe(key):
+            if task != "inference":
+                raise ValueError(
+                    f"Named recipe {template_name!r} already implies training; "
+                    "use default task='inference'."
+                )
+            allowed_recipe_kw = frozenset({"name", "graph_id"})
+            bad = set(kwargs) - allowed_recipe_kw
+            if bad:
+                raise ValueError(
+                    f"Named recipe {template_name!r} does not accept from_template kwargs {sorted(bad)}; "
+                    "pass training arguments to run(). Allowed: name, graph_id."
+                )
+            return cls(train_recipe=key, name=kwargs.get("name"), graph_id=kwargs.get("graph_id"))
+        if task == "train":
+            from yggdrasill.integrations.diffusers.training.training_templates import build_training_template
+
+            graph = build_training_template(template_name, **kwargs)
+            return cls(graph)
+        if task != "inference":
+            raise ValueError(f"task must be 'inference' or 'train', got {task!r}")
         graph = Hypergraph.from_template(template_name, **kwargs)
         return cls(graph)
+
+    @staticmethod
+    def build_lora_training_hypergraph(*, objective: Any, **kwargs: Any) -> Hypergraph:
+        """Level-2 training graph for diffusion LoRA (delegates to :func:`training_hypergraph.build_diffusion_lora_training_hypergraph`)."""
+        from yggdrasill.integrations.diffusers.training.training_hypergraph import (
+            build_diffusion_lora_training_hypergraph,
+        )
+
+        return build_diffusion_lora_training_hypergraph(objective=objective, **kwargs)
 
     def _apply_graph_device(self) -> None:
         """Move all nodes (and schedulers) to the graph's inferred device."""
@@ -427,18 +486,54 @@ class DiffusionGraphBuilder:
         inputs: Optional[Dict[str, Any]] = None,
         **kwargs: Any,
     ) -> Any:
-        """Run the diffusion graph. Accepts prompt, negative_prompt, num_inference_steps,
-        guidance_scale, seed, width, height, device, controlnet_image, ip_adapter_image,
-        ip_adapter_image_embeds, controlnet_conditioning_scale, ip_adapter_conditioning_scale,
-        (InstantStyle / per-layer scales: pass a dict with only ``down`` / ``up`` / ``mid`` keys, or a list
-        of per–IP-Adapter configs as in diffusers ``set_ip_adapter_scale``). For **multiple** IP-Adapter
-        nodes, ``ip_adapter_image`` may be a **list** in the same order as ``add_component`` calls that
-        loaded weights (stored in graph metadata; falls back to sorted node ids if missing).
-        For **several** ``sdxl.lora`` / ``sd15.lora`` components, pass ``lora_conditioning_scale`` as a
-        dict ``{node_id: float}`` so every LoRA stays active together (one diffusers ``set_adapters`` call).
-        Returns DiffusionOutput."""
+        """Run the diffusion graph or a named train recipe.
+
+        **Inference:** prompt, negative_prompt, num_inference_steps, guidance_scale, seed, width, height,
+        device, controlnet_image, ip_adapter_image, … — see :func:`yggdrasill.integrations.diffusers.run.run`.
+        Returns :class:`~yggdrasill.integrations.diffusers.types.DiffusionOutput`.
+
+        **Named train recipe** (from ``from_template(\"sd15_lora_train\")`` etc.): pass
+        :class:`~yggdrasill.integrations.diffusers.training.config.TrainingConfig`-compatible kwargs
+        (``data_dir``, ``output_path``, ``task``, ``pretrained`` / ``pretrained_model_name_or_path``, …).
+        Returns :class:`~yggdrasill.integrations.diffusers.training.types.TrainResult`.
+        """
+        recipe = self._graph.metadata.get("ygg_diffusion_train_recipe")
+        if recipe is not None:
+            return self._run_named_train_recipe(inputs, **kwargs)
         from yggdrasill.integrations.diffusers.run import run as run_diffusion
         return run_diffusion(self.graph, inputs, wrap_output=True, **kwargs)
+
+    def _run_named_train_recipe(
+        self,
+        inputs: Optional[Dict[str, Any]],
+        **kwargs: Any,
+    ) -> Any:
+        from yggdrasill.integrations.diffusers.train_recipe_registry import TRAIN_RECIPE_SPECS
+        from yggdrasill.integrations.diffusers.training.config import TrainingConfig
+        from yggdrasill.integrations.diffusers.training.trainer import DiffusionLoRATrainer
+
+        recipe = str(self._graph.metadata.get("ygg_diffusion_train_recipe") or "")
+        if recipe not in TRAIN_RECIPE_SPECS:
+            raise ValueError(f"Unknown train recipe metadata {recipe!r}")
+        spec = TRAIN_RECIPE_SPECS[recipe]
+        merged: Dict[str, Any] = {}
+        if inputs:
+            merged.update(inputs)
+        merged.update(kwargs)
+
+        allowed = set(TrainingConfig.__dataclass_fields__)
+        cfg_kwargs: Dict[str, Any] = {"family": spec["family"]}
+        default_pt = spec["default_pretrained"]
+        for k, v in merged.items():
+            if k == "pretrained":
+                cfg_kwargs["pretrained_model_name_or_path"] = v
+            elif k in allowed:
+                cfg_kwargs[k] = v
+        if "pretrained_model_name_or_path" not in cfg_kwargs:
+            cfg_kwargs["pretrained_model_name_or_path"] = default_pt
+
+        config = TrainingConfig(**cfg_kwargs)
+        return DiffusionLoRATrainer(config).train()
 
     def _ensure_text2img_complete(self) -> None:
         """Add latent_init, expose I/O, and metadata if this is an incomplete text2img topology."""

@@ -13,6 +13,11 @@ from yggdrasill.integrations.diffusers.training.trainer import (
 from yggdrasill.integrations.diffusers.training.training_hypergraph import (
     build_diffusion_lora_training_hypergraph,
 )
+from yggdrasill.integrations.diffusers.training.training_templates import (
+    TRAINING_GRAPH_TEMPLATES,
+    TRAIN_RECIPE_TEMPLATE_NAMES,
+    list_training_templates,
+)
 from yggdrasill.integrations.diffusers.training.types import TrainResult, TrainingComponents, TrainingTargetSetup
 
 
@@ -93,11 +98,6 @@ def train_sd15_lora(
         resume_from_checkpoint=resume_from_checkpoint,
     )
     return train_diffusion_lora(config=config)
-
-
-def train_sd15_lora_from_folder(**kwargs) -> TrainResult:
-    """Backward-compatible alias for :func:`train_sd15_lora`."""
-    return train_sd15_lora(**kwargs)
 
 
 def train_sdxl_lora(
@@ -263,18 +263,14 @@ def train_flux_lora(
 
 
 __all__ = [
+    "TRAINING_GRAPH_TEMPLATES",
+    "TRAIN_RECIPE_TEMPLATE_NAMES",
     "TrainingConfig",
     "TrainResult",
     "TrainingComponents",
     "TrainingTargetSetup",
     "build_diffusion_lora_training_hypergraph",
-    "DiffusionLoRATrainer",
-    "SD15LoRATrainer",
-    "SDXLLoRATrainer",
-    "FluxLoRATrainer",
-    "train_diffusion_lora",
-    "train_sd15_lora",
-    "train_sdxl_lora",
-    "train_flux_lora",
-    "train_sd15_lora_from_folder",
+    "list_training_templates",
+    # Legacy entrypoints remain on the module for compatibility but are not re-exported via __all__:
+    # DiffusionLoRATrainer, train_diffusion_lora, train_sd15_lora, ...
 ]

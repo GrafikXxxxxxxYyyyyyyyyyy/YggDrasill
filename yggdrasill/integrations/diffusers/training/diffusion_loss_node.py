@@ -1,21 +1,21 @@
-"""Converter node wrapping a diffusion :class:`TrainingObjective` for graph-native training."""
+"""Training node wrapping a diffusion :class:`TrainingObjective` for graph-native training."""
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
 from yggdrasill.foundation.port import Port, PortDirection, PortType
-from yggdrasill.foundation.registry import register_block
+from yggdrasill.foundation.registry import BlockRegistry, register_block
 from yggdrasill.integrations.diffusers.training.types import TrainingObjective
 from yggdrasill.task_nodes.abstract import AbstractConverter
 
 
-@register_block("converter/diffusion_lora_loss")
-class DiffusionLoRALossConverter(AbstractConverter):
-    """``converter/diffusion_lora_loss``: batch dict -> scalar loss tensor (autograd)."""
+@register_block("training/diffusion_lora_loss")
+class DiffusionLoRALoss(AbstractConverter):
+    """``training/diffusion_lora_loss``: batch dict -> scalar loss tensor (autograd)."""
 
     @property
     def block_type(self) -> str:
-        return "converter/diffusion_lora_loss"
+        return "training/diffusion_lora_loss"
 
     def __init__(
         self,
@@ -36,10 +36,14 @@ class DiffusionLoRALossConverter(AbstractConverter):
 
     def forward(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         if self._objective is None:
-            raise RuntimeError("DiffusionLoRALossConverter requires a bound objective")
+            raise RuntimeError("DiffusionLoRALoss requires a bound objective")
         loss = self._objective.compute_loss(inputs["batch"])
         return {"loss": loss}
 
     @property
     def supports_backward(self) -> bool:
         return True
+
+
+# Deprecated type id; kept for loading older saved graphs.
+BlockRegistry.global_registry().register("converter/diffusion_lora_loss", DiffusionLoRALoss)

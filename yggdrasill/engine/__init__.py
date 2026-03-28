@@ -12,18 +12,21 @@ from yggdrasill.engine.buffers import EdgeBuffers
 from yggdrasill.engine.edge import Edge
 from yggdrasill.hypergraph.structure import Hypergraph
 from yggdrasill.engine.validator import ValidationResult, validate
-from yggdrasill.engine.planner import build_plan, clear_plan_cache
+from yggdrasill.engine.planner import (
+    TrainingPlan,
+    build_plan,
+    build_training_plan,
+    clear_plan_cache,
+    training_plan_signature,
+)
 from yggdrasill.engine.executor import RunResult, ValidationError, run, run_stream
 
 _TRAINING_LAZY: Dict[str, Tuple[str, str]] = {
-    "TrainingPlan": ("yggdrasill.training.plan", "TrainingPlan"),
     "TrainingStepContext": ("yggdrasill.training.context", "TrainingStepContext"),
     "TrainingStepOutcome": ("yggdrasill.training.context", "TrainingStepOutcome"),
-    "build_training_plan": ("yggdrasill.training.plan", "build_training_plan"),
     "fit_training_graph": ("yggdrasill.training.executor", "fit_training_graph"),
     "resume_training": ("yggdrasill.training.executor", "resume_training"),
     "run_training_step": ("yggdrasill.training.executor", "run_training_step"),
-    "training_plan_signature": ("yggdrasill.training.plan", "training_plan_signature"),
 }
 
 

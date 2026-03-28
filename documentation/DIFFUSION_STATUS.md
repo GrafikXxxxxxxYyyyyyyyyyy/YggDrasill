@@ -26,13 +26,16 @@ Diffusion-слой является **opt-in addon** над ядром:
 Текущая training-поддержка уже отделена от inference-cycle и теперь организована как
 **generic diffusers-family LoRA training layer** поверх training registry/contracts.
 
-Поддерживаемая поверхность:
+Поддерживаемая поверхность (stable-ориентир):
 
-- generic entrypoint: `train_diffusion_lora(config=TrainingConfig(...))`
-- ergonomic wrappers:
-  - `train_sd15_lora(...)`
-  - `train_sdxl_lora(...)`
-  - `train_flux_lora(...)`
+- **Engine:** `yggdrasill.engine.planner.build_training_plan` (рядом с `build_plan`), `run(..., run_mode="train")` для полного цикла обучения на графе с `metadata['training']`.
+- **Шаблоны обучения (уровень 3):** `DiffusionGraphBuilder.from_template(..., task="train")`, `list_training_templates()` / `TRAINING_GRAPH_TEMPLATES` в `integrations.diffusers.training`.
+- **Уровень 2:** `DiffusionGraphBuilder.build_lora_training_hypergraph(...)` (делегирует в `build_diffusion_lora_training_hypergraph`).
+
+Legacy convenience (по-прежнему на модуле `integrations.diffusers.training`, но не в `__all__`):
+
+- `train_diffusion_lora(config=TrainingConfig(...))`
+- `train_sd15_lora(...)`, `train_sdxl_lora(...)`, `train_flux_lora(...)`
 - registry-owned training dispatch:
   - backbone/component layout
   - conditioning builder
@@ -69,8 +72,8 @@ Diffusion-слой является **opt-in addon** над ядром:
 - `ControlNet training`
 - distributed / multi-host training surface
 
-**Graph-native training loop:** шаг обучения LoRA выполняется через `yggdrasill.training.run_training_step` /
-`build_diffusion_lora_training_hypergraph` (forward до loss-узла → backward в исполнителе → helper-узлы optim/sched).
+**Graph-native training loop:** полный цикл — `engine.run(..., run_mode="train")`; шаг — `run_training_step` /
+`build_diffusion_lora_training_hypergraph` (forward до loss-узла → backward в исполнителе → узлы `training/optim_step` / `training/lr_scheduler_step`).
 Чекпоинты могут включать `training_graph.json` (подпись плана) рядом с `trainer_state.pt`.
 
 Важно:

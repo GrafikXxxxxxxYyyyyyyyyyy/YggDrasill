@@ -11,6 +11,8 @@
 - `yggdrasill.workflow.workflow.Workflow`;
 - `AbstractBaseBlock`, `AbstractGraphNode`, базовые task-node абстракции;
 - core executor contract: `inputs`, `num_loop_steps`, `seed`, `pin_data`, `run_data`, `dirty_node_ids`, `destination_node_id`, `interrupt_on`, `max_steps`;
+- training on the same engine: `run_mode` (`"inference"` \| `"train"`), `build_training_plan` in `yggdrasill.engine.planner` next to `build_plan`;
+- diffusion training UX mirrors inference levels: manual `Hypergraph` + `run(train)` → `DiffusionGraphBuilder` (+ `build_lora_training_hypergraph`) → `from_template(..., task="train")` built on level 2;
 - config/checkpoint serialization primitives.
 
 Эти API должны оставаться предсказуемыми и документируемыми как основной low-level путь.

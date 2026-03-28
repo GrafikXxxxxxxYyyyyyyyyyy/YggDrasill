@@ -27,7 +27,7 @@ Implemented and test-backed today:
 
 Not yet a finished production runtime:
 
-- `Stage`, `World`, `Universe`;
+- higher layers (`Stage`, `World`, `Universe`) described in the canon are not shipped as code yet;
 - full parity with every ambition described in the domain canon;
 - full stabilization of high-level diffusion ergonomics.
 

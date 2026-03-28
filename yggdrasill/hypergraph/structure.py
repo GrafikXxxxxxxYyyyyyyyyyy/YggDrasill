@@ -997,9 +997,20 @@ class Hypergraph:
         self._node_trainable[node_id] = trainable
 
     def trainable_parameters(self) -> Iterator[Any]:
-        """Yield trainable parameters, deduplicated by block_id."""
+        """Yield trainable parameters, deduplicated by block_id.
+
+        If ``metadata['training']['trainable_node_ids']`` is set, only those nodes
+        contribute parameters (must be a subset of graph nodes).
+        """
+        meta_training = (self.metadata or {}).get("training") or {}
+        raw_tni = meta_training.get("trainable_node_ids")
+        restrict: Optional[Set[str]] = (
+            {str(x) for x in raw_tni} if raw_tni is not None else None
+        )
         seen_block_ids: Set[str] = set()
         for nid, node in self._nodes.items():
+            if restrict is not None and nid not in restrict:
+                continue
             if not self._node_trainable.get(nid, True):
                 continue
             block_id = getattr(node, "block_id", nid)

@@ -39,7 +39,7 @@ def write_training_graph_sidecar(
 
 def assert_checkpoint_matches_plan(checkpoint_dir: str | Path, structure: Any) -> None:
     """Raise ``ValueError`` if sidecar signature disagrees with *structure* (optional guard)."""
-    from yggdrasill.training.plan import training_plan_signature
+    from yggdrasill.engine.planner import training_plan_signature
 
     side = read_training_graph_sidecar(checkpoint_dir)
     if side is None:

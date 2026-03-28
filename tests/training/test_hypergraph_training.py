@@ -9,13 +9,14 @@ from yggdrasill.engine.edge import Edge
 from yggdrasill.engine.validator import validate
 from yggdrasill.foundation.registry import BlockRegistry
 from yggdrasill.hypergraph.structure import Hypergraph
-from yggdrasill.integrations.diffusers.training.diffusion_loss_node import DiffusionLoRALossConverter
+from yggdrasill.integrations.diffusers.training.diffusion_loss_node import DiffusionLoRALoss
 from yggdrasill.integrations.diffusers.training.training_hypergraph import (
     build_diffusion_lora_training_hypergraph,
 )
 from yggdrasill.training.context import TrainingStepContext
 from yggdrasill.training.executor import run_training_step
-from yggdrasill.training.plan import build_training_plan, training_plan_signature
+from yggdrasill.engine.planner import build_training_plan, training_plan_signature
+from yggdrasill.engine.executor import run as engine_run
 
 import yggdrasill.training.blocks  # noqa: F401
 
@@ -83,6 +84,35 @@ def test_run_training_step_toy_reduces_loss() -> None:
     assert losses[-1] < losses[0]
 
 
+def test_engine_run_mode_train_matches_manual_loop() -> None:
+    g = _toy_training_graph(dim=4)
+    toy = g.get_node("toy")
+    assert toy is not None
+    toy.to(torch.device("cpu"))
+    opt = torch.optim.AdamW(toy.trainable_parameters(), lr=0.05)
+    sched = torch.optim.lr_scheduler.LambdaLR(opt, lr_lambda=lambda _: 1.0)
+    ctx = TrainingStepContext(
+        optimizer=opt,
+        lr_scheduler=sched,
+        trainable_parameters=list(toy.trainable_parameters()),
+        grad_accumulation_steps=1,
+        max_grad_norm=None,
+        scaler=None,
+    )
+    x = torch.randn(2, 4)
+    batches_x = [{"x": x} for _ in range(10)]
+    engine_run(
+        g,
+        {
+            "training_step_context": ctx,
+            "training_batch_iter": batches_x,
+            "training_batch_input_key": "x",
+        },
+        run_mode="train",
+        validate_before=True,
+    )
+
+
 def test_gradient_accumulation_optimizer_not_every_step() -> None:
     g = _toy_training_graph()
     toy = g.get_node("toy")
@@ -118,4 +148,4 @@ def test_build_diffusion_lora_training_hypergraph_smoke() -> None:
     r = validate(g)
     assert r.valid, r.errors
     loss_node = g.get_node("loss")
-    assert isinstance(loss_node, DiffusionLoRALossConverter)
+    assert isinstance(loss_node, DiffusionLoRALoss)

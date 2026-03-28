@@ -5,7 +5,7 @@ from typing import Any, List, Tuple
 
 from yggdrasill.foundation.registry import BlockRegistry
 from yggdrasill.hypergraph.structure import Hypergraph
-from yggdrasill.integrations.diffusers.training.diffusion_loss_node import DiffusionLoRALossConverter
+from yggdrasill.integrations.diffusers.training.diffusion_loss_node import DiffusionLoRALoss
 from yggdrasill.integrations.diffusers.training.types import TrainingObjective
 
 # Ensure training helpers are registered
@@ -24,7 +24,7 @@ def build_diffusion_lora_training_hypergraph(
     g.metadata["graph_kind"] = "training"
     g.metadata["num_loop_steps"] = 1
 
-    loss_node = DiffusionLoRALossConverter(node_id="loss", objective=objective)
+    loss_node = DiffusionLoRALoss(node_id="loss", objective=objective)
     g.add_node("loss", loss_node)
     g.expose_input("loss", "batch", name="batch")
 

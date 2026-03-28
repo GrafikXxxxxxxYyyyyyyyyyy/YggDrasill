@@ -292,15 +292,13 @@ class BaseLoRATrainer:
 
         import yggdrasill.training.blocks  # noqa: F401 — register training/* and outer_module/*
 
+        from yggdrasill.engine.executor import run as engine_run
+        from yggdrasill.engine.planner import training_plan_signature
         from yggdrasill.integrations.diffusers.training.training_hypergraph import (
             build_diffusion_lora_training_hypergraph,
         )
         from yggdrasill.training.context import TrainingStepContext
-        from yggdrasill.training.executor import (
-            resume_training as resume_training_graph,
-            run_training_step,
-        )
-        from yggdrasill.training.plan import training_plan_signature
+        from yggdrasill.training.executor import resume_training as resume_training_graph
 
         torch.manual_seed(self.config.seed)
         device = self._resolve_device()
@@ -345,80 +343,76 @@ class BaseLoRATrainer:
         checkpoints: List[Path] = []
         global_step = ctx.global_step
         final_loss: Optional[float] = None
-        should_stop = False
-        graph_validated = False
 
-        for _epoch in range(self.config.num_epochs):
-            for batch in dataloader:
-                try:
-                    outcome = run_training_step(
-                        graph,
-                        {"batch": batch},
-                        ctx,
-                        validate_before=not graph_validated,
+        def _after_batch(_ctx: Any, outcome: Any) -> None:
+            nonlocal global_step, final_loss
+            global_step = outcome.global_step
+            final_loss = outcome.loss
+            if (
+                outcome.optimizer_ran
+                and self.config.logging_steps > 0
+                and global_step % self.config.logging_steps == 0
+            ):
+                print(f"[yggdrasill][train] step={global_step} loss={final_loss:.6f}")
+
+            if (
+                outcome.optimizer_ran
+                and self.config.checkpoint_every_n_steps > 0
+                and global_step % self.config.checkpoint_every_n_steps == 0
+            ):
+                checkpoint_dir = self.config.output_dir_path / f"checkpoint-{global_step}"
+                checkpoints.append(
+                    save_training_state(
+                        checkpoint_dir,
+                        global_step=global_step,
+                        optimizer=optimizer,
+                        lr_scheduler=lr_scheduler,
+                        scaler=scaler,
+                        config=self.config,
+                        training_plan_signature=plan_sig,
                     )
-                except RuntimeError as exc:
-                    msg = str(exc)
-                    if "Non-finite" in msg:
-                        guidance = ""
-                        if (
-                            self.config.family == "sdxl"
-                            and self.config.mixed_precision == "fp16"
-                            and self.config.train_text_encoder
-                        ):
-                            guidance = (
-                                " For SDXL, a safer starting point is "
-                                "train_text_encoder=False, or mixed_precision='bf16'. "
-                                "YggDrasill now auto-upgrades this runtime to bf16 when supported, "
-                                "auto-reduces LR, and enables memory-efficient training for this mode, "
-                                "but some datasets can still destabilize it."
-                            )
-                        raise RuntimeError(
-                            "Non-finite training loss encountered. "
-                            f"family={self.config.family!r} task={self.config.task!r} "
-                            f"mixed_precision={self.config.mixed_precision!r}. "
-                            "Check dataset values and mixed-precision stability."
-                            f"{guidance}"
-                        ) from exc
-                    raise
-                graph_validated = True
-                global_step = outcome.global_step
-                final_loss = outcome.loss
+                )
 
-                if (
-                    outcome.optimizer_ran
-                    and self.config.logging_steps > 0
-                    and global_step % self.config.logging_steps == 0
-                ):
-                    print(f"[yggdrasill][train] step={global_step} loss={final_loss:.6f}")
+        train_payload: Dict[str, Any] = {
+            "training_step_context": ctx,
+            "training_dataloader": dataloader,
+            "num_epochs": self.config.num_epochs,
+            "training_batch_end": _after_batch,
+        }
+        if self.config.max_train_steps is not None:
+            train_payload["max_train_steps"] = self.config.max_train_steps
 
+        try:
+            engine_run(
+                graph,
+                train_payload,
+                run_mode="train",
+                validate_before=True,
+            )
+        except RuntimeError as exc:
+            msg = str(exc)
+            if "Non-finite" in msg:
+                guidance = ""
                 if (
-                    outcome.optimizer_ran
-                    and self.config.checkpoint_every_n_steps > 0
-                    and global_step % self.config.checkpoint_every_n_steps == 0
+                    self.config.family == "sdxl"
+                    and self.config.mixed_precision == "fp16"
+                    and self.config.train_text_encoder
                 ):
-                    checkpoint_dir = self.config.output_dir_path / f"checkpoint-{global_step}"
-                    checkpoints.append(
-                        save_training_state(
-                            checkpoint_dir,
-                            global_step=global_step,
-                            optimizer=optimizer,
-                            lr_scheduler=lr_scheduler,
-                            scaler=scaler,
-                            config=self.config,
-                            training_plan_signature=plan_sig,
-                        )
+                    guidance = (
+                        " For SDXL, a safer starting point is "
+                        "train_text_encoder=False, or mixed_precision='bf16'. "
+                        "YggDrasill now auto-upgrades this runtime to bf16 when supported, "
+                        "auto-reduces LR, and enables memory-efficient training for this mode, "
+                        "but some datasets can still destabilize it."
                     )
-
-                if (
-                    outcome.optimizer_ran
-                    and self.config.max_train_steps is not None
-                    and global_step >= self.config.max_train_steps
-                ):
-                    should_stop = True
-                    break
-            if should_stop:
-                break
+                raise RuntimeError(
+                    "Non-finite training loss encountered. "
+                    f"family={self.config.family!r} task={self.config.task!r} "
+                    f"mixed_precision={self.config.mixed_precision!r}. "
+                    "Check dataset values and mixed-precision stability."
+                    f"{guidance}"
+                ) from exc
+            raise
 
         output_path = self._export_weights(targets=targets)
         result = TrainResult(

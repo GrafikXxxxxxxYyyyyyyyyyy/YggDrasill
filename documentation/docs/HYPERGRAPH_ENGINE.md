@@ -70,9 +70,13 @@
 
 Эти пять компонентов присутствуют на всех уровнях, где применяется движок; на уровнях стадии, мира и вселенной «узлом» является целая стадия, мир и т.д., а по рёбрам течёт state или обмен (payload), но принцип тот же: план → буферы → обход → вызов run.
 
-### 4.1 Обучение (training step)
+### 4.1 Обучение (training)
 
-Для графов с `metadata['training']` используется отдельный контракт **training plan** (`yggdrasill.training.plan.build_training_plan`): порядок forward-узлов до узла потерь, затем фаза backward по скаляру потерь (вне узлов), затем цепочка post-backward helper-узлов (optimizer, LR scheduler и т.д.). Публичные точки: `run_training_step`, `fit_training_graph`, `resume_training` (реэкспорт в `yggdrasill.engine`).
+Для графов с `metadata['training']` используется контракт **training plan**, собираемый рядом с inference-планировщиком: **`yggdrasill.engine.planner.build_training_plan`** (тот же пакет `engine`, что и `build_plan`): порядок forward-узлов до узла потерь (при отсутствии явного `forward_node_ids` — топопорядок на подмножестве узлов на путях к loss), затем backward по скаляру потерь (вне узлов), затем цепочка post-backward helper-узлов (optimizer, LR scheduler и т.д.).
+
+**Полное обучение за один вызов:** `yggdrasill.engine.executor.run(..., run_mode="train")` с полями во входах: `training_step_context`, `training_dataloader` или `training_batch_iter`, опционально `num_epochs`, `max_train_steps`, `training_batch_end` (колбэк после каждого шага). Одиночный шаг: `run_training_step`; обёртка `fit_training_graph` делегирует в `run(..., run_mode="train")`. `resume_training` и реэкспорты остаются в `yggdrasill.engine` (lazy) и `yggdrasill.training`.
+
+`run_stream` поддерживает только `run_mode="inference"`.
 
 ---
 
