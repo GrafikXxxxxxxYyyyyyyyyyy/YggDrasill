@@ -6,6 +6,7 @@ from typing import Any, Dict
 from yggdrasill.integrations.diffusers.training.config import TrainingConfig
 from yggdrasill.integrations.diffusers.training.objective_utils import (
     build_sdxl_time_ids,
+    cast_sdxl_unet_inputs,
     encode_sdxl_prompt,
     module_device_dtype,
     resize_mask_to_latents,
@@ -84,6 +85,14 @@ class SDXLInpaintLoRAObjective:
         in_channels = int(getattr(getattr(self._unet, "config", None), "in_channels", 4))
         if in_channels == 9:
             unet_input = torch.cat([noisy_latents[:, :4], mask[:, :1], masked_latents[:, :4]], dim=1)
+        unet_input, prompt_embeds, pooled_embeds, time_ids = cast_sdxl_unet_inputs(
+            unet_input,
+            prompt_embeds,
+            pooled_embeds,
+            time_ids,
+            unet_device=unet_device,
+            unet_dtype=unet_dtype,
+        )
         noise_pred = self._unet(
             unet_input,
             timesteps,

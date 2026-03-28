@@ -26,6 +26,20 @@ def scheduler_uses_float_timestep_in_step(scheduler: Any) -> bool:
     return type(scheduler).__name__ in _FLOAT_TIMESTEP_STEP_SCHEDULERS
 
 
+def scheduler_reference_timestep_dtype(scheduler: Any) -> Any:
+    """Dtype for *timestep* tensors passed to ``scale_model_input`` / ``step`` for float-timestep schedulers.
+
+    Must match ``scheduler.timesteps.dtype`` (almost always float32). Casting to the UNet's fp16 dtype
+    breaks ``EulerDiscreteScheduler.index_for_timestep`` (no exact match → empty indices → IndexError).
+    """
+    import torch
+
+    ts = getattr(scheduler, "timesteps", None)
+    if ts is not None and hasattr(ts, "dtype") and hasattr(ts, "numel") and ts.numel() > 0:
+        return ts.dtype
+    return torch.float32
+
+
 def coerce_timestep_for_scheduler_step(
     timestep: Any,
     latents: Any,

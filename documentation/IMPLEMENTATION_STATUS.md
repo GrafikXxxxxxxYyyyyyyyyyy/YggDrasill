@@ -68,7 +68,7 @@ Diffusion-слой функционален, но остаётся **экспе�
 - API ещё дорабатывается;
 - поддержка семейств и сценариев не равна всему объёму ambition-документов;
 - ergonomics и high-level shortcuts допускают изменение при очистке архитектуры.
-- training: graph-native план в `engine.planner` (`build_training_plan` рядом с `build_plan`); полный цикл — `engine.run(..., run_mode="train")`; diffusion UX — `DiffusionGraphBuilder.from_template(..., task="train")`, `list_training_templates`.
+- training: graph-native план в `engine.planner` (`build_training_plan` рядом с `build_plan`); полный цикл — `engine.run(..., run_mode="train")`; diffusion UX — `DiffusionGraphBuilder.from_template("sd15_lora_train" | …)` + `run(...)`, `list_training_templates`.
 - practically supported training recipes:
   - `SD1.5`: `text2img`, `img2img`, `inpaint`
   - `SDXL`: `text2img`, `img2img`, `inpaint`, `refiner`

@@ -49,6 +49,7 @@ diffusion = [
     "accelerate>=0.25.0",
     "peft>=0.13.1",
     "opencv-python-headless>=4.5.0",
+    "tqdm>=4.65.0",
 ]
 dev = [
     "build>=1.2.2",

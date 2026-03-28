@@ -36,6 +36,7 @@ class TrainingConfig:
     mixed_precision: Optional[str] = None
     checkpoint_every_n_steps: int = 0
     logging_steps: int = 10
+    show_progress_bar: bool = True
     caption_column: str = "caption"
     image_column: str = "image"
     prompt_2_column: Optional[str] = None

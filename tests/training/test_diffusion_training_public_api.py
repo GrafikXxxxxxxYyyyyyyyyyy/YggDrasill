@@ -8,14 +8,14 @@ pytest.importorskip("torch")
 from yggdrasill.engine.executor import run
 from yggdrasill.engine.planner import build_training_plan
 import yggdrasill.integrations.diffusers.training as diffusion_training
+from yggdrasill.integrations.diffusers.train_recipe_registry import TRAIN_RECIPE_SPECS
 
 
 def test_training_package_exports() -> None:
     assert hasattr(diffusion_training, "list_training_templates")
     assert callable(diffusion_training.list_training_templates)
-    names = diffusion_training.list_training_templates()
-    assert "diffusion_lora" in names
-    assert "sd15_lora_train" in names
+    names = set(diffusion_training.list_training_templates())
+    assert names == set(TRAIN_RECIPE_SPECS.keys())
     assert hasattr(diffusion_training, "TrainingConfig")
     assert hasattr(diffusion_training, "build_diffusion_lora_training_hypergraph")
 
@@ -33,7 +33,14 @@ def test_legacy_entrypoints_still_importable() -> None:
     assert callable(diffusion_training.train_sd15_lora)
 
 
-def test_diffusion_graph_builder_from_template_train() -> None:
+def test_diffusion_graph_builder_from_template_train_rejected() -> None:
+    from yggdrasill.integrations.diffusers.builder import DiffusionGraphBuilder
+
+    with pytest.raises(ValueError, match="no longer supports task"):
+        DiffusionGraphBuilder.from_template("anything", task="train", objective=object())
+
+
+def test_build_lora_training_hypergraph_still_available() -> None:
     from yggdrasill.integrations.diffusers.builder import DiffusionGraphBuilder
 
     class _Obj:
@@ -43,10 +50,6 @@ def test_diffusion_graph_builder_from_template_train() -> None:
             b = batch  # type: ignore[assignment]
             return torch.as_tensor(b["pixel_values"], dtype=torch.float32).mean()
 
-    builder = DiffusionGraphBuilder.from_template(
-        "diffusion_lora",
-        task="train",
-        objective=_Obj(),
-    )
-    meta = builder.graph.metadata.get("training") or {}
+    graph = DiffusionGraphBuilder.build_lora_training_hypergraph(objective=_Obj())
+    meta = graph.metadata.get("training") or {}
     assert meta.get("loss_node_id") == "loss"

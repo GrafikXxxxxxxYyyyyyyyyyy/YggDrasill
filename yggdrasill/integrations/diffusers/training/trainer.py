@@ -344,10 +344,54 @@ class BaseLoRATrainer:
         global_step = ctx.global_step
         final_loss: Optional[float] = None
 
+        pbar: Any = None
+        pbar_mode: Optional[str] = None
+        if self.config.show_progress_bar:
+            try:
+                from tqdm.auto import tqdm
+
+                start_gs = int(ctx.global_step)
+                if self.config.max_train_steps is not None:
+                    rem = max(0, int(self.config.max_train_steps) - start_gs)
+                    if rem > 0:
+                        pbar = tqdm(
+                            total=rem,
+                            desc="LoRA train",
+                            unit="step",
+                            dynamic_ncols=True,
+                        )
+                        pbar_mode = "optimizer"
+                else:
+                    try:
+                        n_per_epoch = len(dataloader)
+                    except TypeError:
+                        n_per_epoch = None
+                    total_batches = (
+                        int(n_per_epoch) * max(1, int(self.config.num_epochs))
+                        if n_per_epoch is not None
+                        else None
+                    )
+                    pbar = tqdm(
+                        total=total_batches,
+                        desc="LoRA train",
+                        unit="batch",
+                        dynamic_ncols=True,
+                    )
+                    pbar_mode = "batch"
+            except ImportError:
+                pbar = None
+                pbar_mode = None
+
         def _after_batch(_ctx: Any, outcome: Any) -> None:
             nonlocal global_step, final_loss
             global_step = outcome.global_step
             final_loss = outcome.loss
+            if pbar is not None:
+                if pbar_mode == "optimizer" and outcome.optimizer_ran:
+                    pbar.update(1)
+                elif pbar_mode == "batch":
+                    pbar.update(1)
+                pbar.set_postfix(loss=f"{outcome.loss:.4f}", step=global_step, refresh=False)
             if (
                 outcome.optimizer_ran
                 and self.config.logging_steps > 0
@@ -413,6 +457,9 @@ class BaseLoRATrainer:
                     f"{guidance}"
                 ) from exc
             raise
+        finally:
+            if pbar is not None:
+                pbar.close()
 
         output_path = self._export_weights(targets=targets)
         result = TrainResult(

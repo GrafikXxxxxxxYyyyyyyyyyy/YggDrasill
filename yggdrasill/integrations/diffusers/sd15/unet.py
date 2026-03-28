@@ -73,6 +73,7 @@ class SD15UNetNode(AbstractBackbone):
         prompt_embeds = inputs[C.PORT_PROMPT_EMBEDS]
 
         from yggdrasill.integrations.diffusers.common.scheduler_step import (
+            scheduler_reference_timestep_dtype,
             scheduler_uses_float_timestep_in_step,
         )
 
@@ -93,7 +94,8 @@ class SD15UNetNode(AbstractBackbone):
             ):
                 timestep = timestep.long()
             elif use_float_t:
-                timestep = timestep.to(dtype=dtype)
+                tref = scheduler_reference_timestep_dtype(sched)
+                timestep = timestep.to(dtype=tref)
         else:
             if hasattr(timestep, "item") and callable(getattr(timestep, "item")):
                 try:
@@ -103,7 +105,8 @@ class SD15UNetNode(AbstractBackbone):
             else:
                 t_val = timestep
             if use_float_t:
-                timestep = torch.tensor(float(t_val), device=device, dtype=dtype)
+                tref = scheduler_reference_timestep_dtype(sched)
+                timestep = torch.tensor(float(t_val), device=device, dtype=tref)
             else:
                 timestep = torch.tensor(int(t_val), device=device, dtype=torch.long)
         neg_embeds = inputs.get(C.PORT_NEGATIVE_PROMPT_EMBEDS)

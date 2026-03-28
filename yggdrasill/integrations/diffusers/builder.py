@@ -420,14 +420,13 @@ class DiffusionGraphBuilder:
     ) -> "DiffusionGraphBuilder":
         """Wrap a graph from a template.
 
-        *task* ``\"inference\"`` (default): same as :meth:`Hypergraph.from_template`.
-        *task* ``\"train\"``: training templates from
-        :mod:`yggdrasill.integrations.diffusers.training.training_templates`
-        (e.g. ``\"diffusion_lora\"``), implemented via level-2 training graph builders.
-
-        **Named recipes** (``\"sd15_lora_train\"``, ``\"sdxl_lora_train\"``, ``\"flux_lora_train\"``):
+        *task* ``\"inference\"`` (default): same as :meth:`Hypergraph.from_template`, or a **named
+        train recipe** (``\"sd15_lora_train\"``, ``\"sdxl_lora_train\"``, ``\"flux_lora_train\"``, …):
         placeholder builder; pass training kwargs to :meth:`run` (full LoRA train via
         :class:`~yggdrasill.integrations.diffusers.training.trainer.DiffusionLoRATrainer`).
+
+        *task* ``\"train\"`` is not used for diffusion templates; use a named ``*_lora_train`` recipe
+        or build a training graph with :meth:`build_lora_training_hypergraph` / ``engine.run(..., run_mode=\"train\")``.
         """
         key = template_name.strip().lower().replace("-", "_")
         from yggdrasill.integrations.diffusers.train_recipe_registry import is_named_train_recipe
@@ -447,10 +446,12 @@ class DiffusionGraphBuilder:
                 )
             return cls(train_recipe=key, name=kwargs.get("name"), graph_id=kwargs.get("graph_id"))
         if task == "train":
-            from yggdrasill.integrations.diffusers.training.training_templates import build_training_template
-
-            graph = build_training_template(template_name, **kwargs)
-            return cls(graph)
+            raise ValueError(
+                'diffusion from_template no longer supports task="train" with a graph template name; '
+                "use a named recipe, e.g. from_template(\"sd15_lora_train\"), then run(...). "
+                "For a custom training hypergraph, use DiffusionGraphBuilder.build_lora_training_hypergraph(...) "
+                'or engine.run(..., run_mode="train").'
+            )
         if task != "inference":
             raise ValueError(f"task must be 'inference' or 'train', got {task!r}")
         graph = Hypergraph.from_template(template_name, **kwargs)

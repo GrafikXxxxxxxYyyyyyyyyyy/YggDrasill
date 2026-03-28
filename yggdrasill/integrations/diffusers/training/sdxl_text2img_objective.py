@@ -6,6 +6,7 @@ from typing import Any, Dict
 from yggdrasill.integrations.diffusers.training.config import TrainingConfig
 from yggdrasill.integrations.diffusers.training.objective_utils import (
     build_sdxl_time_ids,
+    cast_sdxl_unet_inputs,
     encode_sdxl_prompt,
     module_device_dtype,
     resolve_diffusion_target,
@@ -74,6 +75,14 @@ class SDXLText2ImgLoRAObjective:
             requires_aesthetics_score=self._config.requires_aesthetics_score,
             aesthetic_score=self._config.aesthetic_score,
             aesthetic_scores=batch.get("aesthetic_score"),
+        )
+        noisy_latents, prompt_embeds, pooled_embeds, time_ids = cast_sdxl_unet_inputs(
+            noisy_latents,
+            prompt_embeds,
+            pooled_embeds,
+            time_ids,
+            unet_device=unet_device,
+            unet_dtype=unet_dtype,
         )
         noise_pred = self._unet(
             noisy_latents,

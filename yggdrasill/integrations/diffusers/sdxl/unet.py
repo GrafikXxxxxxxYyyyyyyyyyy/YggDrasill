@@ -72,6 +72,7 @@ class SDXLUNetNode(AbstractBackbone):
         import torch
         from yggdrasill.integrations.diffusers.common.guidance import apply_cfg
         from yggdrasill.integrations.diffusers.common.scheduler_step import (
+            scheduler_reference_timestep_dtype,
             scheduler_uses_float_timestep_in_step,
         )
 
@@ -100,7 +101,8 @@ class SDXLUNetNode(AbstractBackbone):
             ):
                 timestep = timestep.long()
             elif use_float_t:
-                timestep = timestep.to(dtype=dtype)
+                tref = scheduler_reference_timestep_dtype(sched)
+                timestep = timestep.to(dtype=tref)
         else:
             if hasattr(timestep_in, "item") and callable(getattr(timestep_in, "item")):
                 try:
@@ -110,7 +112,8 @@ class SDXLUNetNode(AbstractBackbone):
             else:
                 t_val = timestep_in
             if use_float_t:
-                timestep = torch.tensor(float(t_val), device=device, dtype=dtype)
+                tref = scheduler_reference_timestep_dtype(sched)
+                timestep = torch.tensor(float(t_val), device=device, dtype=tref)
             else:
                 timestep = torch.tensor(int(t_val), device=device, dtype=torch.long)
 

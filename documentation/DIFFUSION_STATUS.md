@@ -29,7 +29,7 @@ Diffusion-слой является **opt-in addon** над ядром:
 Поддерживаемая поверхность (stable-ориентир):
 
 - **Engine:** `yggdrasill.engine.planner.build_training_plan` (рядом с `build_plan`), `run(..., run_mode="train")` для полного цикла обучения на графе с `metadata['training']`.
-- **Шаблоны обучения (уровень 3):** `DiffusionGraphBuilder.from_template(..., task="train")`, `list_training_templates()` / `TRAINING_GRAPH_TEMPLATES` в `integrations.diffusers.training`.
+- **Шаблоны обучения (уровень 3):** `DiffusionGraphBuilder.from_template("sd15_lora_train" | …)` (именованные рецепты), затем `run(...)`; `list_training_templates()` / `TRAINING_GRAPH_TEMPLATES` в `integrations.diffusers.training` перечисляют те же имена рецептов.
 - **Уровень 2:** `DiffusionGraphBuilder.build_lora_training_hypergraph(...)` (делегирует в `build_diffusion_lora_training_hypergraph`).
 
 Legacy convenience (по-прежнему на модуле `integrations.diffusers.training`, но не в `__all__`):

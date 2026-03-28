@@ -117,7 +117,13 @@ def encode_sdxl_prompt(
                 with torch.no_grad():
                     output = encoder(input_ids, output_hidden_states=True)
         hidden = output.hidden_states[-2]
+        # Match diffusers SDXL _encode_prompt: pooled comes from output[0] on the last encoder
+        # (HF CLIPTextModelWithProjection lists text_embeds first in tuple order).
         pooled = getattr(output, "text_embeds", None)
+        if pooled is None and hasattr(output, "__getitem__"):
+            zeroth = output[0]
+            if getattr(zeroth, "ndim", 0) == 2:
+                pooled = zeroth
         if pooled is None:
             pooled = getattr(output, "pooler_output", None)
         if pooled is None:
@@ -164,6 +170,29 @@ def resolve_diffusion_target(*, scheduler: Any, latents: Any, noise: Any, timest
     raise ValueError(f"Unsupported scheduler prediction_type: {prediction_type!r}")
 
 
+def cast_sdxl_unet_inputs(
+    noisy_latents: Any,
+    prompt_embeds: Any,
+    pooled_prompt_embeds: Any,
+    time_ids: Any,
+    *,
+    unet_device: Any,
+    unet_dtype: Any,
+) -> tuple[Any, Any, Any, Any]:
+    """Cast SDXL latents and conditioning to the UNet device/dtype (diffusers-style).
+
+    Prompt embeddings and ``time_ids`` are often float32 from encoders/schedulers while the
+    UNet runs in fp16/bf16 under mixed precision; keeping everything in the UNet dtype avoids
+    incorrect predictions and weak or unstable LoRA results.
+    """
+    return (
+        noisy_latents.to(device=unet_device, dtype=unet_dtype),
+        prompt_embeds.to(device=unet_device, dtype=unet_dtype),
+        pooled_prompt_embeds.to(device=unet_device, dtype=unet_dtype),
+        time_ids.to(device=unet_device, dtype=unet_dtype),
+    )
+
+
 def build_sdxl_time_ids(
     *,
     batch_size: int,
@@ -178,23 +207,23 @@ def build_sdxl_time_ids(
 ) -> Any:
     import torch
 
-    f32 = torch.float32
+    elem_dtype = dtype if isinstance(dtype, torch.dtype) else torch.float32
     if requires_aesthetics_score:
         if aesthetic_scores is not None:
             if hasattr(aesthetic_scores, "to"):
-                scores = aesthetic_scores.to(device=device, dtype=f32).reshape(batch_size, 1)
+                scores = aesthetic_scores.to(device=device, dtype=elem_dtype).reshape(batch_size, 1)
             else:
-                scores = torch.tensor(aesthetic_scores, device=device, dtype=f32).reshape(batch_size, 1)
+                scores = torch.tensor(aesthetic_scores, device=device, dtype=elem_dtype).reshape(batch_size, 1)
             prefix = torch.tensor(
                 [*original_size, *crops_coords_top_left],
                 device=device,
-                dtype=f32,
+                dtype=elem_dtype,
             ).unsqueeze(0).expand(batch_size, -1)
             return torch.cat([prefix, scores], dim=1)
         values: Iterable[float] = [*original_size, *crops_coords_top_left, aesthetic_score]
     else:
         values = [*original_size, *crops_coords_top_left, *target_size]
-    time_ids = torch.tensor(list(values), device=device, dtype=f32)
+    time_ids = torch.tensor(list(values), device=device, dtype=elem_dtype)
     return time_ids.unsqueeze(0).expand(batch_size, -1)
 
 
