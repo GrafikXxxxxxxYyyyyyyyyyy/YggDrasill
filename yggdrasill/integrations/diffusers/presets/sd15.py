@@ -338,6 +338,184 @@ def build_sd15_inpaint_graph(
     return h
 
 
+def _patch_sd15_graph_animatediff(
+    graph: Hypergraph,
+    num_frames: int,
+    *,
+    decode_chunk: int = 16,
+) -> None:
+    """Set ``num_frames`` / decode flags on SD1.5 nodes; merge ``metadata['animatediff']``."""
+    meta = getattr(graph, "metadata", None)
+    if not isinstance(meta, dict):
+        meta = {}
+        graph.metadata = meta
+    slot = meta.setdefault("animatediff", {})
+    if isinstance(slot, dict):
+        slot["num_frames"] = int(num_frames)
+    for nid in graph.node_ids:
+        n = graph.get_node(nid)
+        if n is None:
+            continue
+        bt = getattr(n, "block_type", "") or ""
+        cfg = getattr(n, "_config", None)
+        if not isinstance(cfg, dict):
+            cfg = {}
+            n._config = cfg
+        if "sd15/latent_init" in bt:
+            cfg[C.CFG_NUM_FRAMES] = int(num_frames)
+        if "sd15/vae_decode" in bt:
+            cfg[C.CFG_NUM_FRAMES] = int(num_frames)
+            cfg[C.CFG_DECODE_CHUNK_SIZE] = int(decode_chunk)
+            cfg[C.CFG_ANIMATEDIFF_VIDEO_DECODE] = True
+        if "sd15/vae_encode" in bt:
+            cfg[C.CFG_NUM_FRAMES] = int(num_frames)
+
+
+def build_sd15_animatediff_text2img_graph(
+    *,
+    tokenizer: Any = None,
+    text_encoder: Any = None,
+    unet: Any = None,
+    vae: Any = None,
+    scheduler: Any = None,
+    safety_checker: Any = None,
+    feature_extractor: Any = None,
+    config: Optional[Dict[str, Any]] = None,
+) -> Hypergraph:
+    """SD1.5 text-to-video topology (5D latents); add ``sd15.motionadapter`` for MotionAdapter weights."""
+    cfg = dict(config or {})
+    nf = int(cfg.get(C.CFG_NUM_FRAMES, cfg.get("num_frames", 16)))
+    dc = int(cfg.get(C.CFG_DECODE_CHUNK_SIZE, cfg.get("decode_chunk_size", 16)))
+    h = build_sd15_text2img_graph(
+        tokenizer=tokenizer,
+        text_encoder=text_encoder,
+        unet=unet,
+        vae=vae,
+        scheduler=scheduler,
+        safety_checker=safety_checker,
+        feature_extractor=feature_extractor,
+        config=cfg,
+    )
+    meta = h.metadata if isinstance(h.metadata, dict) else {}
+    h.metadata = {**meta, "animatediff_template": "sd15_animatediff_text2img"}
+    _patch_sd15_graph_animatediff(h, nf, decode_chunk=dc)
+    return h
+
+
+def build_sd15_animatediff_img2img_graph(
+    *,
+    tokenizer: Any = None,
+    text_encoder: Any = None,
+    unet: Any = None,
+    vae: Any = None,
+    scheduler: Any = None,
+    config: Optional[Dict[str, Any]] = None,
+) -> Hypergraph:
+    """Image/list-of-frames → VAE encode (5D) → latent_init (img2video) → denoise → decode."""
+    cfg = dict(config or {})
+    nf = int(cfg.get(C.CFG_NUM_FRAMES, cfg.get("num_frames", 16)))
+    dc = int(cfg.get(C.CFG_DECODE_CHUNK_SIZE, cfg.get("decode_chunk_size", 16)))
+    h = build_sd15_img2img_graph(
+        tokenizer=tokenizer,
+        text_encoder=text_encoder,
+        unet=unet,
+        vae=vae,
+        scheduler=scheduler,
+        config=cfg,
+    )
+    meta = h.metadata if isinstance(h.metadata, dict) else {}
+    h.metadata = {**meta, "animatediff_template": "sd15_animatediff_img2img"}
+    _patch_sd15_graph_animatediff(h, nf, decode_chunk=dc)
+    return h
+
+
+def build_sd15_animatediff_inpaint_graph(
+    *,
+    tokenizer: Any = None,
+    text_encoder: Any = None,
+    unet: Any = None,
+    vae: Any = None,
+    scheduler: Any = None,
+    config: Optional[Dict[str, Any]] = None,
+) -> Hypergraph:
+    """Inpaint graph with 5D latents when ``num_frames`` > 1 (9-ch UNet + motion)."""
+    cfg = dict(config or {})
+    nf = int(cfg.get(C.CFG_NUM_FRAMES, cfg.get("num_frames", 16)))
+    dc = int(cfg.get(C.CFG_DECODE_CHUNK_SIZE, cfg.get("decode_chunk_size", 16)))
+    h = build_sd15_inpaint_graph(
+        tokenizer=tokenizer,
+        text_encoder=text_encoder,
+        unet=unet,
+        vae=vae,
+        scheduler=scheduler,
+        config=cfg,
+    )
+    meta = h.metadata if isinstance(h.metadata, dict) else {}
+    h.metadata = {**meta, "animatediff_template": "sd15_animatediff_inpaint"}
+    _patch_sd15_graph_animatediff(h, nf, decode_chunk=dc)
+    return h
+
+
+def build_sd15_animatediff_video2video_graph(
+    *,
+    tokenizer: Any = None,
+    text_encoder: Any = None,
+    unet: Any = None,
+    vae: Any = None,
+    scheduler: Any = None,
+    config: Optional[Dict[str, Any]] = None,
+) -> Hypergraph:
+    """Video-to-video: same wiring as img2video; metadata flags V2V for runners/docs."""
+    h = build_sd15_animatediff_img2img_graph(
+        tokenizer=tokenizer,
+        text_encoder=text_encoder,
+        unet=unet,
+        vae=vae,
+        scheduler=scheduler,
+        config=config,
+    )
+    base_meta = h.metadata if isinstance(h.metadata, dict) else {}
+    h.metadata = {**base_meta, "animatediff_template": "sd15_animatediff_video2video"}
+    meta = h.metadata
+    ad = meta.setdefault("animatediff", {})
+    if isinstance(ad, dict):
+        ad["video2video"] = True
+    return h
+
+
+def build_sd15_animatediff_sparsectrl_graph(
+    *,
+    tokenizer: Any = None,
+    text_encoder: Any = None,
+    unet: Any = None,
+    vae: Any = None,
+    scheduler: Any = None,
+    safety_checker: Any = None,
+    feature_extractor: Any = None,
+    config: Optional[Dict[str, Any]] = None,
+) -> Hypergraph:
+    """Text-to-video base graph; use a SparseCtrl / motion ControlNet checkpoint via ``add_component``.
+
+    Wiring matches text2img + optional ControlNet edges; ``metadata['animatediff']['sparsectrl']=True`` tags the intent.
+    """
+    h = build_sd15_animatediff_text2img_graph(
+        tokenizer=tokenizer,
+        text_encoder=text_encoder,
+        unet=unet,
+        vae=vae,
+        scheduler=scheduler,
+        safety_checker=safety_checker,
+        feature_extractor=feature_extractor,
+        config=config,
+    )
+    meta = h.metadata if isinstance(h.metadata, dict) else {}
+    h.metadata = {**meta, "animatediff_template": "sd15_animatediff_sparsectrl"}
+    ad = h.metadata.setdefault("animatediff", {})
+    if isinstance(ad, dict):
+        ad["sparsectrl"] = True
+    return h
+
+
 def _sd15_inpaint_topology_node_ids(graph: Hypergraph) -> Dict[str, str]:
     """Canonical node ids for inpaint / universal SD1.5 rewiring (preset or builder role map)."""
     meta = getattr(graph, "metadata", None) or {}

@@ -770,6 +770,33 @@ class DiffusionGraphBuilder:
             dtype_map = {"float16": torch.float16, "float32": torch.float32, "bfloat16": torch.bfloat16}
             dtype_to_load = dtype_map.get(dtype_str, torch.float16)
 
+        # AnimateDiff: wrap existing SD1.5 UNet with MotionAdapter (diffusers UNetMotionModel).
+        if component_type == "sd15.motionadapter":
+            if not pretrained:
+                raise ValueError(
+                    "sd15.motionadapter requires pretrained= (Hugging Face repo id for MotionAdapter weights)."
+                )
+            if dtype_to_load is None:
+                dtype_map = {"float16": torch.float16, "float32": torch.float32, "bfloat16": torch.bfloat16}
+                dtype_to_load = dtype_map.get(family_spec.torch_dtype_default, torch.float16)
+            self._apply_sd15_motion_adapter(str(pretrained), cfg, dtype_to_load)
+            self.expose_default_io()
+            self._apply_graph_device()
+            return self
+
+        if component_type == "sdxl.motionadapter":
+            if not pretrained:
+                raise ValueError(
+                    "sdxl.motionadapter requires pretrained= (Hugging Face repo id for MotionAdapter weights)."
+                )
+            if dtype_to_load is None:
+                dtype_map = {"float16": torch.float16, "float32": torch.float32, "bfloat16": torch.bfloat16}
+                dtype_to_load = dtype_map.get(family_spec.torch_dtype_default, torch.float16)
+            self._apply_sdxl_motion_adapter(str(pretrained), cfg, dtype_to_load)
+            self.expose_default_io()
+            self._apply_graph_device()
+            return self
+
         # Load pretrained components if requested
         components_loaded: Dict[str, Any] = {}
         if pretrained and spec.load_keys:
@@ -887,6 +914,160 @@ class DiffusionGraphBuilder:
             if bt.endswith("/unet") or bt.endswith("/transformer"):
                 return node
         return None
+
+    def _apply_sd15_motion_adapter(
+        self,
+        pretrained_repo: str,
+        cfg: Dict[str, Any],
+        torch_dtype: Any,
+    ) -> None:
+        """Load MotionAdapter and replace ``sd15/unet`` node's module with ``UNetMotionModel``."""
+        from yggdrasill.integrations.diffusers.lazy_component import resolve_if_lazy
+
+        try:
+            from diffusers.models import MotionAdapter, UNetMotionModel
+        except ImportError as exc:  # pragma: no cover
+            raise ImportError(
+                "AnimateDiff requires diffusers with MotionAdapter / UNetMotionModel. "
+                "Install: pip install 'diffusers>=0.28'"
+            ) from exc
+
+        node = self._find_unet_node()
+        if node is None:
+            raise RuntimeError(
+                "sd15.motionadapter requires a graph that already has an sd15/unet node "
+                "(e.g. DiffusionGraphBuilder.from_template('sd15_text2img', ...))."
+            )
+        bt = getattr(node, "block_type", "") or ""
+        if bt != "sd15/unet":
+            raise RuntimeError(
+                f"sd15.motionadapter only supports sd15/unet backbone; found {bt!r}."
+            )
+
+        base = resolve_if_lazy(getattr(node, "_unet", None))
+        if base is None:
+            raise RuntimeError("UNet node has no weights; add sd15.unet (or complete template) before motionadapter.")
+
+        if isinstance(base, UNetMotionModel):
+            import warnings
+
+            warnings.warn(
+                "UNet is already a UNetMotionModel; skipping second sd15.motionadapter wrap.",
+                stacklevel=2,
+            )
+        else:
+            ma = MotionAdapter.from_pretrained(pretrained_repo, torch_dtype=torch_dtype)
+            wrapped = UNetMotionModel.from_unet2d(base, ma, load_weights=True)
+            p = next(wrapped.parameters(), None)
+            if p is not None:
+                dev = p.device
+                dt = p.dtype
+                wrapped = wrapped.to(device=dev, dtype=dt)
+            node._unet = wrapped
+
+        num_frames = int(cfg.get(C.CFG_NUM_FRAMES, cfg.get("num_frames", 16)))
+        decode_chunk = int(cfg.get(C.CFG_DECODE_CHUNK_SIZE, cfg.get("decode_chunk_size", 16)))
+        meta = self._graph.metadata
+        slot = meta.setdefault("animatediff", {})
+        if not isinstance(slot, dict):
+            slot = {}
+            meta["animatediff"] = slot
+        slot["num_frames"] = num_frames
+        slot["motion_adapter_pretrained"] = pretrained_repo
+
+        for nid in self._graph.node_ids:
+            n = self._graph.get_node(nid)
+            nbt = getattr(n, "block_type", "") or ""
+            if "sd15/latent_init" in nbt:
+                if not hasattr(n, "_config"):
+                    n._config = {}
+                n._config[C.CFG_NUM_FRAMES] = num_frames
+            if "sd15/vae_decode" in nbt:
+                if not hasattr(n, "_config"):
+                    n._config = {}
+                n._config[C.CFG_NUM_FRAMES] = num_frames
+                n._config[C.CFG_DECODE_CHUNK_SIZE] = decode_chunk
+                n._config[C.CFG_ANIMATEDIFF_VIDEO_DECODE] = True
+            if "sd15/vae_encode" in nbt:
+                if not hasattr(n, "_config"):
+                    n._config = {}
+                n._config[C.CFG_NUM_FRAMES] = num_frames
+
+    def _apply_sdxl_motion_adapter(
+        self,
+        pretrained_repo: str,
+        cfg: Dict[str, Any],
+        torch_dtype: Any,
+    ) -> None:
+        """Load MotionAdapter and wrap ``sdxl/unet`` with ``UNetMotionModel`` (AnimateDiff SDXL)."""
+        from yggdrasill.integrations.diffusers.lazy_component import resolve_if_lazy
+
+        try:
+            from diffusers.models import MotionAdapter, UNetMotionModel
+        except ImportError as exc:  # pragma: no cover
+            raise ImportError(
+                "AnimateDiff SDXL requires diffusers with MotionAdapter / UNetMotionModel."
+            ) from exc
+
+        node = self._find_unet_node()
+        if node is None:
+            raise RuntimeError(
+                "sdxl.motionadapter requires a graph with an sdxl/unet node "
+                "(e.g. DiffusionGraphBuilder.from_template('sdxl_text2img', ...))."
+            )
+        bt = getattr(node, "block_type", "") or ""
+        if bt != "sdxl/unet":
+            raise RuntimeError(
+                f"sdxl.motionadapter only supports sdxl/unet backbone; found {bt!r}."
+            )
+
+        base = resolve_if_lazy(getattr(node, "_unet", None))
+        if base is None:
+            raise RuntimeError("UNet node has no weights; add sdxl.unet before motionadapter.")
+
+        if isinstance(base, UNetMotionModel):
+            import warnings
+
+            warnings.warn(
+                "UNet is already a UNetMotionModel; skipping second sdxl.motionadapter wrap.",
+                stacklevel=2,
+            )
+        else:
+            ma = MotionAdapter.from_pretrained(pretrained_repo, torch_dtype=torch_dtype)
+            wrapped = UNetMotionModel.from_unet2d(base, ma, load_weights=True)
+            p = next(wrapped.parameters(), None)
+            if p is not None:
+                wrapped = wrapped.to(device=p.device, dtype=p.dtype)
+            node._unet = wrapped
+
+        num_frames = int(cfg.get(C.CFG_NUM_FRAMES, cfg.get("num_frames", 16)))
+        decode_chunk = int(cfg.get(C.CFG_DECODE_CHUNK_SIZE, cfg.get("decode_chunk_size", 16)))
+        meta = self._graph.metadata
+        slot = meta.setdefault("animatediff", {})
+        if not isinstance(slot, dict):
+            slot = {}
+            meta["animatediff"] = slot
+        slot["num_frames"] = num_frames
+        slot["motion_adapter_pretrained"] = pretrained_repo
+        slot["family"] = "sdxl"
+
+        for nid in self._graph.node_ids:
+            n = self._graph.get_node(nid)
+            nbt = getattr(n, "block_type", "") or ""
+            if "sdxl/latent_init" in nbt:
+                if not hasattr(n, "_config"):
+                    n._config = {}
+                n._config[C.CFG_NUM_FRAMES] = num_frames
+            if "sdxl/vae_decode" in nbt:
+                if not hasattr(n, "_config"):
+                    n._config = {}
+                n._config[C.CFG_NUM_FRAMES] = num_frames
+                n._config[C.CFG_DECODE_CHUNK_SIZE] = decode_chunk
+                n._config[C.CFG_ANIMATEDIFF_VIDEO_DECODE] = True
+            if "sdxl/vae_encode" in nbt:
+                if not hasattr(n, "_config"):
+                    n._config = {}
+                n._config[C.CFG_NUM_FRAMES] = num_frames
 
     def add_node(self, node_id: str, node: Any) -> "DiffusionGraphBuilder":
         """Add a pre-built node directly. Auto-connects by port names."""

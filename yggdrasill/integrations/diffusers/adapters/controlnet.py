@@ -78,6 +78,10 @@ class ControlNetNode(AbstractInnerModule):
             )
 
         latents = inputs[C.PORT_LATENTS]
+        is_video_latents = isinstance(latents, torch.Tensor) and latents.dim() == 5
+        num_frames_video = int(latents.shape[2]) if is_video_latents else 1
+        video_base_batch = int(latents.shape[0]) if isinstance(latents, torch.Tensor) else 1
+
         p = None
         if hasattr(self._controlnet, "parameters"):
             p = next(self._controlnet.parameters(), None)
@@ -145,6 +149,16 @@ class ControlNetNode(AbstractInnerModule):
             if sched is not None and hasattr(sched, "scale_model_input"):
                 latents_in = sched.scale_model_input(latents_in, timestep)
 
+        # AnimateDiff (diffusers pipeline_animatediff_controlnet): 5D → repeat prompts per frame, flatten batch.
+        if is_video_latents:
+            if latents_in.dim() != 5:
+                raise ValueError(
+                    f"expected 5D latents (B,C,F,H,W) for video ControlNet, got {tuple(latents_in.shape)}"
+                )
+            b5, c5, f5, h5, w5 = latents_in.shape
+            encoder_states = encoder_states.repeat_interleave(f5, dim=0)
+            latents_in = latents_in.transpose(1, 2).reshape(b5 * f5, c5, h5, w5)
+
         conditioning_scale = self._config.get("conditioning_scale", 1.0)
         conditioning_scale = self._apply_control_guidance_window(sched_state, conditioning_scale)
 
@@ -160,57 +174,98 @@ class ControlNetNode(AbstractInnerModule):
 
         cond_mode = _resolved_conditioning_mode()
 
-        if not isinstance(control_image, torch.Tensor):
-            height = self._config.get("height", latents_in.shape[-2] * 8)
-            width = self._config.get("width", latents_in.shape[-1] * 8)
-            dev = str(model_device)
-            # Cache key includes model dtype so fp16/fp32 preprocess caches do not clash.
-            cache_key = (
-                control_image if isinstance(control_image, str) else id(control_image),
-                height,
-                width,
-                str(model_dtype),
-                cond_mode,
-            )
-            if cache_key not in self._control_image_cache:
-                # Canny + VAE preprocess must run only once per run, not every denoising step.
-                preprocess_src: Any = control_image
-                if cond_mode == "canny":
-                    from yggdrasill.integrations.diffusers.common.image_utils import (
-                        apply_canny_for_controlnet_conditioning,
-                    )
+        height = self._config.get("height", latents_in.shape[-2] * 8)
+        width = self._config.get("width", latents_in.shape[-1] * 8)
+        dev = str(model_device)
 
-                    preprocess_src = apply_canny_for_controlnet_conditioning(
-                        control_image,
+        if not isinstance(control_image, torch.Tensor):
+            # Video: list/tuple of per-frame images (length F), matching AnimateDiff ControlNet pipeline.
+            if (
+                is_video_latents
+                and isinstance(control_image, (list, tuple))
+                and not isinstance(control_image, str)
+            ):
+                cache_key = (
+                    "video_frames",
+                    len(control_image),
+                    height,
+                    width,
+                    str(model_dtype),
+                    cond_mode,
+                    tuple(id(x) for x in control_image),
+                )
+                if cache_key not in self._control_image_cache:
+                    frames_t: List[Any] = []
+                    for fr in control_image:
+                        preprocess_src: Any = fr
+                        if cond_mode == "canny":
+                            from yggdrasill.integrations.diffusers.common.image_utils import (
+                                apply_canny_for_controlnet_conditioning,
+                            )
+
+                            preprocess_src = apply_canny_for_controlnet_conditioning(
+                                fr, height=height, width=width,
+                            )
+                        frames_t.append(
+                            preprocess_image(
+                                preprocess_src,
+                                height=height,
+                                width=width,
+                                dtype=torch.float32,
+                                device=dev,
+                                do_normalize=False,
+                                do_convert_rgb=True,
+                            )
+                        )
+                    self._control_image_cache[cache_key] = torch.cat(frames_t, dim=0)
+                control_image = self._control_image_cache[cache_key].to(
+                    device=model_device, dtype=model_dtype
+                )
+            else:
+                # Cache key includes model dtype so fp16/fp32 preprocess caches do not clash.
+                cache_key = (
+                    control_image if isinstance(control_image, str) else id(control_image),
+                    height,
+                    width,
+                    str(model_dtype),
+                    cond_mode,
+                )
+                if cache_key not in self._control_image_cache:
+                    preprocess_src = control_image
+                    if cond_mode == "canny":
+                        from yggdrasill.integrations.diffusers.common.image_utils import (
+                            apply_canny_for_controlnet_conditioning,
+                        )
+
+                        preprocess_src = apply_canny_for_controlnet_conditioning(
+                            control_image,
+                            height=height,
+                            width=width,
+                        )
+                    self._control_image_cache[cache_key] = preprocess_image(
+                        preprocess_src,
                         height=height,
                         width=width,
+                        dtype=torch.float32,
+                        device=dev,
+                        do_normalize=False,
+                        do_convert_rgb=True,
                     )
-                # Match pipeline_controlnet: control_image_processor uses do_normalize=False, do_convert_rgb=True
-                # (Vae input uses [-1,1]; ControlNet conditioning must stay in [0,1] — wrong range breaks residuals.)
-                self._control_image_cache[cache_key] = preprocess_image(
-                    preprocess_src,
-                    height=height,
-                    width=width,
-                    dtype=torch.float32,
-                    device=dev,
-                    do_normalize=False,
-                    do_convert_rgb=True,
+                control_image = self._control_image_cache[cache_key].to(
+                    device=model_device, dtype=model_dtype
                 )
-            control_image = self._control_image_cache[cache_key].to(
-                device=model_device, dtype=model_dtype
-            )
         else:
             control_image = control_image.to(device=model_device, dtype=model_dtype)
 
-        # prepare_image() in pipeline_controlnet: if CFG and not guess_mode,
-        # image = torch.cat([image] * 2) so controlnet_cond batch matches latents_in.
-        if (
-            do_cfg
-            and not guess_mode
-            and isinstance(control_image, torch.Tensor)
-            and control_image.shape[0] * 2 == latents_in.shape[0]
-        ):
-            control_image = torch.cat([control_image, control_image], dim=0)
+        control_image = self._match_controlnet_cond_batch(
+            control_image,
+            target_batch=int(latents_in.shape[0]),
+            num_frames=num_frames_video,
+            video_base_batch=video_base_batch,
+            is_video_latents=is_video_latents,
+            do_cfg=do_cfg,
+            guess_mode=guess_mode,
+        )
 
         if isinstance(control_image, torch.Tensor) and control_image.shape[0] != latents_in.shape[0]:
             raise ValueError(
@@ -273,6 +328,12 @@ class ControlNetNode(AbstractInnerModule):
             else:
                 added_cond["time_ids"] = tid_p
 
+        if added_cond and is_video_latents:
+            f_rep = num_frames_video
+            for k, v in list(added_cond.items()):
+                if isinstance(v, torch.Tensor):
+                    added_cond[k] = v.repeat_interleave(f_rep, dim=0)
+
         if added_cond:
             kwargs["added_cond_kwargs"] = added_cond
 
@@ -302,6 +363,65 @@ class ControlNetNode(AbstractInnerModule):
             C.PORT_DOWN_BLOCK_RESIDUALS: down_residuals,
             C.PORT_MID_BLOCK_RESIDUAL: mid_residual,
         }
+
+    def _match_controlnet_cond_batch(
+        self,
+        control_image: Any,
+        *,
+        target_batch: int,
+        num_frames: int,
+        video_base_batch: int,
+        is_video_latents: bool,
+        do_cfg: bool,
+        guess_mode: bool,
+    ) -> Any:
+        """Match ``controlnet_cond.shape[0]`` to flattened video/control latent batch (AnimateDiff + CFG)."""
+        import torch
+
+        if not isinstance(control_image, torch.Tensor):
+            return control_image
+        ci = control_image
+        if ci.dim() != 4:
+            raise ValueError(
+                f"ControlNet conditioning must be 4D [N,C,H,W]; got dim={ci.dim()} shape={tuple(ci.shape)}"
+            )
+        n, c, h, w = ci.shape
+        if n == target_batch:
+            return ci
+        if n == 1:
+            return ci.expand(target_batch, c, h, w).contiguous()
+
+        if not is_video_latents:
+            if do_cfg and not guess_mode and n * 2 == target_batch:
+                return torch.cat([ci, ci], dim=0)
+        else:
+            if num_frames <= 1:
+                if do_cfg and not guess_mode and n * 2 == target_batch:
+                    return torch.cat([ci, ci], dim=0)
+            else:
+                if n == num_frames and video_base_batch == 1:
+                    if target_batch == num_frames:
+                        return ci
+                    if target_batch == 2 * num_frames and do_cfg and not guess_mode:
+                        return torch.cat([ci, ci], dim=0)
+                strip = video_base_batch * num_frames
+                if n == strip and target_batch == strip:
+                    return ci
+                if n == strip and target_batch == 2 * strip and do_cfg and not guess_mode:
+                    return torch.cat([ci, ci], dim=0)
+                if n == num_frames and video_base_batch > 1 and target_batch == strip:
+                    return (
+                        ci.unsqueeze(0)
+                        .expand(video_base_batch, num_frames, c, h, w)
+                        .reshape(-1, c, h, w)
+                        .contiguous()
+                    )
+
+        raise ValueError(
+            f"ControlNet conditioning batch {n} cannot be aligned to target_batch={target_batch} "
+            f"(video={is_video_latents}, num_frames={num_frames}, video_base_batch={video_base_batch}, "
+            f"do_cfg={do_cfg}, guess_mode={guess_mode}, shape={tuple(ci.shape)})."
+        )
 
     def _apply_control_guidance_window(self, sched_state: Any, scale: Any) -> Any:
         """Match diffusers' control_guidance_start/end via controlnet_keep.

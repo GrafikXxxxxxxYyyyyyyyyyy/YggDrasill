@@ -126,3 +126,7 @@ CFG_CLIP_SKIP = "clip_skip"
 CFG_IP_ADAPTER_SCALE = "ip_adapter_scale"
 # Set automatically when IP-Adapter Plus weights are loaded (proj_in.in_features).
 CFG_IP_ADAPTER_PLUS_TOKEN_EMBED_DIM = "ip_adapter_plus_token_embed_dim"
+# AnimateDiff (SD1.5 + MotionAdapter): temporal dimension and chunked VAE decode
+CFG_NUM_FRAMES = "num_frames"
+CFG_DECODE_CHUNK_SIZE = "decode_chunk_size"
+CFG_ANIMATEDIFF_VIDEO_DECODE = "animatediff_video_decode"

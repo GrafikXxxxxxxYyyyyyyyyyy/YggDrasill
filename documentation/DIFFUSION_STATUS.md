@@ -21,6 +21,17 @@ Diffusion-слой является **opt-in addon** над ядром:
 - family-aware `LoRA training` subsystem через `yggdrasill.integrations.diffusers.training`;
 - diffusion builders / presets для smoke и development use.
 
+### AnimateDiff (SD1.5 / SDXL)
+
+Поверхность в коде (ориентир diffusers v0.37.x):
+
+- **Компоненты:** `sd15.motionadapter`, `sdxl.motionadapter` — оборачивают существующий UNet в `UNetMotionModel` (`DiffusionGraphBuilder.add_component`).
+- **Латенты 5D** `(B, C, F, H, W)`: `SD15LatentInitNode` / `SDXLLatentInitNode` (t2v и img2video через `init_latents`), `SD15UNetNode` / `SDXLUNetNode` (`repeat_interleave` по кадрам для эмбеддингов и SDXL `added_cond`), **9-ch inpaint + видео** (broadcast маски по `F` на SD1.5 и SDXL).
+- **VAE:** `SD15VAEEncodeNode` / `SDXLVAEEncodeNode` — список кадров или тензор `(B,F,C,H,W)` → 5D латенты; decode — по-кадровый 2D decode (chunked).
+- **ControlNet:** `ControlNetNode` — для 5D латентов: `scale_model_input` → `repeat_interleave` по `encoder_hidden_states` → flatten `(B·F, C, H, W)`; SDXL — то же для `added_cond_kwargs`; список изображений как `controlnet_cond`.
+- **Шаблоны / factory:** `sd15_animatediff_*` (`text2img`, `img2img`, `inpaint`, `video2video`, `sparsectrl`), `sdxl_animatediff_text2img`; `build_sd15_animatediff_pipeline`, `build_sdxl_animatediff_pipeline`.
+- **FreeNoise / FreeInit:** `common/animatediff_extras.py` + флаги `animatediff_free_noise` (и тип/shape в `run_diffusion` / `metadata['animatediff']`); FreeInit — внешние итерации через `animatediff_free_init_iters` / повторный запуск с обновлённым scheduler.
+
 ## Training subsystem
 
 Текущая training-поддержка уже отделена от inference-cycle и теперь организована как

@@ -30,6 +30,8 @@
 
 Папка `integrations/diffusers/common/` содержит **вспомогательные утилиты** (изображения, CFG, merge residual и т.п.), а не целые семейства; узлы семейства не выносятся в `common/` ради связи двух линеек друг с другом.
 
+**AnimateDiff (реализация в репозитории):** графы с латентами `(B, C, F, H, W)`, компоненты `sd15.motionadapter` / `sdxl.motionadapter`, шаблоны `sd15_animatediff_*` и `sdxl_animatediff_text2img`, вспомогательные режимы FreeNoise в `common/animatediff_extras.py`. Актуальная матрица сценариев — в `documentation/DIFFUSION_STATUS.md`.
+
 ---
 
 ## 2. Что должен уметь фреймворк (паритет с Diffusers v0.37.0)

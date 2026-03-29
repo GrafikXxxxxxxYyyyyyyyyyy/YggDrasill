@@ -503,3 +503,67 @@ def build_sdxl_base_refiner_workflow(
     w.expose_output("refiner", C.PORT_DECODED_IMAGE, C.PORT_OUTPUT_IMAGE)
 
     return w
+
+
+def _patch_sdxl_graph_animatediff(
+    graph: Hypergraph,
+    num_frames: int,
+    *,
+    decode_chunk: int = 16,
+) -> None:
+    meta = getattr(graph, "metadata", None)
+    if not isinstance(meta, dict):
+        meta = {}
+        graph.metadata = meta
+    slot = meta.setdefault("animatediff", {})
+    if isinstance(slot, dict):
+        slot["num_frames"] = int(num_frames)
+        slot.setdefault("family", "sdxl")
+    for nid in graph.node_ids:
+        n = graph.get_node(nid)
+        if n is None:
+            continue
+        bt = getattr(n, "block_type", "") or ""
+        cfg = getattr(n, "_config", None)
+        if not isinstance(cfg, dict):
+            cfg = {}
+            n._config = cfg
+        if "sdxl/latent_init" in bt:
+            cfg[C.CFG_NUM_FRAMES] = int(num_frames)
+        if "sdxl/vae_decode" in bt:
+            cfg[C.CFG_NUM_FRAMES] = int(num_frames)
+            cfg[C.CFG_DECODE_CHUNK_SIZE] = int(decode_chunk)
+            cfg[C.CFG_ANIMATEDIFF_VIDEO_DECODE] = True
+        if "sdxl/vae_encode" in bt:
+            cfg[C.CFG_NUM_FRAMES] = int(num_frames)
+
+
+def build_sdxl_animatediff_text2img_graph(
+    *,
+    tokenizer: Any = None,
+    tokenizer_2: Any = None,
+    text_encoder: Any = None,
+    text_encoder_2: Any = None,
+    unet: Any = None,
+    vae: Any = None,
+    scheduler: Any = None,
+    config: Optional[Dict[str, Any]] = None,
+) -> Hypergraph:
+    """SDXL text-to-video (5D latents); add ``sdxl.motionadapter`` for weights."""
+    cfg = dict(config or {})
+    nf = int(cfg.get(C.CFG_NUM_FRAMES, cfg.get("num_frames", 16)))
+    dc = int(cfg.get(C.CFG_DECODE_CHUNK_SIZE, cfg.get("decode_chunk_size", 16)))
+    h = build_sdxl_text2img_graph(
+        tokenizer=tokenizer,
+        tokenizer_2=tokenizer_2,
+        text_encoder=text_encoder,
+        text_encoder_2=text_encoder_2,
+        unet=unet,
+        vae=vae,
+        scheduler=scheduler,
+        config=cfg,
+    )
+    m = h.metadata if isinstance(h.metadata, dict) else {}
+    h.metadata = {**m, "animatediff_template": "sdxl_animatediff_text2img"}
+    _patch_sdxl_graph_animatediff(h, nf, decode_chunk=dc)
+    return h

@@ -19,6 +19,36 @@ def _build_sd15_inpaint(**kwargs: Any) -> Any:
     return build_sd15_pipeline(task="inpaint", **kwargs)
 
 
+def _build_sd15_animatediff_text2img(**kwargs: Any) -> Any:
+    from yggdrasill.integrations.diffusers.factory import build_sd15_animatediff_pipeline
+    return build_sd15_animatediff_pipeline(task="text2img", **kwargs)
+
+
+def _build_sd15_animatediff_img2img(**kwargs: Any) -> Any:
+    from yggdrasill.integrations.diffusers.factory import build_sd15_animatediff_pipeline
+    return build_sd15_animatediff_pipeline(task="img2img", **kwargs)
+
+
+def _build_sd15_animatediff_inpaint(**kwargs: Any) -> Any:
+    from yggdrasill.integrations.diffusers.factory import build_sd15_animatediff_pipeline
+    return build_sd15_animatediff_pipeline(task="inpaint", **kwargs)
+
+
+def _build_sd15_animatediff_video2video(**kwargs: Any) -> Any:
+    from yggdrasill.integrations.diffusers.factory import build_sd15_animatediff_pipeline
+    return build_sd15_animatediff_pipeline(task="video2video", **kwargs)
+
+
+def _build_sd15_animatediff_sparsectrl(**kwargs: Any) -> Any:
+    from yggdrasill.integrations.diffusers.factory import build_sd15_animatediff_pipeline
+    return build_sd15_animatediff_pipeline(task="sparsectrl", **kwargs)
+
+
+def _build_sdxl_animatediff_text2img(**kwargs: Any) -> Any:
+    from yggdrasill.integrations.diffusers.factory import build_sdxl_animatediff_pipeline
+    return build_sdxl_animatediff_pipeline(**kwargs)
+
+
 def _build_sdxl_text2img(**kwargs: Any) -> Any:
     from yggdrasill.integrations.diffusers.factory import build_sdxl_pipeline
     return build_sdxl_pipeline(task="text2img", **kwargs)
@@ -64,6 +94,12 @@ _TEMPLATE_BUILDERS: Dict[str, Callable[..., Any]] = {
     "sd15_text2image": _build_sd15_text2img,
     "sd15_img2img": _build_sd15_img2img,
     "sd15_inpaint": _build_sd15_inpaint,
+    "sd15_animatediff_text2img": _build_sd15_animatediff_text2img,
+    "sd15_animatediff_img2img": _build_sd15_animatediff_img2img,
+    "sd15_animatediff_inpaint": _build_sd15_animatediff_inpaint,
+    "sd15_animatediff_video2video": _build_sd15_animatediff_video2video,
+    "sd15_animatediff_sparsectrl": _build_sd15_animatediff_sparsectrl,
+    "sdxl_animatediff_text2img": _build_sdxl_animatediff_text2img,
     "sdxl_text2img": _build_sdxl_text2img,
     "sdxl_img2img": _build_sdxl_img2img,
     "sdxl_inpaint": _build_sdxl_inpaint,
@@ -80,6 +116,12 @@ GRAPH_TEMPLATES: Final[Tuple[str, ...]] = (
     "sd15_text2img",
     "sd15_img2img",
     "sd15_inpaint",
+    "sd15_animatediff_text2img",
+    "sd15_animatediff_img2img",
+    "sd15_animatediff_inpaint",
+    "sd15_animatediff_video2video",
+    "sd15_animatediff_sparsectrl",
+    "sdxl_animatediff_text2img",
     "sdxl_text2img",
     "sdxl_img2img",
     "sdxl_inpaint",

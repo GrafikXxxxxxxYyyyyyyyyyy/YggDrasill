@@ -96,6 +96,7 @@ def run(
     inputs: Optional[Dict[str, Any]] = None,
     *,
     num_inference_steps: Optional[int] = None,
+    num_frames: Optional[int] = None,
     seed: Optional[int] = None,
     device: Optional[Any] = None,
     wrap_output: bool = True,
@@ -109,6 +110,11 @@ def run(
             ``controlnet_image`` / mask keys may be dicts ``{node_id: ...}`` here as well as
             in ``**kwargs``; they are normalized to ``{node_id}:{port}`` before the run.
         num_inference_steps: Override for denoising steps.
+        num_frames: For AnimateDiff graphs (``sd15.motionadapter`` / ``sdxl.motionadapter``), overrides temporal length.
+            Optional kwargs consumed by :func:`_prepare_diffusion_run`: ``animatediff_free_noise``,
+            ``animatediff_free_noise_noise_type``, ``animatediff_free_noise_context_length``,
+            ``animatediff_free_noise_context_stride``, ``animatediff_free_init_iters`` (see
+            ``metadata['animatediff']`` for defaults).
         seed: Random seed for latent init.
         device: Target device.
         wrap_output: If True, return DiffusionOutput; otherwise raw dict.
@@ -132,6 +138,8 @@ def run(
     run_kw = dict(kwargs)
     if num_inference_steps is not None:
         run_kw["num_inference_steps"] = num_inference_steps
+    if num_frames is not None:
+        run_kw["num_frames"] = num_frames
     if seed is not None:
         run_kw["seed"] = seed
     if device is not None:
@@ -939,3 +947,53 @@ def _prepare_diffusion_run(
             if not hasattr(node, "_config"):
                 node._config = {}
             node._config["guidance_scale"] = gsf
+
+    nf = run_kwargs.pop("num_frames", None)
+    if nf is not None:
+        nf_i = int(nf)
+        meta = getattr(graph, "metadata", None) or {}
+        ad = meta.get("animatediff")
+        if isinstance(ad, dict):
+            ad[C.CFG_NUM_FRAMES] = nf_i
+        for node in (getattr(graph, "_nodes", None) or {}).values():
+            bt = getattr(node, "block_type", "") or ""
+            if "latent_init" not in bt and "vae_decode" not in bt:
+                continue
+            if not hasattr(node, "_config"):
+                node._config = {}
+            node._config[C.CFG_NUM_FRAMES] = nf_i
+
+    meta_ad = (getattr(graph, "metadata", None) or {}).get("animatediff")
+    overrides = {
+        "animatediff_free_noise": run_kwargs.pop("animatediff_free_noise", None),
+        "animatediff_free_noise_noise_type": run_kwargs.pop(
+            "animatediff_free_noise_noise_type", None,
+        ),
+        "animatediff_free_noise_context_length": run_kwargs.pop(
+            "animatediff_free_noise_context_length", None,
+        ),
+        "animatediff_free_noise_context_stride": run_kwargs.pop(
+            "animatediff_free_noise_context_stride", None,
+        ),
+        "animatediff_free_init_iters": run_kwargs.pop("animatediff_free_init_iters", None),
+    }
+    if isinstance(meta_ad, dict):
+        if meta_ad.get("free_noise") is True:
+            overrides.setdefault("animatediff_free_noise", True)
+        for src, dst in (
+            ("free_noise_noise_type", "animatediff_free_noise_noise_type"),
+            ("free_noise_context_length", "animatediff_free_noise_context_length"),
+            ("free_noise_context_stride", "animatediff_free_noise_context_stride"),
+            ("free_init_iters", "animatediff_free_init_iters"),
+        ):
+            if meta_ad.get(src) is not None and overrides.get(dst) is None:
+                overrides[dst] = meta_ad[src]
+    for node in (getattr(graph, "_nodes", None) or {}).values():
+        bt = getattr(node, "block_type", "") or ""
+        if "latent_init" not in bt:
+            continue
+        if not hasattr(node, "_config"):
+            node._config = {}
+        for k, v in overrides.items():
+            if v is not None:
+                node._config[k] = v

@@ -71,6 +71,13 @@ class SD15UNetNode(AbstractBackbone):
         latents = inputs[C.PORT_LATENTS]
         timestep = inputs[C.PORT_TIMESTEP]
         prompt_embeds = inputs[C.PORT_PROMPT_EMBEDS]
+        lat_ndim = (
+            int(latents.dim())
+            if hasattr(latents, "dim") and callable(getattr(latents, "dim", None))
+            else int(getattr(latents, "ndim", 4))
+        )
+        is_video = lat_ndim == 5
+        num_frames = int(latents.shape[2]) if is_video else 1
 
         from yggdrasill.integrations.diffusers.common.scheduler_step import (
             scheduler_reference_timestep_dtype,
@@ -124,6 +131,10 @@ class SD15UNetNode(AbstractBackbone):
             latent_input = latents
             encoder_states = prompt_embeds.to(device=device, dtype=dtype)
 
+        # AnimateDiff / UNetMotionModel: match diffusers AnimateDiffPipeline (repeat per frame on batch dim).
+        if is_video and num_frames > 1:
+            encoder_states = encoder_states.repeat_interleave(num_frames, dim=0)
+
         if sched_state and isinstance(sched_state, dict):
             sched = sched_state.get("scheduler")
             if sched is not None and hasattr(sched, "scale_model_input"):
@@ -132,13 +143,31 @@ class SD15UNetNode(AbstractBackbone):
         mask_latents = inputs.get(C.PORT_MASK_LATENTS)
         masked_latents = inputs.get(C.PORT_MASKED_IMAGE_LATENTS)
         in_ch = getattr(getattr(self._unet, "config", None), "in_channels", 4)
+
+        def _inpaint_aux_to_video(aux: Any) -> Any:
+            """Broadcast 4D mask/masked latents to (B, C_aux, F, H, W) (before CFG doubling)."""
+            aux = aux.to(device=device, dtype=dtype)
+            if not is_video or num_frames <= 1:
+                return aux
+            if aux.dim() != 4:
+                if aux.dim() == 5 and aux.shape[2] == num_frames:
+                    return aux
+                raise ValueError(
+                    f"inpaint aux for video expects 4D (B,C,H,W) or 5D with F={num_frames}; got {tuple(aux.shape)}"
+                )
+            b_a, c_a, h_a, w_a = aux.shape
+            b_lat = int(latents.shape[0])
+            if b_a != b_lat:
+                raise ValueError(f"inpaint aux batch {b_a} != latent batch {b_lat}")
+            return aux.unsqueeze(2).expand(b_lat, c_a, num_frames, h_a, w_a).contiguous()
+
         if (
             mask_latents is not None
             and masked_latents is not None
             and in_ch == 9
         ):
-            mask_latents = mask_latents.to(device=device, dtype=dtype)
-            masked_latents = masked_latents.to(device=device, dtype=dtype)
+            mask_latents = _inpaint_aux_to_video(mask_latents)
+            masked_latents = _inpaint_aux_to_video(masked_latents)
             if do_cfg:
                 mask_latents = torch.cat([mask_latents, mask_latents], dim=0)
                 masked_latents = torch.cat([masked_latents, masked_latents], dim=0)

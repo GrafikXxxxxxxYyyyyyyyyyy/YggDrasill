@@ -70,7 +70,13 @@ class SDXLLatentInitNode(AbstractOuterModule):
         }
         dtype = dtype_map.get(dtype_str, torch.float16)
 
-        shape = (batch_size, num_channels, height // 8, width // 8)
+        num_frames = int(self._config.get(C.CFG_NUM_FRAMES, self._config.get("num_frames", 1)))
+        if num_frames < 1:
+            num_frames = 1
+        if num_frames > 1:
+            shape = (batch_size, num_channels, num_frames, height // 8, width // 8)
+        else:
+            shape = (batch_size, num_channels, height // 8, width // 8)
         target_device = device if isinstance(device, (str, torch.device)) else str(device)
 
         generator = None
@@ -78,7 +84,24 @@ class SDXLLatentInitNode(AbstractOuterModule):
         if seed is not None:
             generator = torch.Generator(device=target_device).manual_seed(int(seed))
 
-        noise = torch.randn(shape, generator=generator, device=target_device, dtype=dtype)
+        if num_frames > 1 and self._config.get("animatediff_free_noise"):
+            from yggdrasill.integrations.diffusers.common.animatediff_extras import (
+                apply_free_noise_latents,
+            )
+
+            noise = apply_free_noise_latents(
+                batch_size=batch_size,
+                num_channels=num_channels,
+                num_frames=num_frames,
+                height_latent=height // 8,
+                width_latent=width // 8,
+                dtype=dtype,
+                device=torch.device(target_device),
+                generator=generator,
+                config=self._config,
+            )
+        else:
+            noise = torch.randn(shape, generator=generator, device=target_device, dtype=dtype)
         sig = init_noise_sigma
         if isinstance(sig, torch.Tensor):
             latents = noise * sig.to(device=target_device, dtype=dtype)
@@ -110,6 +133,11 @@ class SDXLLatentInitNode(AbstractOuterModule):
             latents = existing_latents * init_noise_sigma
             timestep = self._clamp_timestep(self._get_first_timestep(sched_state))
             return {C.PORT_LATENTS: latents, C.PORT_TIMESTEP: timestep}
+
+        if existing_latents.dim() == 5:
+            return self._forward_from_encoded_latents_5d(
+                existing_latents, sched_state, init_noise_sigma,
+            )
 
         strength = float(self._config.get("strength", 0.8))
         if strength <= 0 or strength > 1.0:
@@ -192,6 +220,83 @@ class SDXLLatentInitNode(AbstractOuterModule):
         timestep = self._clamp_timestep(first_t)
         if self._config.get("inpaint_4ch_composite"):
             sched_state["_inpaint_blend_noise"] = noise
+        return {C.PORT_LATENTS: latents, C.PORT_TIMESTEP: timestep}
+
+    def _forward_from_encoded_latents_5d(
+        self,
+        existing_latents: Any,
+        sched_state: Dict[str, Any],
+        init_noise_sigma: float,
+    ) -> Dict[str, Any]:
+        """AnimateDiff SDXL: encoded latents ``(B,C,F,H,W)`` (same schedule logic as SD1.5 5D)."""
+        import torch
+
+        if existing_latents.dim() != 5:
+            raise ValueError(f"expected 5D latents (B,C,F,H,W), got shape {tuple(existing_latents.shape)}")
+
+        scheduler = sched_state.get("scheduler")
+        strength = float(self._config.get("strength", 0.8))
+        if strength <= 0 or strength > 1.0:
+            raise ValueError(f"strength must be in (0, 1], got {strength}")
+
+        timesteps = getattr(scheduler, "timesteps", None)
+        if timesteps is None or len(timesteps) == 0:
+            latents = existing_latents * init_noise_sigma
+            timestep = self._clamp_timestep(self._get_first_timestep(sched_state))
+            return {C.PORT_LATENTS: latents, C.PORT_TIMESTEP: timestep}
+
+        n = len(timesteps)
+        init_timestep = min(int(n * strength), n)
+        if strength > 0 and init_timestep == 0:
+            init_timestep = 1
+        t_start = max(n - init_timestep, 0)
+        order = int(getattr(scheduler, "order", 1))
+        start_idx = t_start * order
+
+        if isinstance(timesteps, torch.Tensor):
+            scheduler.timesteps = timesteps[start_idx:].clone()
+        else:
+            scheduler.timesteps = timesteps[start_idx:]
+
+        if hasattr(scheduler, "set_begin_index"):
+            scheduler.set_begin_index(start_idx)
+
+        sched_state["num_loop_steps"] = len(scheduler.timesteps)
+
+        b, c, f, h, w = existing_latents.shape
+        flat = existing_latents.permute(0, 2, 1, 3, 4).reshape(b * f, c, h, w)
+        device = flat.device
+        dtype = flat.dtype
+        generator = None
+        seed = self._config.get("seed")
+        if seed is not None:
+            generator = torch.Generator(device=device).manual_seed(int(seed))
+
+        ts_line = scheduler.timesteps
+        first_t = ts_line[0]
+        batch_flat = b * f
+        if isinstance(ts_line, torch.Tensor):
+            timesteps_for_noise = ts_line[0].expand(batch_flat).to(device=device)
+        else:
+            v0 = ts_line[0]
+            tdtype = torch.float32 if isinstance(v0, float) else torch.long
+            timesteps_for_noise = torch.full((batch_flat,), v0, device=device, dtype=tdtype)
+
+        if strength >= 1.0:
+            noise = torch.randn(flat.shape, generator=generator, device=device, dtype=dtype)
+            sig = init_noise_sigma
+            if isinstance(sig, torch.Tensor):
+                latents_flat = noise * sig.to(device=device, dtype=dtype)
+            else:
+                latents_flat = noise * float(sig)
+        else:
+            noise = torch.randn(flat.shape, generator=generator, device=device, dtype=dtype)
+            latents_flat = scheduler.add_noise(flat, noise, timesteps_for_noise)
+
+        latents = latents_flat.reshape(b, f, c, h, w).permute(0, 2, 1, 3, 4).contiguous()
+        timestep = self._clamp_timestep(first_t)
+        if self._config.get("inpaint_4ch_composite"):
+            sched_state["_inpaint_blend_noise"] = noise.reshape(b, f, c, h, w).permute(0, 2, 1, 3, 4)
         return {C.PORT_LATENTS: latents, C.PORT_TIMESTEP: timestep}
 
     def _get_first_timestep(self, sched_state: Any):

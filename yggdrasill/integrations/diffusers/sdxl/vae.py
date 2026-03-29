@@ -43,43 +43,68 @@ class SDXLVAEEncodeNode(AbstractConverter):
         if p is not None and vae_dtype is None:
             vae_dtype = p.dtype
 
-        # Match StableDiffusionXLImg2ImgPipeline.prepare_latents: fp16 VAE encode overflows;
-        # temporarily run encoder weights and pixels in float32 when config.force_upcast.
         force_upcast = bool(getattr(self._vae.config, "force_upcast", False))
         prep_dtype = torch.float32 if force_upcast else vae_dtype
+        height = self._config.get("height", 1024)
+        width = self._config.get("width", 1024)
+        scaling = getattr(self._vae.config, "scaling_factor", 0.13025)
+        shift = getattr(self._vae.config, "shift_factor", None)
+
+        def _post_sample(latents: Any) -> Any:
+            if shift is not None:
+                out = (latents - shift) * scaling
+            else:
+                out = latents * scaling
+            if vae_dtype is not None:
+                out = out.to(dtype=vae_dtype)
+            return out
+
+        def _encode_pixels(pixel_values: Any) -> Any:
+            did_fp32 = False
+            pv = pixel_values
+            if force_upcast and p is not None and vae_dtype == torch.float16:
+                self._vae.to(dtype=torch.float32)
+                pv = pv.float()
+                did_fp32 = True
+            elif force_upcast:
+                pv = pv.float()
+            with torch.no_grad():
+                lat = self._vae.encode(pv).latent_dist.sample()
+            if did_fp32 and vae_dtype is not None:
+                self._vae.to(dtype=vae_dtype)
+            return _post_sample(lat)
+
+        if isinstance(image, torch.Tensor) and image.dim() == 5:
+            b_sz, n_fr, c_in, h_in, w_in = image.shape
+            flat = image.reshape(b_sz * n_fr, c_in, h_in, w_in).to(device=device, dtype=prep_dtype)
+            lat_flat = _encode_pixels(flat)
+            _, c_lat, hl, wl = lat_flat.shape
+            latents = lat_flat.reshape(b_sz, n_fr, c_lat, hl, wl).permute(0, 2, 1, 3, 4).contiguous()
+            return {C.PORT_LATENTS: latents}
+
+        if isinstance(image, (list, tuple)) and not isinstance(image, str):
+            chunks: List[Any] = []
+            for fr in image:
+                chunks.append(
+                    preprocess_image(fr, height=height, width=width, dtype=prep_dtype, device=device)
+                )
+            pixel_values = torch.cat(chunks, dim=0)
+            lat_flat = _encode_pixels(pixel_values)
+            n_fr = len(image)
+            b_sz = int(lat_flat.shape[0] // max(n_fr, 1))
+            _, c_lat, hl, wl = lat_flat.shape
+            latents = lat_flat.reshape(b_sz, n_fr, c_lat, hl, wl).permute(0, 2, 1, 3, 4).contiguous()
+            return {C.PORT_LATENTS: latents}
 
         pixel_values = preprocess_image(
             image,
-            height=self._config.get("height", 1024),
-            width=self._config.get("width", 1024),
+            height=height,
+            width=width,
             dtype=prep_dtype,
             device=device,
         )
 
-        orig_vae_dtype = vae_dtype
-        did_fp32_encode = False
-        if force_upcast and p is not None and vae_dtype == torch.float16:
-            self._vae.to(dtype=torch.float32)
-            pixel_values = pixel_values.float()
-            did_fp32_encode = True
-        elif force_upcast:
-            pixel_values = pixel_values.float()
-
-        with torch.no_grad():
-            latents = self._vae.encode(pixel_values).latent_dist.sample()
-
-        if did_fp32_encode and orig_vae_dtype is not None:
-            self._vae.to(dtype=orig_vae_dtype)
-
-        scaling = getattr(self._vae.config, "scaling_factor", 0.13025)
-        shift = getattr(self._vae.config, "shift_factor", None)
-        if shift is not None:
-            latents = (latents - shift) * scaling
-        else:
-            latents = latents * scaling
-
-        if orig_vae_dtype is not None:
-            latents = latents.to(dtype=orig_vae_dtype)
+        latents = _encode_pixels(pixel_values)
 
         return {C.PORT_LATENTS: latents}
 
@@ -157,6 +182,28 @@ class SDXLVAEDecodeNode(AbstractConverter):
             latents = latents.to(device=device, dtype=p.dtype)
         else:
             latents = latents.to(device=device)
+
+        decode_chunk = int(
+            self._config.get(C.CFG_DECODE_CHUNK_SIZE, self._config.get("decode_chunk_size", 16))
+        )
+
+        if latents.dim() == 5:
+            b_sz, ch, n_frames, h_l, w_l = latents.shape
+            flat = latents.permute(0, 2, 1, 3, 4).reshape(b_sz * n_frames, ch, h_l, w_l)
+            chunks: List[Any] = []
+            try:
+                for i in range(0, flat.shape[0], max(1, decode_chunk)):
+                    chunk = flat[i : i + decode_chunk]
+                    if needs_fp32_decode and orig_vae_dtype is not None:
+                        self._vae.to(dtype=torch.float32)
+                    with torch.no_grad():
+                        chunks.append(self._vae.decode(chunk, return_dict=False)[0])
+            finally:
+                if needs_fp32_decode and orig_vae_dtype is not None:
+                    self._vae.to(dtype=orig_vae_dtype)
+            image = torch.cat(chunks, dim=0)
+            image = (image / 2 + 0.5).clamp(0, 1)
+            return {C.PORT_DECODED_IMAGE: postprocess_image(image, output_type=output_type)}
 
         try:
             with torch.no_grad():

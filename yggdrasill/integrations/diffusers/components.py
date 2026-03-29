@@ -123,6 +123,12 @@ _SD15_COMPONENTS: Dict[str, ComponentSpec] = {
         load_keys=[],
         constructor_map={},
     ),
+    # Wraps existing sd15/unet with diffusers UNetMotionModel (no new graph node).
+    "sd15.motionadapter": ComponentSpec(
+        block_types=[],
+        load_keys=[],
+        constructor_map={},
+    ),
 }
 
 # ── SDXL components ────────────────────────────────────────────────────
@@ -137,6 +143,11 @@ _SDXL_COMPONENTS: Dict[str, ComponentSpec] = {
         block_types=["sdxl/unet"],
         load_keys=["unet"],
         constructor_map={"sdxl/unet": {"unet": "unet"}},
+    ),
+    "sdxl.motionadapter": ComponentSpec(
+        block_types=[],
+        load_keys=[],
+        constructor_map={},
     ),
     "sdxl.autoencoder": ComponentSpec(
         block_types=["sdxl/vae_decode"],

@@ -11,12 +11,18 @@ from yggdrasill.integrations.diffusers.presets.sd15 import (
     build_sd15_text2img_graph,
     build_sd15_img2img_graph,
     build_sd15_inpaint_graph,
+    build_sd15_animatediff_img2img_graph,
+    build_sd15_animatediff_inpaint_graph,
+    build_sd15_animatediff_sparsectrl_graph,
+    build_sd15_animatediff_text2img_graph,
+    build_sd15_animatediff_video2video_graph,
 )
 from yggdrasill.integrations.diffusers.presets.sdxl import (
     build_sdxl_text2img_graph,
     build_sdxl_img2img_graph,
     build_sdxl_inpaint_graph,
     build_sdxl_base_refiner_workflow,
+    build_sdxl_animatediff_text2img_graph,
 )
 from yggdrasill.integrations.diffusers.presets.flux import (
     build_flux_text2img_graph,
@@ -119,6 +125,78 @@ def build_sd15_pipeline(
     return graph
 
 
+def build_sd15_animatediff_pipeline(
+    repo_id: Optional[str] = None,
+    *,
+    task: str = "text2img",
+    variant: str = "",
+    torch_dtype: str = "float16",
+    device: str = "cuda",
+    enable_safety: bool = True,
+    store: Optional[ModelStore] = None,
+    config: Optional[Dict[str, Any]] = None,
+    **kwargs: Any,
+) -> Hypergraph:
+    """Build SD1.5 AnimateDiff-ready graph (5D latents); add ``sd15.motionadapter`` on a :class:`DiffusionGraphBuilder`.
+
+    ``task``: ``text2img`` | ``img2img`` | ``inpaint`` | ``video2video`` | ``sparsectrl``.
+    """
+    import torch
+
+    dtype_map = {"float16": torch.float16, "float32": torch.float32, "bfloat16": torch.bfloat16}
+    dtype = dtype_map.get(torch_dtype, torch.float16)
+
+    resolved_repo = (
+        repo_id
+        if repo_id is not None
+        else (_SD15_INPAINT_DEFAULT_REPO if task == "inpaint" else _SD15_DEFAULT_REPO)
+    )
+
+    ms = store if store is not None else ModelStore.default()
+    sd15_keys = ["tokenizer", "text_encoder", "unet", "vae", "scheduler"]
+    components = ms.load_components_by_keys(
+        "sd15", sd15_keys, resolved_repo,
+        variant=variant if variant else ("fp16" if dtype == torch.float16 else ""),
+        torch_dtype=dtype,
+    )
+
+    cfg = dict(config or {})
+    cfg.setdefault("device", device)
+    cfg.setdefault("dtype", torch_dtype)
+    cfg.setdefault("enable_safety", enable_safety)
+    cfg.update(kwargs)
+
+    comp_kwargs = {
+        "tokenizer": components.get("tokenizer"),
+        "text_encoder": components.get("text_encoder"),
+        "unet": components.get("unet"),
+        "vae": components.get("vae"),
+        "scheduler": components.get("scheduler"),
+        "config": cfg,
+    }
+
+    if enable_safety and task == "text2img":
+        comp_kwargs["safety_checker"] = None
+        comp_kwargs["feature_extractor"] = None
+
+    builders = {
+        "text2img": build_sd15_animatediff_text2img_graph,
+        "img2img": build_sd15_animatediff_img2img_graph,
+        "inpaint": build_sd15_animatediff_inpaint_graph,
+        "video2video": build_sd15_animatediff_video2video_graph,
+        "sparsectrl": build_sd15_animatediff_sparsectrl_graph,
+    }
+    if task not in builders:
+        raise ValueError(f"Unknown AnimateDiff task '{task}', expected one of {list(builders.keys())}")
+
+    graph = builders[task](**comp_kwargs)
+
+    if device != "cpu":
+        graph.to(device)
+
+    return graph
+
+
 def build_sdxl_pipeline(
     repo_id: Optional[str] = None,
     *,
@@ -179,6 +257,54 @@ def build_sdxl_pipeline(
         raise ValueError(f"Unknown task '{task}', expected one of {list(builders.keys())}")
 
     graph = builders[task](**comp_kwargs)
+
+    if device != "cpu":
+        graph.to(device)
+
+    return graph
+
+
+def build_sdxl_animatediff_pipeline(
+    repo_id: Optional[str] = None,
+    *,
+    variant: str = "fp16",
+    torch_dtype: str = "float16",
+    device: str = "cuda",
+    store: Optional[ModelStore] = None,
+    config: Optional[Dict[str, Any]] = None,
+    **kwargs: Any,
+) -> Hypergraph:
+    """SDXL graph with 5D latent/VAE paths; add ``sdxl.motionadapter`` on :class:`DiffusionGraphBuilder`."""
+    import torch
+
+    dtype_map = {"float16": torch.float16, "float32": torch.float32, "bfloat16": torch.bfloat16}
+    dtype = dtype_map.get(torch_dtype, torch.float16)
+
+    resolved_repo = repo_id if repo_id is not None else _SDXL_DEFAULT_REPO
+    ms = store if store is not None else ModelStore.default()
+    sdxl_keys = ["tokenizer", "tokenizer_2", "text_encoder", "text_encoder_2", "unet", "vae", "scheduler"]
+    components = ms.load_components_by_keys(
+        "sdxl", sdxl_keys, resolved_repo,
+        variant=variant, torch_dtype=dtype,
+    )
+
+    cfg = dict(config or {})
+    cfg.setdefault("device", device)
+    cfg.setdefault("dtype", torch_dtype)
+    cfg.update(kwargs)
+
+    comp_kwargs = {
+        "tokenizer": components.get("tokenizer"),
+        "tokenizer_2": components.get("tokenizer_2"),
+        "text_encoder": components.get("text_encoder"),
+        "text_encoder_2": components.get("text_encoder_2"),
+        "unet": components.get("unet"),
+        "vae": components.get("vae"),
+        "scheduler": components.get("scheduler"),
+        "config": cfg,
+    }
+
+    graph = build_sdxl_animatediff_text2img_graph(**comp_kwargs)
 
     if device != "cpu":
         graph.to(device)
